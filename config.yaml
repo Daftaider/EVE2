@@ -63,14 +63,14 @@ speech:
   language: "en"
   
   # LLM settings
-  llm_model: "models/llama-3-8b-instruct.Q5_K_M.gguf"
+  llm_model: "models/tinyllama-1.1b-chat-v1.0.Q5_K_M.gguf"
   llm_context_length: 2048
   llm_max_tokens: 256
   llm_temperature: 0.7
   
   # Text-to-speech settings
   tts_model: "models/tts-piper-en"
-  tts_voice: "en_US/ljspeech_low"
+  tts_voice: "en_US/lessac_medium"
   tts_speaking_rate: 1.0
 
 # Communication module settings
