@@ -38,7 +38,7 @@ logger = logging.getLogger("model_downloader")
 MODEL_INFO = {
     "whisper": {
         "name": "whisper-small.en.gguf",
-        "url": "https://github.com/ggerganov/whisper.cpp/raw/master/models/ggml-small.en.bin",
+        "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin?download=true",
         "size": 466_000_000,
         "md5": None,  # Skip MD5 check
         "dest_path": MODELS_DIR / "whisper-small.en.gguf",
@@ -52,11 +52,18 @@ MODEL_INFO = {
     },
     "tts": {
         "name": "tts-piper-en",
-        "url": "https://github.com/rhasspy/piper/releases/download/v1.2.0/voice-en_US-lessac-medium.tar.gz",
-        "size": 65_000_000,
+        "url": "https://github.com/rhasspy/piper/releases/download/v1.2.0/en_US-lessac-medium.onnx",
+        "size": 50_000_000,
         "md5": None,  # Skip MD5 check
-        "dest_path": MODELS_DIR / "tts-piper-en",
-        "is_archive": True,
+        "dest_path": MODELS_DIR / "tts-piper-en/en_US/lessac_medium.onnx",
+        "is_archive": False,  # Changed from archive to direct file
+    },
+    "tts_config": {
+        "name": "tts-piper-en-config",
+        "url": "https://github.com/rhasspy/piper/releases/download/v1.2.0/en_US-lessac-medium.onnx.json",
+        "size": 1_000,
+        "md5": None,  # Skip MD5 check
+        "dest_path": MODELS_DIR / "tts-piper-en/en_US/lessac_medium.onnx.json",
     },
     "emotion": {
         "name": "emotion-fer",

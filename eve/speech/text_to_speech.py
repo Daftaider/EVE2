@@ -10,6 +10,7 @@ import logging
 import time
 import threading
 import wave
+import json
 import numpy as np
 import sounddevice as sd
 from typing import Optional, Dict, Any, List, Tuple, Callable
@@ -67,13 +68,43 @@ class TextToSpeech:
         self.audio_thread = None
         self.stop_event = threading.Event()
         
-        # Validate the model path
-        if not os.path.exists(self.model_path):
-            self.logger.error(f"TTS model directory not found: {self.model_path}")
+        # Get the full paths for the model
+        self.model_dir = Path(self.model_path)
+        voice_parts = self.voice.split("/")
+        if len(voice_parts) != 2:
+            self.logger.error(f"Invalid voice format: {self.voice}. Expected format: 'LANG/NAME'")
             self.model_available = False
-        else:
-            self.model_available = True
-            self.logger.info(f"Using TTS model at {self.model_path}")
+            return
+            
+        lang, name = voice_parts
+        model_file = self.model_dir / lang / f"{name}.onnx"
+        config_file = self.model_dir / lang / f"{name}.onnx.json"
+        
+        # Check if model files exist
+        if not model_file.exists():
+            self.logger.error(f"TTS model file not found: {model_file}")
+            self.model_available = False
+            return
+            
+        if not config_file.exists():
+            self.logger.error(f"TTS config file not found: {config_file}")
+            self.model_available = False
+            return
+            
+        self.model_file = model_file
+        self.config_file = config_file
+        self.model_available = True
+        
+        # Try to load the config to get the sample rate
+        try:
+            with open(config_file, 'r') as f:
+                model_config = json.load(f)
+                self.sample_rate = model_config.get('audio', {}).get('sample_rate', self.sample_rate)
+                self.logger.info(f"Using sample rate from model config: {self.sample_rate}")
+        except Exception as e:
+            self.logger.warning(f"Could not load model config: {e}")
+        
+        self.logger.info(f"Using TTS model at {self.model_file}")
     
     def start(self):
         """Start the text-to-speech processor."""
@@ -222,50 +253,52 @@ class TextToSpeech:
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
                 output_path = temp_file.name
             
-            # Build command
-            model_dir = Path(self.model_path)
-            piper_executable = "piper" if os.name != "nt" else "piper.exe"
-            piper_path = model_dir / piper_executable
-            
-            if not os.path.exists(piper_path):
-                piper_path = piper_executable  # Use system piper if not found in model dir
-            
-            # Command arguments
-            cmd = [
-                str(piper_path),
-                "--model", str(model_dir / f"{self.voice}.onnx"),
-                "--output_file", output_path,
-                "--sentence_silence", "0.25"
-            ]
-            
-            # Add speaking rate if not 1.0
-            if self.speaking_rate != 1.0:
-                cmd.extend(["--length_scale", str(1.0 / self.speaking_rate)])
-            
-            # Run piper
-            process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            
-            # Send text to stdin
-            stdout, stderr = process.communicate(text)
-            
-            if process.returncode != 0:
-                self.logger.error(f"Piper TTS failed: {stderr}")
-                return None
-            
-            # Read the WAV file
+            # Check if piper is installed
             try:
-                audio_data = self._read_wav(output_path)
-                return audio_data
-            finally:
-                # Clean up temporary file
-                if os.path.exists(output_path):
-                    os.unlink(output_path)
+                # Try to find piper in PATH
+                import shutil
+                piper_executable = shutil.which("piper") or "piper.exe" if os.name == "nt" else "piper"
+                
+                # Command arguments
+                cmd = [
+                    piper_executable,
+                    "--model", str(self.model_file),
+                    "--output_file", output_path,
+                    "--sentence_silence", "0.25"
+                ]
+                
+                # Add speaking rate if not 1.0
+                if self.speaking_rate != 1.0:
+                    cmd.extend(["--length_scale", str(1.0 / self.speaking_rate)])
+                
+                # Run piper
+                process = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                
+                # Send text to stdin
+                stdout, stderr = process.communicate(text)
+                
+                if process.returncode != 0:
+                    self.logger.error(f"Piper TTS failed: {stderr}")
+                    return None
+                
+                # Read the WAV file
+                try:
+                    audio_data = self._read_wav(output_path)
+                    return audio_data
+                finally:
+                    # Clean up temporary file
+                    if os.path.exists(output_path):
+                        os.unlink(output_path)
+                    
+            except FileNotFoundError:
+                self.logger.error("Piper executable not found. Please install piper-tts")
+                return None
                 
         except Exception as e:
             self.logger.error(f"Error synthesizing speech: {e}")
