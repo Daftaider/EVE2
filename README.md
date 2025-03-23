@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 # EVE2 - Emotional Virtual Entity
 
 EVE2 is an interactive robotic system inspired by EVE from Wall-E, designed to run on Raspberry Pi hardware. It features face detection, emotion recognition, interactive LCD-based eye animations, and natural language conversation capabilities.
