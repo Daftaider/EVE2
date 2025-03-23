@@ -1,0 +1,93 @@
+# EVE2 System Configuration
+
+# Hardware settings
+hardware:
+  # Camera settings
+  camera_enabled: true
+  camera_index: 0
+  camera_resolution: [640, 480]
+  camera_fps: 15
+  
+  # Display settings
+  display_enabled: true
+  display_resolution: [800, 480]
+  display_fps: 30
+  fullscreen: false
+  
+  # Audio settings
+  audio_input_enabled: true
+  audio_output_enabled: true
+  audio_input_device: null  # null uses default device
+  audio_output_device: null  # null uses default device
+  audio_sample_rate: 16000
+  
+  # Network settings (for distributed mode)
+  master_ip: "127.0.0.1"
+  master_port: 5000
+
+# Vision module settings
+vision:
+  # Face detection settings
+  detection_model: "hog"  # 'hog' (faster) or 'cnn' (more accurate)
+  recognition_enabled: true
+  recognition_tolerance: 0.6
+  known_faces_dir: "data/known_faces"
+  
+  # Emotion detection settings
+  emotion_enabled: true
+  emotion_confidence_threshold: 0.4
+  emotions:
+    - "neutral"
+    - "happy"
+    - "sad"
+    - "angry"
+    - "surprised"
+    - "confused"
+
+# Display module settings
+display:
+  assets_dir: "assets/emotions"
+  default_emotion: "neutral"
+  background_color: [0, 0, 0]  # RGB
+  eye_color: [0, 191, 255]  # RGB (DeepSkyBlue)
+  blink_interval_min_sec: 2.0
+  blink_interval_max_sec: 8.0
+  blink_duration_sec: 0.2
+  emotion_transition_time_ms: 500
+
+# Speech module settings
+speech:
+  # Speech recognition settings
+  recognition_model: "models/whisper-small.en.gguf"
+  recognition_threshold: 0.5
+  language: "en"
+  
+  # LLM settings
+  llm_model: "models/llama-3-8b-instruct.Q5_K_M.gguf"
+  llm_context_length: 2048
+  llm_max_tokens: 256
+  llm_temperature: 0.7
+  
+  # Text-to-speech settings
+  tts_model: "models/tts-piper-en"
+  tts_voice: "en_US/ljspeech_low"
+  tts_speaking_rate: 1.0
+
+# Communication module settings
+communication:
+  queue_max_size: 1000
+  distributed: false
+  role: "standalone"  # standalone, master, vision, speech, display
+  api_host: "0.0.0.0"
+  api_port: 5000
+  connection_timeout_sec: 5
+
+# Logging settings
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  file: "logs/eve.log"
+  max_size_mb: 10
+  backup_count: 3
+  console: true
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S" 
