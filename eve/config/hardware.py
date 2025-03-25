@@ -8,6 +8,13 @@ ROLE = "master"
 # Distributed mode - determines if EVE runs as a single system or distributed across multiple devices
 DISTRIBUTED_MODE = False
 
+# Device capabilities (enable/disable hardware components)
+CAMERA_ENABLED = True
+MICROPHONE_ENABLED = True
+SPEAKER_ENABLED = True
+DISPLAY_ENABLED = True
+GPIO_ENABLED = True
+
 # Network settings for distributed mode
 NETWORK = {
     "master_ip": "192.168.1.100",
@@ -16,7 +23,7 @@ NETWORK = {
     "heartbeat_interval": 5.0  # seconds
 }
 
-# Hardware capabilities
+# Hardware capabilities (more detailed than simple enabled flags)
 CAPABILITIES = {
     "display": True,
     "camera": True,
