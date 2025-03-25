@@ -11,7 +11,7 @@ DISPLAY_DRIVER = "pygame"  # Options: "pygame", "kivy", "tkinter", "custom"
 
 # Emotions and animations
 DEFAULT_EMOTION = "neutral"
-AVAILABLE_EMOTIONS = [
+EMOTIONS = [
     "neutral",
     "happy",
     "sad",
@@ -20,6 +20,7 @@ AVAILABLE_EMOTIONS = [
     "confused",
     "thinking"
 ]
+AVAILABLE_EMOTIONS = EMOTIONS  # Keep for backward compatibility
 
 # Colors
 BACKGROUND_COLOR = (0, 0, 0)  # Black background
@@ -37,7 +38,7 @@ ANIMATION_PATH = "assets/animations"
 ENABLE_BLINKING = True
 ENABLE_EMOTIONS = True
 ANIMATION_SMOOTHING = True
-EMOTION_TRANSITION_TIME_MS = 500  # Add this line - time to transition between emotions
+EMOTION_TRANSITION_TIME_MS = 500  # Time to transition between emotions
 
 # Face settings
 EYE_SIZE = 50

@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 import time
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -13,64 +14,106 @@ class Camera:
         self.cap = None
         self.is_mock = False
         self.frame_count = 0
-        self.logger = logging.getLogger(__name__)
+        self.last_frame_time = time.time()
+        self.fps = 30  # Target FPS
         
+        # Try to initialize the actual camera
         try:
             self.cap = cv2.VideoCapture(camera_index)
             if not self.cap.isOpened():
-                self.logger.warning(f"Failed to open camera {camera_index}, using mock camera")
+                logger.warning(f"Failed to open camera {camera_index}, using mock camera")
                 self.is_mock = True
+                self._init_mock_camera()
             else:
-                self.logger.info(f"Camera {camera_index} initialized successfully")
+                logger.info(f"Camera {camera_index} initialized successfully")
         except Exception as e:
-            self.logger.error(f"Error initializing camera: {e}")
+            logger.error(f"Error initializing camera: {e}")
             self.is_mock = True
+            self._init_mock_camera()
+    
+    def _init_mock_camera(self):
+        """Initialize mock camera resources"""
+        # Try to load test images if available
+        self.test_images = []
+        test_dir = os.path.join("assets", "test_images")
+        
+        if os.path.exists(test_dir):
+            # Load all images from test directory
+            for file in os.listdir(test_dir):
+                if file.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    try:
+                        img_path = os.path.join(test_dir, file)
+                        img = cv2.imread(img_path)
+                        if img is not None:
+                            self.test_images.append(img)
+                    except Exception as e:
+                        logger.error(f"Error loading test image {file}: {e}")
+        
+        logger.info(f"Mock camera initialized with {len(self.test_images)} test images")
             
     def get_frame(self):
         """Get a frame from the camera or generate a mock frame if camera not available"""
+        # Limit frame rate
+        current_time = time.time()
+        elapsed = current_time - self.last_frame_time
+        target_interval = 1.0 / self.fps
+        
+        if elapsed < target_interval:
+            time.sleep(target_interval - elapsed)
+            
+        self.last_frame_time = time.time()
+        self.frame_count += 1
+        
+        # Return real or mock frame
         if self.is_mock:
             return self._get_mock_frame()
             
         if self.cap and self.cap.isOpened():
             ret, frame = self.cap.read()
-            if ret:
+            if ret and frame is not None and frame.size > 0:
                 return frame
             else:
-                self.logger.warning("Failed to capture frame from camera")
+                logger.warning("Failed to capture frame from camera")
                 return self._get_mock_frame()
         else:
             return self._get_mock_frame()
             
     def _get_mock_frame(self):
         """Generate a mock frame for testing"""
-        self.frame_count += 1
+        # If we have test images, cycle through them
+        if self.test_images:
+            index = self.frame_count % len(self.test_images)
+            return self.test_images[index].copy()
         
-        # Create a black image
-        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        # Otherwise generate a synthetic frame
+        width, height = 640, 480
+        frame = np.zeros((height, width, 3), dtype=np.uint8)
         
-        # Draw a moving face-like circle
-        center_x = 320 + int(50 * np.sin(self.frame_count / 30))
-        cv2.circle(frame, (center_x, 240), 100, (200, 200, 200), -1)
+        # Draw a moving face
+        t = self.frame_count / 30.0  # Time parameter
+        center_x = width // 2 + int(100 * np.sin(t))
+        center_y = height // 2 + int(50 * np.cos(t * 0.7))
         
-        # Draw eyes
-        left_eye_x = center_x - 40
-        right_eye_x = center_x + 40
-        cv2.circle(frame, (left_eye_x, 220), 20, (255, 255, 255), -1)
-        cv2.circle(frame, (right_eye_x, 220), 20, (255, 255, 255), -1)
+        # Draw face
+        cv2.circle(frame, (center_x, center_y), 100, (200, 200, 200), -1)
         
-        # Draw mouth - smile or frown based on position
-        smile = np.sin(self.frame_count / 50) > 0
+        # Draw eyes that blink occasionally
+        blink = (self.frame_count % 50) < 3  # Blink every ~2 seconds
+        eye_h = 5 if blink else 20
+        
+        cv2.ellipse(frame, (center_x - 30, center_y - 20), (20, eye_h), 0, 0, 360, (255, 255, 255), -1)
+        cv2.ellipse(frame, (center_x + 30, center_y - 20), (20, eye_h), 0, 0, 360, (255, 255, 255), -1)
+        
+        # Draw mouth that changes expression
+        smile = np.sin(t * 0.5) > 0
         if smile:
-            cv2.ellipse(frame, (center_x, 280), (50, 20), 0, 0, 180, (255, 255, 255), -1)
+            cv2.ellipse(frame, (center_x, center_y + 30), (50, 20), 0, 0, 180, (255, 255, 255), -1)
         else:
-            cv2.ellipse(frame, (center_x, 300), (50, 20), 0, 180, 360, (255, 255, 255), -1)
-            
-        # Add some text
-        cv2.putText(frame, "EVE Mock Camera", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
-                    1, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.ellipse(frame, (center_x, center_y + 40), (50, 20), 0, 180, 360, (255, 255, 255), -1)
         
-        # Simulate processing delay
-        time.sleep(0.03)
+        # Add frame info
+        cv2.putText(frame, f"Mock Camera: Frame {self.frame_count}", (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
         return frame
         

@@ -182,51 +182,68 @@ class FaceDetector:
     
     def _detection_loop(self) -> None:
         """Main detection loop running in a separate thread."""
-        detection_interval = config.vision.FACE_DETECTION_INTERVAL_SEC
+        detection_interval = getattr(config.vision, "FACE_DETECTION_INTERVAL_SEC", 0.1)
+        
+        # Initialize camera if needed
+        if not hasattr(self, "camera") or self.camera is None:
+            from eve.vision.camera import Camera
+            try:
+                self.camera = Camera(camera_index=getattr(config.hardware, "CAMERA_INDEX", 0))
+            except Exception as e:
+                logger.error(f"Error creating camera: {e}")
+                self.camera = MockCamera()
+        
+        # Reset frame counter for monitoring
+        frame_count = 0
+        empty_frame_count = 0
         
         while self.running:
             try:
                 # Get a frame from the camera
-                frame = self.video_capture.read()
+                frame = self.camera.get_frame()
+                frame_count += 1
                 
-                # Check if frame is valid before processing
+                # Check if frame is valid
                 if frame is None or not isinstance(frame, np.ndarray) or frame.size == 0:
-                    logger.warning("Invalid or empty frame received")
-                    time.sleep(detection_interval)
-                    continue
+                    empty_frame_count += 1
+                    if empty_frame_count % 10 == 0:  # Log only every 10th empty frame
+                        logger.warning(f"Invalid or empty frame received ({empty_frame_count}/{frame_count} frames empty)")
+                    
+                    # Use a mock frame as fallback
+                    frame = self._create_mock_frame()
                 
-                # Make a copy to avoid potential reference issues
-                frame_copy = frame.copy()
+                # Detect faces
+                faces = self._detect_faces(frame)
                 
-                # Verify frame dimensions
-                if len(frame_copy.shape) < 2:
-                    logger.error(f"Invalid frame shape: {frame_copy.shape}")
-                    time.sleep(detection_interval)
-                    continue
+                # Update faces
+                self.faces = faces
                 
-                # Convert to grayscale for face detection if needed
-                if len(frame_copy.shape) == 3:  # Color image
-                    gray = cv2.cvtColor(frame_copy, cv2.COLOR_BGR2GRAY)
-                else:  # Already grayscale
-                    gray = frame_copy
+                # Store current frame
+                self.frame = frame
                 
-                # Detect faces at regular intervals
-                current_time = time.time()
-                if current_time - self.last_detection_time >= detection_interval:
-                    # Detect faces in the current frame
-                    faces = self._detect_faces(gray)
-                    self.last_detection_time = current_time
-                else:
-                    # Reuse the last detected faces
-                    faces = [] if not self.frame_queue else self.frame_queue[-1][1]
-                
-                # Add the frame and faces to the queue
-                with self.frame_lock:
-                    self.frame_queue.append((frame, faces))
+                # Wait for next detection interval
+                time.sleep(detection_interval)
             
             except Exception as e:
                 logger.error(f"Error in face detection loop: {e}")
                 time.sleep(detection_interval)
+        
+        logger.info("Face detection loop stopped")
+    
+    def _create_mock_frame(self):
+        """Create a mock frame when camera frame is invalid"""
+        frame_size = getattr(config.vision, "CAMERA_RESOLUTION", (640, 480))
+        if not isinstance(frame_size, tuple):
+            frame_size = (640, 480)
+        
+        # Create blank frame
+        frame = np.zeros((frame_size[1], frame_size[0], 3), dtype=np.uint8)
+        
+        # Add text indicating this is a mock frame
+        cv2.putText(frame, "Mock Frame", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 
+                    1, (255, 255, 255), 2)
+                
+        return frame
     
     def _detect_faces(self, frame: np.ndarray) -> List[Dict[str, Any]]:
         """
