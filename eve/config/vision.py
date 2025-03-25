@@ -40,6 +40,7 @@ EMOTION_DETECTION_ENABLED = True
 EMOTION_DETECTION_MODEL = "fer"  # Facial Emotion Recognition model
 EMOTION_DETECTION_INTERVAL_SEC = 1.0
 EMOTION_THRESHOLD = 0.5  # Minimum confidence for emotion detection
+EMOTION_CONFIDENCE_THRESHOLD = 0.5  # Add this line - alias for EMOTION_THRESHOLD
 
 # Object detection
 OBJECT_DETECTION_ENABLED = False

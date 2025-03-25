@@ -37,6 +37,7 @@ ANIMATION_PATH = "assets/animations"
 ENABLE_BLINKING = True
 ENABLE_EMOTIONS = True
 ANIMATION_SMOOTHING = True
+EMOTION_TRANSITION_TIME_MS = 500  # Add this line - time to transition between emotions
 
 # Face settings
 EYE_SIZE = 50

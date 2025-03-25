@@ -38,7 +38,8 @@ class SpeechRecognizer:
         max_recording_sec: float = 30.0,
         silence_duration_sec: float = 1.5,
         vad_threshold: float = 0.3,
-        callback: Optional[Callable[[str, float], None]] = None
+        callback: Optional[Callable[[str, float], None]] = None,
+        model_type: Optional[str] = None
     ):
         """
         Initialize the speech recognizer.
@@ -54,6 +55,7 @@ class SpeechRecognizer:
             silence_duration_sec: Silence duration in seconds to consider speech ended.
             vad_threshold: Voice activity detection threshold.
             callback: Callback function to be called when speech is recognized.
+            model_type: The type of speech recognition model to use ('google', 'vosk', 'whisper', etc.)
         """
         logger.info("Initializing speech recognizer")
         
@@ -68,6 +70,7 @@ class SpeechRecognizer:
         self.silence_duration_sec = silence_duration_sec
         self.vad_threshold = vad_threshold
         self.callback = callback
+        self.model_type = model_type or "default"
         
         # Internal state
         self.is_running = False
@@ -360,6 +363,6 @@ class SpeechRecognizer:
 
     def recognize(self, audio_data):
         """Convert audio data to text"""
-        logger.info("Processing speech recognition")
+        logger.info(f"Processing speech recognition with {self.model_type} model")
         # Return placeholder text for now
         return "Hello EVE" 
