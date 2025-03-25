@@ -46,11 +46,13 @@ class LLMProcessor:
         
         logger.info(f"Initializing LLM processor with model type: {self.model_type}")
         
-        # Initialize model based on type
-        if self.model_type == "simple":
-            # Simple model doesn't need external files
-            self.model = "simple_model"
-        # Other model types would be initialized here
+        # Check if model file exists
+        if self.model_path and not os.path.exists(self.model_path):
+            logger.error(f"Model file not found: {self.model_path}")
+            # Continue anyway - we'll use the fallback implementation
+        
+        # Initialize model based on type - using fallback for any missing files
+        self.model = "simple_model"  # Just a placeholder
         
         # State
         self.is_running = False

@@ -25,55 +25,35 @@ class LCDController:
     manages the rendering of emotive eye animations.
     """
     
-    def __init__(
-        self,
-        width: int = 800,
-        height: int = 480,
-        fullscreen: bool = False,
-        fps: int = 30,
-        default_emotion: str = "neutral",
-        background_color: Tuple[int, int, int] = (0, 0, 0),
-        eye_color: Tuple[int, int, int] = (0, 191, 255),
-        transition_time_ms: int = 500
-    ) -> None:
+    def __init__(self, width=800, height=480, fullscreen=False, resolution=None):
         """
-        Initialize the LCD controller.
+        Initialize the display controller
         
         Args:
-            width: Display width (default: 800)
-            height: Display height (default: 480)
-            fullscreen: Whether to start in fullscreen mode (default: False)
-            fps: Target frames per second (default: 30)
-            default_emotion: Default emotion to display (default: "neutral")
-            background_color: Background color in RGB (default: (0, 0, 0))
-            eye_color: Eye color in RGB (default: (0, 191, 255))
-            transition_time_ms: Transition time between emotions in milliseconds (default: 500)
+            width (int): Display width in pixels
+            height (int): Display height in pixels
+            fullscreen (bool): Whether to use fullscreen mode
+            resolution (tuple): Optional (width, height) tuple that can be used instead of 
+                               separate width and height parameters
         """
-        self.width = width
-        self.height = height
+        # If resolution is provided, use it instead of width/height parameters
+        if resolution and isinstance(resolution, tuple) and len(resolution) == 2:
+            self.width, self.height = resolution
+        else:
+            self.width = width
+            self.height = height
+        
         self.fullscreen = fullscreen
-        self.fps = fps
-        self.default_emotion = default_emotion
-        self.background_color = background_color
-        self.eye_color = eye_color
-        self.transition_time_ms = transition_time_ms
-        
-        # State variables
         self.running = False
-        self.current_emotion = default_emotion
-        self.target_emotion = default_emotion
-        self.transition_start_time = 0
-        self.transition_progress = 1.0  # 1.0 means transition is complete
+        self.render_thread = None
+        self.current_emotion = "neutral"
+        self.emotion_images = {}
+        self.logger = logging.getLogger(__name__)
         
-        # Pygame objects
-        self.screen = None
-        self.clock = None
-        
-        # Assets
-        self.emotion_images: Dict[str, pygame.Surface] = {}
-        
-        # Initialize pygame and assets
+        # Initialize pygame with software rendering fallback
         self._init_pygame()
+        
+        # Load display assets
         self._load_assets()
         
     def _init_pygame(self) -> None:

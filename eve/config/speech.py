@@ -56,6 +56,7 @@ WAKE_WORD_PATH = "models/wake_word/hey_eve.ppn"
 # Text-to-speech settings
 TTS_ENABLED = True
 TTS_VOICE = "en-US-Standard-C"
+TTS_VOICE_ID = "en-US-1"
 TTS_RATE = 1.0
 TTS_PITCH = 1.0
 TTS_ENGINE = "pyttsx3"  # Options: "pyttsx3", "google", "espeak"
