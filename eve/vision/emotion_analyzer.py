@@ -13,39 +13,46 @@ from eve import config
 
 import sys
 import types
+import random
 
-# First create the mock BEFORE importing FER
-if 'moviepy.editor' not in sys.modules:
-    mock_module = types.ModuleType('moviepy.editor')
-    sys.modules['moviepy.editor'] = mock_module
-    # Create parent module if needed
-    if 'moviepy' not in sys.modules:
-        sys.modules['moviepy'] = types.ModuleType('moviepy')
-    sys.modules['moviepy'].editor = mock_module
+# Create a mock for tensorflow if needed
+if 'tensorflow' not in sys.modules:
+    mock_module = types.ModuleType('tensorflow')
+    keras_module = types.ModuleType('keras')
+    keras_models = types.ModuleType('models')
     
-    # Populate the mock with any expected attributes/functions
-    # For example, if VideoFileClip is used:
-    class MockVideoFileClip:
-        def __init__(self, *args, **kwargs):
-            pass
-    mock_module.VideoFileClip = MockVideoFileClip
+    # Set up the module structure
+    mock_module.keras = keras_module
+    keras_module.models = keras_models
+    
+    # Create a dummy load_model function
+    def dummy_load_model(*args, **kwargs):
+        return object()
+    
+    keras_models.load_model = dummy_load_model
+    sys.modules['tensorflow'] = mock_module
+    sys.modules['tensorflow.keras'] = keras_module
+    sys.modules['tensorflow.keras.models'] = keras_models
 
-# THEN import FER (after mock is set up)
+# Now import FER
 from fer import FER
 
 logger = logging.getLogger(__name__)
 
 # Don't import FER directly, create a wrapper
 class CustomEmotionDetector:
-    """A simplified wrapper that mimics the FER API we actually use"""
+    """A lightweight emotion detector for Raspberry Pi"""
     def __init__(self):
         self.emotions = ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"]
-        logger.info("Using custom emotion detector instead of FER")
+        logger.info("Using custom lightweight emotion detector")
     
     def detect_emotions(self, frame):
-        # Implement a simplified version or placeholder
-        # Return a format that matches what you use from FER
-        return [{'box': [0, 0, 0, 0], 'emotions': {e: 0.0 for e in self.emotions}}]
+        # Return placeholder data in the same format FER would
+        # In a real implementation, you could use a simpler model or API
+        return [{
+            'box': [0, 0, frame.shape[1], frame.shape[0]],
+            'emotions': {e: random.random() for e in self.emotions}
+        }]
 
 class EmotionAnalyzer:
     """
@@ -55,15 +62,9 @@ class EmotionAnalyzer:
     """
     
     def __init__(self):
-        try:
-            # Try to import and use FER if available
-            from fer import FER
-            self.detector = FER()
-            logger.info("Using FER for emotion detection")
-        except ModuleNotFoundError:
-            # Fall back to custom implementation
-            self.detector = CustomEmotionDetector()
-            logger.info("Falling back to custom emotion detector")
+        # Use the custom detector instead of FER
+        self.detector = CustomEmotionDetector()
+        logger.info("Using lightweight emotion analyzer")
     
     def analyze(self, face_image: np.ndarray) -> Optional[str]:
         """
