@@ -1,6 +1,6 @@
 """
-EVE Configuration Module
-Contains all global configuration settings for EVE
+EVE2 Configuration Module
+Contains all global configuration settings for EVE2
 """
 
 # Import all configuration submodules
@@ -16,6 +16,7 @@ from . import hardware
 # so it can be imported as: from eve.config import config
 class ConfigContainer:
     def __init__(self):
+        # Core modules
         self.display = display
         self.logging = logging
         self.vision = vision
@@ -28,6 +29,8 @@ class ConfigContainer:
         self.DEBUG = True
         self.VERSION = "2.0.0"
         self.LOG_LEVEL = "INFO"
+        self.PROJECT_NAME = "EVE2"
+        self.SAVE_PATH = "data/"
 
 # Create the config instance
 config = ConfigContainer()
