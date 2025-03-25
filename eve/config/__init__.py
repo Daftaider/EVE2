@@ -9,6 +9,7 @@ from . import logging
 from . import vision
 from . import speech
 from . import system
+from . import communication
 
 # Create a config object that contains all the configuration
 # so it can be imported as: from eve.config import config
@@ -19,6 +20,7 @@ class ConfigContainer:
         self.vision = vision
         self.speech = speech
         self.system = system
+        self.communication = communication
         
         # Global configuration settings
         self.DEBUG = True
