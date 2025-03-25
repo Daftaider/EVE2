@@ -21,6 +21,7 @@ SPEAKER_ENABLED = True       # Alternative name for backward compatibility
 # Display settings
 DISPLAY_ENABLED = True
 DISPLAY_RESOLUTION = (800, 480)
+FULLSCREEN = False
 GPIO_ENABLED = True
 
 # Network settings for distributed mode
@@ -58,7 +59,7 @@ CAMERA_TYPE = "picamera"
 CAMERA_ROTATION = 0
 CAMERA_RESOLUTION = (640, 480)
 CAMERA_FRAMERATE = 30
-CAMERA_FPS = 30  # Add this line (same as FRAMERATE for compatibility)
+CAMERA_FPS = 30  # Same as FRAMERATE for compatibility
 
 # Audio settings
 AUDIO_INPUT_DEVICE = "default"
