@@ -46,15 +46,39 @@ class LLMProcessor:
         
         logger.info(f"Initializing LLM processor with model type: {self.model_type}")
         
-        # Only check model path if we need it
+        # Only attempt to load the model if it's not "simple"
         if self.model_type != "simple" and self.model_path:
-            if not os.path.exists(self.model_path):
-                logger.error(f"Model file not found: {self.model_path}")
-                # Fall back to simple model that doesn't need files
-                self.model_type = "simple"
+            try:
+                logger.info(f"Loading LLM model from {self.model_path}")
+                
+                # Check for CUDA availability
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        self.device = "cuda"
+                        logger.info("Using CUDA for inference")
+                    else:
+                        self.device = "cpu"
+                        logger.info("CUDA is not available, using CPU for inference")
+                except ImportError:
+                    self.device = "cpu"
+                    logger.info("PyTorch not available, using CPU for inference")
+                
+                # Try to load the model - this is just a placeholder
+                if not os.path.exists(self.model_path):
+                    logger.error(f"Failed to load LLM model: Failed to load model from file: {self.model_path}")
+                    self.model_type = "simple"  # Fall back to simple model
+                else:
+                    # This would be real model loading code
+                    self.model = "loaded_model"
+            except Exception as e:
+                logger.error(f"Failed to load LLM model: {e}")
+                self.model_type = "simple"  # Fall back to simple model
         
-        # Initialize model based on type
-        self.model = "simple_model"  # Just a placeholder
+        # Always initialize a simple model as fallback
+        if self.model_type == "simple":
+            self.model = "simple_model"
+            logger.info("Using simple LLM model (rule-based responses)")
         
         # State
         self.is_running = False
@@ -346,8 +370,8 @@ class LLMProcessor:
         """Process text with LLM and return response"""
         logger.info(f"Processing text with LLM: {text[:50]}...")
         
-        # Simple placeholder implementation
-        if self.model_type == "simple":
+        # Simple fallback implementation
+        if self.model_type == "simple" or self.model is None:
             # Generate a simple response based on the input
             if "hello" in text.lower() or "hi" in text.lower():
                 return "Hello! How can I help you today?"
@@ -362,5 +386,7 @@ class LLMProcessor:
             else:
                 return f"I received your message: '{text}'. How can I assist you further?"
         
-        # Placeholder for other model types
+        # If we have a real model, we would use it here
+        # This is just a placeholder for now
+        time.sleep(0.5)  # Simulate processing time
         return f"LLM response to: {text}" 

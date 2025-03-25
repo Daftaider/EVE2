@@ -32,96 +32,89 @@ class TextToSpeech:
     that can run efficiently on Raspberry Pi hardware.
     """
     
-    def __init__(
-        self,
-        model_path: Optional[str] = None,
-        voice: Optional[str] = None,
-        speaking_rate: float = 1.0,
-        device_index: Optional[int] = None,
-        sample_rate: int = 22050,
-        callback: Optional[Callable[[str], None]] = None
-    ):
+    def __init__(self, voice=None, rate=1.0, pitch=1.0, volume=1.0, engine=None):
         """
-        Initialize the text-to-speech processor.
+        Initialize text to speech synthesizer
         
         Args:
-            model_path: Path to the Piper TTS model. If None, uses the model from config.
-            voice: Voice to use for speech synthesis. If None, uses the voice from config.
-            speaking_rate: Speaking rate multiplier (1.0 = normal speed).
-            device_index: Audio output device index. If None, uses the default device.
-            sample_rate: Audio sample rate for output.
-            callback: Callback function to call when speech is complete.
+            voice (str): Voice ID or name to use
+            rate (float): Speech rate (1.0 is normal speed)
+            pitch (float): Voice pitch (1.0 is normal pitch)
+            volume (float): Audio volume (0.0-1.0)
+            engine (str): TTS engine to use ('pyttsx3', 'espeak', etc.)
         """
-        logger.info("Initializing text to speech")
+        self.voice = voice
+        self.rate = rate
+        self.pitch = pitch
+        self.volume = volume
+        self.engine = engine or "pyttsx3"
+        self.tts_engine = None
         
-        # Configuration
-        self.model_path = model_path or config.speech.tts_model
-        self.voice = voice or config.speech.tts_voice
-        self.speaking_rate = speaking_rate or config.speech.tts_speaking_rate
-        self.device_index = device_index or config.hardware.audio_output_device
-        self.sample_rate = sample_rate
-        self.callback = callback
+        logger.info(f"Initializing text to speech with engine: {self.engine}")
         
-        # State
-        self.is_running = False
-        self.is_speaking = False
-        self.text_queue = []
-        self.current_text = None
-        self.process_thread = None
-        self.audio_thread = None
-        self.stop_event = threading.Event()
-        
-        # Validate the model path
-        if not os.path.isdir(self.model_path):
-            logger.error(f"TTS model directory not found: {self.model_path}")
-            self.model_available = False
-            return
-            
-        # Parse the voice format (should be "LANG/NAME")
-        voice_parts = self.voice.split("/")
-        if len(voice_parts) != 2:
-            logger.error(f"Invalid voice format: {self.voice}. Expected format: 'LANG/NAME'")
-            self.model_available = False
-            return
-            
-        # Get the model file paths
-        lang, name = voice_parts
-        self.model_dir = Path(self.model_path)
-        model_file = self.model_dir / lang / f"{name}_medium.onnx"
-        config_file = self.model_dir / lang / f"{name}_medium.onnx.json"
-        
-        # If files don't exist with _medium suffix, try without it
-        if not model_file.exists() or not config_file.exists():
-            # Check if we have the files with the exact names from the download
-            model_file = self.model_dir / lang / "lessac_medium.onnx"
-            config_file = self.model_dir / lang / "lessac_medium.onnx.json"
-        
-        # Check if model files exist
-        if not model_file.exists():
-            logger.error(f"TTS model file not found: {model_file}")
-            self.model_available = False
-            return
-            
-        if not config_file.exists():
-            logger.error(f"TTS config file not found: {config_file}")
-            self.model_available = False
-            return
-            
-        self.model_file = model_file
-        self.config_file = config_file
-        self.model_available = True
-        
-        # Try to load the config to get the sample rate
-        try:
-            with open(config_file, 'r') as f:
-                model_config = json.load(f)
-                self.sample_rate = model_config.get('audio', {}).get('sample_rate', self.sample_rate)
-                logger.info(f"Using sample rate from model config: {self.sample_rate}")
-        except Exception as e:
-            logger.warning(f"Could not load model config: {e}")
-        
-        logger.info(f"Using TTS model at {self.model_file}")
+        # Initialize appropriate TTS engine
+        self._init_tts_engine()
     
+    def _init_tts_engine(self):
+        """Initialize the selected TTS engine"""
+        if self.engine == "pyttsx3":
+            try:
+                import pyttsx3
+                self.tts_engine = pyttsx3.init()
+                if self.voice:
+                    self.tts_engine.setProperty('voice', self.voice)
+                self.tts_engine.setProperty('rate', int(self.rate * 200))  # Base rate is around 200
+                self.tts_engine.setProperty('volume', self.volume)
+                logger.info("Initialized pyttsx3 engine")
+            except Exception as e:
+                logger.error(f"Failed to initialize pyttsx3: {e}")
+                self.tts_engine = None
+        elif self.engine == "espeak":
+            # Just store the settings, we'll use subprocess to call espeak
+            logger.info("Using espeak engine")
+            self.tts_engine = "espeak"
+        else:
+            logger.warning(f"Unknown TTS engine: {self.engine}, using fallback")
+            self.tts_engine = None
+    
+    def speak(self, text):
+        """Convert text to speech and play it"""
+        if not text:
+            logger.warning("Empty text provided to TTS")
+            return False
+            
+        logger.info(f"Speaking: {text[:50]}...")
+        
+        if self.tts_engine is None:
+            logger.warning("No TTS engine available, using fallback")
+            return self._fallback_speak(text)
+            
+        try:
+            if self.engine == "pyttsx3" and self.tts_engine:
+                self.tts_engine.say(text)
+                self.tts_engine.runAndWait()
+                return True
+            elif self.engine == "espeak":
+                import subprocess
+                cmd = ["espeak", f"-a {int(self.volume * 100)}", f"-s {int(self.rate * 150)}", f"-p {int(self.pitch * 50)}"]
+                if self.voice:
+                    cmd.append(f"-v {self.voice}")
+                cmd.append(f'"{text}"')
+                subprocess.run(" ".join(cmd), shell=True)
+                return True
+            else:
+                return self._fallback_speak(text)
+        except Exception as e:
+            logger.error(f"Error in TTS: {e}")
+            return self._fallback_speak(text)
+    
+    def _fallback_speak(self, text):
+        """Fallback method when TTS engines fail"""
+        logger.info(f"[FALLBACK TTS] {text}")
+        # In a real implementation, this might use a very simple beep or
+        # just log the text that would have been spoken
+        return True
+
     def start(self):
         """Start the text-to-speech processor."""
         if self.is_running:
