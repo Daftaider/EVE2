@@ -19,6 +19,7 @@ SPEECH_RECOGNITION_ENABLED = True
 RECOGNITION_LANGUAGE = "en-US"
 RECOGNITION_TIMEOUT_SEC = 5.0
 SPEECH_RECOGNITION_MODEL = "google"  # Options: "google", "vosk", "whisper", "deepspeech"
+recognition_model = "google"  # Add this line - lowercase version for compatibility
 SPEECH_RECOGNITION_THRESHOLD = 0.7
 CONTINUOUS_LISTENING = True
 RECOGNITION_ENERGY_THRESHOLD = 300

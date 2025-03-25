@@ -19,50 +19,32 @@ import importlib
 # Set up logger first, before using it
 logger = logging.getLogger(__name__)
 
-# Create mocks for both moviepy.editor and tensorflow
-def setup_dependency_mocks():
-    # Mock for moviepy.editor
-    if 'moviepy' not in sys.modules:
-        moviepy_module = types.ModuleType('moviepy')
-        sys.modules['moviepy'] = moviepy_module
+# Create more sophisticated mocks for TensorFlow and FER
+if 'tensorflow' not in sys.modules:
+    tf_module = types.ModuleType('tensorflow')
+    keras_module = types.ModuleType('tensorflow.keras')
+    models_module = types.ModuleType('tensorflow.keras.models')
     
-    editor_module = types.ModuleType('moviepy.editor')
-    sys.modules['moviepy.editor'] = editor_module
-    sys.modules['moviepy'].editor = editor_module
-    
-    class MockVideoFileClip:
-        def __init__(self, *args, **kwargs):
+    # Create class with make_predict_function method
+    class MockModel:
+        def __init__(self):
             pass
-        def close(self):
+        
+        def make_predict_function(self):
             pass
-        def subclip(self, *args, **kwargs):
-            return self
-        def resize(self, *args, **kwargs):
-            return self
+            
+        def predict(self, *args, **kwargs):
+            return np.zeros((1, 7))  # Return empty emotion predictions
     
-    editor_module.VideoFileClip = MockVideoFileClip
-    editor_module.__all__ = ['VideoFileClip']
+    def load_model(*args, **kwargs):
+        return MockModel()
     
-    # Mock for tensorflow
-    if 'tensorflow' not in sys.modules:
-        tf_module = types.ModuleType('tensorflow')
-        keras_module = types.ModuleType('tensorflow.keras')
-        models_module = types.ModuleType('tensorflow.keras.models')
-        
-        def dummy_load_model(*args, **kwargs):
-            return object()
-        
-        models_module.load_model = dummy_load_model
-        
-        sys.modules['tensorflow'] = tf_module
-        sys.modules['tensorflow.keras'] = keras_module
-        sys.modules['tensorflow.keras.models'] = models_module
-        
-        # Connect the modules
-        tf_module.keras = keras_module
-        keras_module.models = models_module
-    
-    logger.info("Mock dependencies set up successfully")
+    models_module.load_model = load_model
+    sys.modules['tensorflow'] = tf_module
+    sys.modules['tensorflow.keras'] = keras_module
+    sys.modules['tensorflow.keras.models'] = models_module
+    tf_module.keras = keras_module
+    keras_module.models = models_module
 
 # Set up our mocks BEFORE any imports
 setup_dependency_mocks()
@@ -96,17 +78,16 @@ class EmotionAnalyzer:
         self.detection_interval = detection_interval
         self.model_type = model_type
         self.emotions = ["neutral", "happy", "sad", "surprise", "angry"]
+        self.detector = None
         
         logger.info(f"Initializing EmotionAnalyzer with confidence threshold: {confidence_threshold}")
         
-        if USE_FER:
-            try:
-                self.detector = FER()
-                logger.info("Using FER for emotion detection")
-            except Exception as e:
-                logger.error(f"Failed to initialize FER: {e}")
-                self.detector = None
-        else:
+        try:
+            from fer import FER
+            self.detector = FER()
+            logger.info("Successfully initialized FER")
+        except Exception as e:
+            logger.error(f"Failed to initialize FER: {e}")
             logger.info("Using fallback emotion detection")
             self.detector = None
     

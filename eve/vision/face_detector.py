@@ -179,15 +179,12 @@ class FaceDetector:
         detection_interval = config.vision.FACE_DETECTION_INTERVAL_SEC
         
         while self.running:
-            loop_start_time = time.time()
-            
             try:
-                # Capture a frame
-                ret, frame = self.video_capture.read()
-                
-                if not ret:
+                # Get a frame from the camera
+                frame = self.video_capture.read()
+                if frame is None:
                     logger.warning("Failed to capture frame")
-                    time.sleep(0.1)
+                    time.sleep(detection_interval)  # Wait before trying again
                     continue
                 
                 # Detect faces at regular intervals
@@ -212,7 +209,7 @@ class FaceDetector:
             
             except Exception as e:
                 logger.error(f"Error in face detection loop: {e}")
-                time.sleep(0.1)
+                time.sleep(detection_interval)
         
         logger.info("Face detection loop stopped")
     
