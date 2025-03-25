@@ -15,27 +15,52 @@ import sys
 import types
 import random
 
-# Create a mock for tensorflow if needed
-if 'tensorflow' not in sys.modules:
-    mock_module = types.ModuleType('tensorflow')
-    keras_module = types.ModuleType('keras')
-    keras_models = types.ModuleType('models')
+# Create a complete mock module structure for moviepy.editor
+# This must be done BEFORE any imports that might use it
+def setup_moviepy_mock():
+    # Create the parent module if it doesn't exist
+    if 'moviepy' not in sys.modules:
+        moviepy_module = types.ModuleType('moviepy')
+        sys.modules['moviepy'] = moviepy_module
     
-    # Set up the module structure
-    mock_module.keras = keras_module
-    keras_module.models = keras_models
+    # Create the editor submodule
+    editor_module = types.ModuleType('moviepy.editor')
+    sys.modules['moviepy.editor'] = editor_module
+    sys.modules['moviepy'].editor = editor_module
     
-    # Create a dummy load_model function
-    def dummy_load_model(*args, **kwargs):
-        return object()
+    # Add commonly used classes/functions to the mock
+    class MockVideoFileClip:
+        def __init__(self, *args, **kwargs):
+            pass
+        def close(self):
+            pass
+        def subclip(self, *args, **kwargs):
+            return self
+        def resize(self, *args, **kwargs):
+            return self
     
-    keras_models.load_model = dummy_load_model
-    sys.modules['tensorflow'] = mock_module
-    sys.modules['tensorflow.keras'] = keras_module
-    sys.modules['tensorflow.keras.models'] = keras_models
+    # Add all expected attributes to the editor module
+    editor_module.VideoFileClip = MockVideoFileClip
+    
+    # Make 'from moviepy.editor import *' work by adding to __all__
+    editor_module.__all__ = ['VideoFileClip']
+    
+    # For star imports, we need to put these in the module's globals
+    for name in editor_module.__all__:
+        setattr(editor_module, name, getattr(editor_module, name))
+    
+    return editor_module
 
-# Now import FER
-from fer import FER
+# Set up our mock BEFORE any imports
+setup_moviepy_mock()
+
+# Now we can safely import FER
+try:
+    from fer import FER
+    logger.info("Successfully imported FER")
+except Exception as e:
+    logger.error(f"Error importing FER: {e}")
+    # We'll need to define a fallback if this fails
 
 logger = logging.getLogger(__name__)
 
