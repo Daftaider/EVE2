@@ -15,8 +15,7 @@ import sounddevice as sd
 from typing import Optional, Callable, Dict, Any, List, Tuple
 from pathlib import Path
 from faster_whisper import WhisperModel
-
-from eve.config import config
+import eve.config as config
 
 logger = logging.getLogger(__name__)
 
