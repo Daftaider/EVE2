@@ -52,16 +52,16 @@ MODEL_INFO = {
     },
     "tts": {
         "name": "tts-piper-en",
-        "url": "https://github.com/rhasspy/piper/releases/download/v1.2.0/en_US-lessac-medium.onnx",
-        "size": 50_000_000,
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx?download=true",
+        "size": 63_200_000,
         "md5": None,  # Skip MD5 check
         "dest_path": MODELS_DIR / "tts-piper-en/en_US/lessac_medium.onnx",
         "is_archive": False,  # Changed from archive to direct file
     },
     "tts_config": {
         "name": "tts-piper-en-config",
-        "url": "https://github.com/rhasspy/piper/releases/download/v1.2.0/en_US-lessac-medium.onnx.json",
-        "size": 1_000,
+        "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json?download=true",
+        "size": 5_000,
         "md5": None,  # Skip MD5 check
         "dest_path": MODELS_DIR / "tts-piper-en/en_US/lessac_medium.onnx.json",
     },

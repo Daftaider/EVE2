@@ -17,6 +17,7 @@ from typing import Optional, Dict, Any, List, Tuple, Callable
 from pathlib import Path
 import subprocess
 import tempfile
+import shutil
 
 from eve.config import config
 
@@ -68,17 +69,30 @@ class TextToSpeech:
         self.audio_thread = None
         self.stop_event = threading.Event()
         
-        # Get the full paths for the model
-        self.model_dir = Path(self.model_path)
+        # Validate the model path
+        if not os.path.isdir(self.model_path):
+            self.logger.error(f"TTS model directory not found: {self.model_path}")
+            self.model_available = False
+            return
+            
+        # Parse the voice format (should be "LANG/NAME")
         voice_parts = self.voice.split("/")
         if len(voice_parts) != 2:
             self.logger.error(f"Invalid voice format: {self.voice}. Expected format: 'LANG/NAME'")
             self.model_available = False
             return
             
+        # Get the model file paths
         lang, name = voice_parts
-        model_file = self.model_dir / lang / f"{name}.onnx"
-        config_file = self.model_dir / lang / f"{name}.onnx.json"
+        self.model_dir = Path(self.model_path)
+        model_file = self.model_dir / lang / f"{name}_medium.onnx"
+        config_file = self.model_dir / lang / f"{name}_medium.onnx.json"
+        
+        # If files don't exist with _medium suffix, try without it
+        if not model_file.exists() or not config_file.exists():
+            # Check if we have the files with the exact names from the download
+            model_file = self.model_dir / lang / "lessac_medium.onnx"
+            config_file = self.model_dir / lang / "lessac_medium.onnx.json"
         
         # Check if model files exist
         if not model_file.exists():
@@ -254,51 +268,54 @@ class TextToSpeech:
                 output_path = temp_file.name
             
             # Check if piper is installed
-            try:
-                # Try to find piper in PATH
-                import shutil
-                piper_executable = shutil.which("piper") or "piper.exe" if os.name == "nt" else "piper"
+            piper_executable = shutil.which("piper")
+            if not piper_executable:
+                if os.name == "nt":
+                    piper_executable = shutil.which("piper.exe")
                 
-                # Command arguments
-                cmd = [
-                    piper_executable,
-                    "--model", str(self.model_file),
-                    "--output_file", output_path,
-                    "--sentence_silence", "0.25"
-                ]
-                
-                # Add speaking rate if not 1.0
-                if self.speaking_rate != 1.0:
-                    cmd.extend(["--length_scale", str(1.0 / self.speaking_rate)])
-                
-                # Run piper
-                process = subprocess.Popen(
-                    cmd,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
-                
-                # Send text to stdin
-                stdout, stderr = process.communicate(text)
-                
-                if process.returncode != 0:
-                    self.logger.error(f"Piper TTS failed: {stderr}")
+                if not piper_executable:
+                    self.logger.error("Piper executable not found in PATH. Please install piper-tts")
                     return None
                 
-                # Read the WAV file
-                try:
-                    audio_data = self._read_wav(output_path)
-                    return audio_data
-                finally:
-                    # Clean up temporary file
-                    if os.path.exists(output_path):
-                        os.unlink(output_path)
-                    
-            except FileNotFoundError:
-                self.logger.error("Piper executable not found. Please install piper-tts")
+            self.logger.debug(f"Using Piper executable: {piper_executable}")
+                
+            # Command arguments
+            cmd = [
+                piper_executable,
+                "--model", str(self.model_file),
+                "--output_file", output_path,
+                "--sentence_silence", "0.25"
+            ]
+            
+            # Add speaking rate if not 1.0
+            if self.speaking_rate != 1.0:
+                cmd.extend(["--length_scale", str(1.0 / self.speaking_rate)])
+            
+            # Run piper
+            self.logger.debug(f"Running command: {' '.join(cmd)}")
+            process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Send text to stdin
+            stdout, stderr = process.communicate(text)
+            
+            if process.returncode != 0:
+                self.logger.error(f"Piper TTS failed with return code {process.returncode}: {stderr}")
                 return None
+            
+            # Read the WAV file
+            try:
+                audio_data = self._read_wav(output_path)
+                return audio_data
+            finally:
+                # Clean up temporary file
+                if os.path.exists(output_path):
+                    os.unlink(output_path)
                 
         except Exception as e:
             self.logger.error(f"Error synthesizing speech: {e}")
