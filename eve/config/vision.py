@@ -19,6 +19,7 @@ VISION_OVERLAY = True
 # Face detection settings
 FACE_DETECTION_ENABLED = True
 FACE_DETECTION_INTERVAL_SEC = 0.5
+FACE_DETECTION_INTERVAL_MS = 500  # Add this line - millisecond version of the interval
 FACE_DETECTION_MODEL = "haarcascade"  # Options: "haarcascade", "dnn", "ssd", "mtcnn"
 FACE_DETECTION_CONFIDENCE = 0.5
 FACE_DETECTION_SCALE_FACTOR = 1.1

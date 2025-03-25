@@ -176,7 +176,7 @@ class FaceDetector:
         frame_interval = 1.0 / self.fps
         
         # Define detection interval based on config
-        detection_interval = config.vision.FACE_DETECTION_INTERVAL_MS / 1000.0
+        detection_interval = config.vision.FACE_DETECTION_INTERVAL_SEC
         
         while self.running:
             loop_start_time = time.time()
