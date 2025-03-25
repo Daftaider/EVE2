@@ -15,7 +15,7 @@ from eve import config
 from eve.utils import logging_utils
 from eve.vision import face_detector, emotion_analyzer
 from eve.display import lcd_controller
-from eve.speech import audio_capture, speech_recognizer, llm_processor, text_to_speech
+from eve.speech import speech_recorder as audio_capture, speech_recognizer, llm_processor, text_to_speech
 from eve.communication import message_queue, api
 
 logger = logging.getLogger(__name__)
