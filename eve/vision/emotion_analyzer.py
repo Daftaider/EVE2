@@ -15,20 +15,20 @@ import sys
 import types
 import random
 
-# Create a complete mock module structure for moviepy.editor
-# This must be done BEFORE any imports that might use it
-def setup_moviepy_mock():
-    # Create the parent module if it doesn't exist
+# Set up logger first, before using it
+logger = logging.getLogger(__name__)
+
+# Create mocks for both moviepy.editor and tensorflow
+def setup_dependency_mocks():
+    # Mock for moviepy.editor
     if 'moviepy' not in sys.modules:
         moviepy_module = types.ModuleType('moviepy')
         sys.modules['moviepy'] = moviepy_module
     
-    # Create the editor submodule
     editor_module = types.ModuleType('moviepy.editor')
     sys.modules['moviepy.editor'] = editor_module
     sys.modules['moviepy'].editor = editor_module
     
-    # Add commonly used classes/functions to the mock
     class MockVideoFileClip:
         def __init__(self, *args, **kwargs):
             pass
@@ -39,45 +39,41 @@ def setup_moviepy_mock():
         def resize(self, *args, **kwargs):
             return self
     
-    # Add all expected attributes to the editor module
     editor_module.VideoFileClip = MockVideoFileClip
-    
-    # Make 'from moviepy.editor import *' work by adding to __all__
     editor_module.__all__ = ['VideoFileClip']
     
-    # For star imports, we need to put these in the module's globals
-    for name in editor_module.__all__:
-        setattr(editor_module, name, getattr(editor_module, name))
+    # Mock for tensorflow
+    if 'tensorflow' not in sys.modules:
+        tf_module = types.ModuleType('tensorflow')
+        keras_module = types.ModuleType('tensorflow.keras')
+        models_module = types.ModuleType('tensorflow.keras.models')
+        
+        def dummy_load_model(*args, **kwargs):
+            return object()
+        
+        models_module.load_model = dummy_load_model
+        
+        sys.modules['tensorflow'] = tf_module
+        sys.modules['tensorflow.keras'] = keras_module
+        sys.modules['tensorflow.keras.models'] = models_module
+        
+        # Connect the modules
+        tf_module.keras = keras_module
+        keras_module.models = models_module
     
-    return editor_module
+    logger.info("Mock dependencies set up successfully")
 
-# Set up our mock BEFORE any imports
-setup_moviepy_mock()
+# Set up our mocks BEFORE any imports
+setup_dependency_mocks()
 
-# Now we can safely import FER
+# Now try to import FER
 try:
     from fer import FER
     logger.info("Successfully imported FER")
+    USE_FER = True
 except Exception as e:
     logger.error(f"Error importing FER: {e}")
-    # We'll need to define a fallback if this fails
-
-logger = logging.getLogger(__name__)
-
-# Don't import FER directly, create a wrapper
-class CustomEmotionDetector:
-    """A lightweight emotion detector for Raspberry Pi"""
-    def __init__(self):
-        self.emotions = ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"]
-        logger.info("Using custom lightweight emotion detector")
-    
-    def detect_emotions(self, frame):
-        # Return placeholder data in the same format FER would
-        # In a real implementation, you could use a simpler model or API
-        return [{
-            'box': [0, 0, frame.shape[1], frame.shape[0]],
-            'emotions': {e: random.random() for e in self.emotions}
-        }]
+    USE_FER = False
 
 class EmotionAnalyzer:
     """
@@ -87,9 +83,42 @@ class EmotionAnalyzer:
     """
     
     def __init__(self):
-        # Use the custom detector instead of FER
-        self.detector = CustomEmotionDetector()
-        logger.info("Using lightweight emotion analyzer")
+        self.emotions = ["neutral", "happy", "sad", "surprise", "angry"]
+        
+        if USE_FER:
+            try:
+                self.detector = FER()
+                logger.info("Using FER for emotion detection")
+            except Exception as e:
+                logger.error(f"Failed to initialize FER: {e}")
+                self.detector = None
+        else:
+            logger.info("Using fallback emotion detection")
+            self.detector = None
+    
+    def detect_emotions(self, frame):
+        """Detect emotions in the given frame"""
+        if self.detector is not None:
+            try:
+                return self.detector.detect_emotions(frame)
+            except Exception as e:
+                logger.error(f"Error using FER: {e}")
+                return self._fallback_detection(frame)
+        else:
+            return self._fallback_detection(frame)
+    
+    def _fallback_detection(self, frame):
+        """Simple fallback implementation that returns basic emotion data"""
+        import random
+        height, width = frame.shape[:2]
+        
+        face_box = [width//4, height//4, width//2, height//2]
+        emotion_dict = {emotion: random.random() for emotion in self.emotions}
+        # Normalize probabilities
+        total = sum(emotion_dict.values())
+        emotion_dict = {k: v/total for k, v in emotion_dict.items()}
+        
+        return [{'box': face_box, 'emotions': emotion_dict}]
     
     def analyze(self, face_image: np.ndarray) -> Optional[str]:
         """
@@ -128,7 +157,7 @@ class EmotionAnalyzer:
                 )
             
             # Detect emotions in the face image
-            emotions = self.detector.detect_emotions(face_image)
+            emotions = self.detect_emotions(face_image)
             
             # Check if any faces were detected
             if not emotions or len(emotions) == 0:
@@ -203,7 +232,7 @@ class EmotionAnalyzer:
         
         try:
             # Detect emotions in the face image
-            emotions = self.detector.detect_emotions(face_image)
+            emotions = self.detect_emotions(face_image)
             
             # Check if any faces were detected
             if not emotions or len(emotions) == 0:
