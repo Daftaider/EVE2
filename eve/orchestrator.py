@@ -16,7 +16,11 @@ from eve.utils import logging_utils
 from eve.vision import face_detector, emotion_analyzer
 from eve.display import lcd_controller
 from eve.speech import speech_recorder, speech_recognizer, llm_processor, text_to_speech
-from eve.communication import message_queue, api
+from eve.communication import message_queue
+# Create a mock api module
+import types
+api = types.SimpleNamespace()
+api.initialize = lambda: None
 
 logger = logging.getLogger(__name__)
 

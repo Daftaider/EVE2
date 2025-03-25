@@ -14,6 +14,7 @@ from eve import config
 import sys
 import types
 import random
+import importlib
 
 # Set up logger first, before using it
 logger = logging.getLogger(__name__)
@@ -257,4 +258,7 @@ class EmotionAnalyzer:
             
         except Exception as e:
             logger.error(f"Error getting emotion confidence: {e}")
-            return {} 
+            return {}
+
+if 'eve.communication' in sys.modules:
+    importlib.reload(sys.modules['eve.communication']) 
