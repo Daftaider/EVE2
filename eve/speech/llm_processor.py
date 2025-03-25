@@ -26,32 +26,31 @@ class LLMProcessor:
     context across multiple turns.
     """
     
-    def __init__(
-        self,
-        model_path: Optional[str] = None,
-        context_length: int = 2048,
-        max_tokens: int = 256,
-        temperature: float = 0.7,
-        callback: Optional[Callable[[str, Dict[str, Any]], None]] = None
-    ):
+    def __init__(self, model_type=None, model_path=None, context_length=4096, max_tokens=100, temperature=0.7):
         """
-        Initialize the LLM processor.
+        Initialize LLM processor with configurable parameters
         
         Args:
-            model_path: Path to the LLM model. If None, uses the model from config.
-            context_length: Maximum context length in tokens.
-            max_tokens: Maximum number of tokens to generate.
-            temperature: Temperature parameter for generation.
-            callback: Callback function to call when a response is generated.
+            model_type (str): Type of LLM to use ('simple', 'openai', etc.)
+            model_path (str): Path to model files if needed
+            context_length (int): Maximum context window size
+            max_tokens (int): Maximum tokens in response
+            temperature (float): Sampling temperature for generation
         """
-        logger.info("Initializing LLM processor")
+        self.model_type = model_type or "simple"
+        self.model_path = model_path
+        self.context_length = context_length
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self.model = None
         
-        # Configuration
-        self.model_path = model_path or config.speech.llm_model
-        self.context_length = context_length or config.speech.llm_context_length
-        self.max_tokens = max_tokens or config.speech.llm_max_tokens
-        self.temperature = temperature or config.speech.llm_temperature
-        self.callback = callback
+        logger.info(f"Initializing LLM processor with model type: {self.model_type}")
+        
+        # Initialize model based on type
+        if self.model_type == "simple":
+            # Simple model doesn't need external files
+            self.model = "simple_model"
+        # Other model types would be initialized here
         
         # State
         self.is_running = False
@@ -69,8 +68,7 @@ class LLMProcessor:
         self.max_history_turns = 5
         
         # Initialize the LLM
-        self.model = None
-        if os.path.exists(self.model_path):
+        if self.model_path and os.path.exists(self.model_path):
             self._load_model()
         else:
             logger.error(f"Model file not found: {self.model_path}")
@@ -342,6 +340,23 @@ class LLMProcessor:
 
     def process(self, text):
         """Process text with LLM and return response"""
-        logger.info(f"Processing text with LLM: {text}")
-        # Return simple response for now
-        return f"I received: {text}" 
+        logger.info(f"Processing text with LLM: {text[:50]}...")
+        
+        # Simple placeholder implementation
+        if self.model_type == "simple":
+            # Generate a simple response based on the input
+            if "hello" in text.lower() or "hi" in text.lower():
+                return "Hello! How can I help you today?"
+            elif "how are you" in text.lower():
+                return "I'm functioning normally. Thank you for asking!"
+            elif "what" in text.lower() and "time" in text.lower():
+                import datetime
+                now = datetime.datetime.now()
+                return f"The current time is {now.strftime('%H:%M:%S')}."
+            elif "weather" in text.lower():
+                return "I'm sorry, I don't have access to weather information right now."
+            else:
+                return f"I received your message: '{text}'. How can I assist you further?"
+        
+        # Placeholder for other model types
+        return f"LLM response to: {text}" 
