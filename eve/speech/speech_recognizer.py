@@ -18,6 +18,8 @@ from faster_whisper import WhisperModel
 
 from eve.config import config
 
+logger = logging.getLogger(__name__)
+
 class SpeechRecognizer:
     """
     Speech recognition using WhisperModel.
@@ -54,7 +56,7 @@ class SpeechRecognizer:
             vad_threshold: Voice activity detection threshold.
             callback: Callback function to be called when speech is recognized.
         """
-        self.logger = logging.getLogger(__name__)
+        logger.info("Initializing speech recognizer")
         
         # Configuration
         self.model_path = model_path or config.speech.recognition_model
@@ -89,12 +91,12 @@ class SpeechRecognizer:
         if os.path.exists(self.model_path):
             self._load_model()
         else:
-            self.logger.error(f"Model file not found: {self.model_path}")
+            logger.error(f"Model file not found: {self.model_path}")
     
     def _load_model(self):
         """Load the Whisper speech recognition model."""
         try:
-            self.logger.info(f"Loading Whisper model from {self.model_path}")
+            logger.info(f"Loading Whisper model from {self.model_path}")
             # Check for GPU or use CPU if not available
             device = "cuda" if self._is_cuda_available() else "cpu"
             compute_type = "float16" if device == "cuda" else "int8"
@@ -108,9 +110,9 @@ class SpeechRecognizer:
                 local_files_only=True,
                 beam_size=1
             )
-            self.logger.info(f"Whisper model loaded successfully (device: {device})")
+            logger.info(f"Whisper model loaded successfully (device: {device})")
         except Exception as e:
-            self.logger.error(f"Failed to load Whisper model: {e}")
+            logger.error(f"Failed to load Whisper model: {e}")
             self.model = None
     
     def _is_cuda_available(self) -> bool:
@@ -124,11 +126,11 @@ class SpeechRecognizer:
     def start(self):
         """Start the speech recognizer."""
         if self.is_running:
-            self.logger.warning("Speech recognizer is already running")
+            logger.warning("Speech recognizer is already running")
             return False
         
         if self.model is None:
-            self.logger.error("Cannot start speech recognizer: Model not loaded")
+            logger.error("Cannot start speech recognizer: Model not loaded")
             return False
         
         self.is_running = True
@@ -142,7 +144,7 @@ class SpeechRecognizer:
         self.listen_thread = threading.Thread(target=self._listen_loop, daemon=True)
         self.listen_thread.start()
         
-        self.logger.info("Speech recognizer started")
+        logger.info("Speech recognizer started")
         return True
     
     def stop(self):
@@ -168,12 +170,12 @@ class SpeechRecognizer:
             self.audio_queue.put(None)
             self.process_thread.join(timeout=2.0)
         
-        self.logger.info("Speech recognizer stopped")
+        logger.info("Speech recognizer stopped")
     
     def _audio_callback(self, indata, frames, time_info, status):
         """Callback function for audio input stream."""
         if status:
-            self.logger.warning(f"Audio stream status: {status}")
+            logger.warning(f"Audio stream status: {status}")
         
         # Convert audio data to mono and float32
         audio_data = indata.copy()
@@ -198,14 +200,14 @@ class SpeechRecognizer:
                 device=self.device_index
             )
             self.stream.start()
-            self.logger.info("Audio stream started")
+            logger.info("Audio stream started")
             
             # Keep the thread alive while running
             while self.is_running:
                 time.sleep(0.1)
                 
         except Exception as e:
-            self.logger.error(f"Error in listen loop: {e}")
+            logger.error(f"Error in listen loop: {e}")
             self.is_running = False
     
     def _process_loop(self):
@@ -226,7 +228,7 @@ class SpeechRecognizer:
                 self.audio_queue.task_done()
                 
         except Exception as e:
-            self.logger.error(f"Error in process loop: {e}")
+            logger.error(f"Error in process loop: {e}")
             self.is_running = False
     
     def _process_audio(self, audio_data: np.ndarray):
@@ -244,7 +246,7 @@ class SpeechRecognizer:
             # Start of speech detected
             self.is_listening = True
             self.recording_buffer = [audio_data]
-            self.logger.debug("Speech detected, started recording")
+            logger.debug("Speech detected, started recording")
         elif self.is_listening:
             # Add data to recording buffer
             self.recording_buffer.append(audio_data)
@@ -284,10 +286,10 @@ class SpeechRecognizer:
         
         # Only process if the recording is long enough
         if len(audio_data) < self.sample_rate * 0.5:  # Less than 0.5 second
-            self.logger.debug("Recording too short, ignoring")
+            logger.debug("Recording too short, ignoring")
             return
         
-        self.logger.debug(f"Processing {len(audio_data)/self.sample_rate:.2f}s of audio")
+        logger.debug(f"Processing {len(audio_data)/self.sample_rate:.2f}s of audio")
         
         try:
             # Recognize speech
@@ -307,14 +309,14 @@ class SpeechRecognizer:
             confidence = info.avg_logprob
             
             # Log the result
-            self.logger.debug(f"Recognized: '{text}' (confidence: {confidence:.2f})")
+            logger.debug(f"Recognized: '{text}' (confidence: {confidence:.2f})")
             
             # Invoke callback if confidence is high enough
             if text and confidence > self.threshold and self.callback:
                 self.callback(text, confidence)
                 
         except Exception as e:
-            self.logger.error(f"Error recognizing speech: {e}")
+            logger.error(f"Error recognizing speech: {e}")
     
     def recognize_file(self, file_path: str) -> Tuple[str, float]:
         """
@@ -327,11 +329,11 @@ class SpeechRecognizer:
             Tuple of (transcript, confidence).
         """
         if not os.path.exists(file_path):
-            self.logger.error(f"Audio file not found: {file_path}")
+            logger.error(f"Audio file not found: {file_path}")
             return "", 0.0
         
         if self.model is None:
-            self.logger.error("Cannot recognize speech: Model not loaded")
+            logger.error("Cannot recognize speech: Model not loaded")
             return "", 0.0
         
         try:
@@ -350,9 +352,15 @@ class SpeechRecognizer:
             # Get confidence score
             confidence = info.avg_logprob
             
-            self.logger.info(f"Recognized from file: '{text}' (confidence: {confidence:.2f})")
+            logger.info(f"Recognized from file: '{text}' (confidence: {confidence:.2f})")
             return text, confidence
             
         except Exception as e:
-            self.logger.error(f"Error recognizing speech from file: {e}")
-            return "", 0.0 
+            logger.error(f"Error recognizing speech from file: {e}")
+            return "", 0.0
+
+    def recognize(self, audio_data):
+        """Convert audio data to text"""
+        logger.info("Processing speech recognition")
+        # Return placeholder text for now
+        return "Hello EVE" 

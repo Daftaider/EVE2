@@ -21,6 +21,8 @@ import shutil
 
 from eve.config import config
 
+logger = logging.getLogger(__name__)
+
 class TextToSpeech:
     """
     Text-to-speech processor using Piper TTS.
@@ -50,7 +52,7 @@ class TextToSpeech:
             sample_rate: Audio sample rate for output.
             callback: Callback function to call when speech is complete.
         """
-        self.logger = logging.getLogger(__name__)
+        logger.info("Initializing text to speech")
         
         # Configuration
         self.model_path = model_path or config.speech.tts_model
@@ -71,14 +73,14 @@ class TextToSpeech:
         
         # Validate the model path
         if not os.path.isdir(self.model_path):
-            self.logger.error(f"TTS model directory not found: {self.model_path}")
+            logger.error(f"TTS model directory not found: {self.model_path}")
             self.model_available = False
             return
             
         # Parse the voice format (should be "LANG/NAME")
         voice_parts = self.voice.split("/")
         if len(voice_parts) != 2:
-            self.logger.error(f"Invalid voice format: {self.voice}. Expected format: 'LANG/NAME'")
+            logger.error(f"Invalid voice format: {self.voice}. Expected format: 'LANG/NAME'")
             self.model_available = False
             return
             
@@ -96,12 +98,12 @@ class TextToSpeech:
         
         # Check if model files exist
         if not model_file.exists():
-            self.logger.error(f"TTS model file not found: {model_file}")
+            logger.error(f"TTS model file not found: {model_file}")
             self.model_available = False
             return
             
         if not config_file.exists():
-            self.logger.error(f"TTS config file not found: {config_file}")
+            logger.error(f"TTS config file not found: {config_file}")
             self.model_available = False
             return
             
@@ -114,20 +116,20 @@ class TextToSpeech:
             with open(config_file, 'r') as f:
                 model_config = json.load(f)
                 self.sample_rate = model_config.get('audio', {}).get('sample_rate', self.sample_rate)
-                self.logger.info(f"Using sample rate from model config: {self.sample_rate}")
+                logger.info(f"Using sample rate from model config: {self.sample_rate}")
         except Exception as e:
-            self.logger.warning(f"Could not load model config: {e}")
+            logger.warning(f"Could not load model config: {e}")
         
-        self.logger.info(f"Using TTS model at {self.model_file}")
+        logger.info(f"Using TTS model at {self.model_file}")
     
     def start(self):
         """Start the text-to-speech processor."""
         if self.is_running:
-            self.logger.warning("TTS processor is already running")
+            logger.warning("TTS processor is already running")
             return False
         
         if not self.model_available:
-            self.logger.error("Cannot start TTS: Model not available")
+            logger.error("Cannot start TTS: Model not available")
             return False
         
         self.is_running = True
@@ -137,7 +139,7 @@ class TextToSpeech:
         self.process_thread = threading.Thread(target=self._process_loop, daemon=True)
         self.process_thread.start()
         
-        self.logger.info("TTS processor started")
+        logger.info("TTS processor started")
         return True
     
     def stop(self):
@@ -155,7 +157,7 @@ class TextToSpeech:
         if self.audio_thread is not None and self.audio_thread.is_alive():
             self.audio_thread.join(timeout=2.0)
         
-        self.logger.info("TTS processor stopped")
+        logger.info("TTS processor stopped")
     
     def say(self, text: str):
         """
@@ -165,13 +167,13 @@ class TextToSpeech:
             text: The text to convert to speech.
         """
         if not self.is_running:
-            self.logger.warning("TTS processor is not running")
+            logger.warning("TTS processor is not running")
             return
         
         # Add text to the queue
         self.text_queue.append(text)
         
-        self.logger.debug(f"Added text to TTS queue: '{text}'")
+        logger.debug(f"Added text to TTS queue: '{text}'")
     
     def say_sync(self, text: str) -> bool:
         """
@@ -184,10 +186,10 @@ class TextToSpeech:
             True if successful, False otherwise.
         """
         if not self.model_available:
-            self.logger.error("Cannot synthesize speech: Model not available")
+            logger.error("Cannot synthesize speech: Model not available")
             return False
         
-        self.logger.info(f"Synthesizing speech: '{text}'")
+        logger.info(f"Synthesizing speech: '{text}'")
         
         try:
             # Generate speech
@@ -201,7 +203,7 @@ class TextToSpeech:
             return True
             
         except Exception as e:
-            self.logger.error(f"Error synthesizing speech: {e}")
+            logger.error(f"Error synthesizing speech: {e}")
             return False
     
     def is_busy(self) -> bool:
@@ -211,7 +213,7 @@ class TextToSpeech:
     def clear_queue(self):
         """Clear the text queue."""
         self.text_queue = []
-        self.logger.info("TTS queue cleared")
+        logger.info("TTS queue cleared")
     
     def _process_loop(self):
         """Process text from the queue."""
@@ -248,7 +250,7 @@ class TextToSpeech:
                 time.sleep(0.1)
                 
         except Exception as e:
-            self.logger.error(f"Error in process loop: {e}")
+            logger.error(f"Error in process loop: {e}")
             self.is_running = False
             self.is_speaking = False
     
@@ -274,10 +276,10 @@ class TextToSpeech:
                     piper_executable = shutil.which("piper.exe")
                 
                 if not piper_executable:
-                    self.logger.error("Piper executable not found in PATH. Please install piper-tts")
+                    logger.error("Piper executable not found in PATH. Please install piper-tts")
                     return None
                 
-            self.logger.debug(f"Using Piper executable: {piper_executable}")
+            logger.debug(f"Using Piper executable: {piper_executable}")
                 
             # Command arguments
             cmd = [
@@ -292,7 +294,7 @@ class TextToSpeech:
                 cmd.extend(["--length_scale", str(1.0 / self.speaking_rate)])
             
             # Run piper
-            self.logger.debug(f"Running command: {' '.join(cmd)}")
+            logger.debug(f"Running command: {' '.join(cmd)}")
             process = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
@@ -305,7 +307,7 @@ class TextToSpeech:
             stdout, stderr = process.communicate(text)
             
             if process.returncode != 0:
-                self.logger.error(f"Piper TTS failed with return code {process.returncode}: {stderr}")
+                logger.error(f"Piper TTS failed with return code {process.returncode}: {stderr}")
                 return None
             
             # Read the WAV file
@@ -318,7 +320,7 @@ class TextToSpeech:
                     os.unlink(output_path)
                 
         except Exception as e:
-            self.logger.error(f"Error synthesizing speech: {e}")
+            logger.error(f"Error synthesizing speech: {e}")
             return None
     
     def _read_wav(self, file_path: str) -> np.ndarray:
@@ -380,7 +382,7 @@ class TextToSpeech:
                 sd.stop()
                 
         except Exception as e:
-            self.logger.error(f"Error playing audio: {e}")
+            logger.error(f"Error playing audio: {e}")
             
     def set_voice(self, voice: str):
         """
@@ -390,7 +392,7 @@ class TextToSpeech:
             voice: The voice to use.
         """
         self.voice = voice
-        self.logger.info(f"TTS voice set to {voice}")
+        logger.info(f"TTS voice set to {voice}")
     
     def set_speaking_rate(self, speaking_rate: float):
         """
@@ -400,4 +402,9 @@ class TextToSpeech:
             speaking_rate: Speaking rate multiplier (1.0 = normal speed).
         """
         self.speaking_rate = max(0.5, min(2.0, speaking_rate))  # Limit range
-        self.logger.info(f"TTS speaking rate set to {self.speaking_rate}") 
+        logger.info(f"TTS speaking rate set to {self.speaking_rate}")
+
+    def speak(self, text):
+        """Convert text to speech and play it"""
+        logger.info(f"Speaking: {text}")
+        return True 

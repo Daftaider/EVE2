@@ -15,6 +15,8 @@ from pathlib import Path
 
 from eve.config import config
 
+logger = logging.getLogger(__name__)
+
 class LLMProcessor:
     """
     LLM processor for generating responses to user queries.
@@ -42,7 +44,7 @@ class LLMProcessor:
             temperature: Temperature parameter for generation.
             callback: Callback function to call when a response is generated.
         """
-        self.logger = logging.getLogger(__name__)
+        logger.info("Initializing LLM processor")
         
         # Configuration
         self.model_path = model_path or config.speech.llm_model
@@ -71,21 +73,21 @@ class LLMProcessor:
         if os.path.exists(self.model_path):
             self._load_model()
         else:
-            self.logger.error(f"Model file not found: {self.model_path}")
+            logger.error(f"Model file not found: {self.model_path}")
             
     def _load_model(self):
         """Load the language model."""
         try:
-            self.logger.info(f"Loading LLM model from {self.model_path}")
+            logger.info(f"Loading LLM model from {self.model_path}")
             
             # Determine if we should use GPU
             n_gpu_layers = -1  # Use all layers on GPU if available
             use_gpu = self._is_cuda_available()
             
             if use_gpu:
-                self.logger.info("CUDA is available, using GPU for inference")
+                logger.info("CUDA is available, using GPU for inference")
             else:
-                self.logger.info("CUDA is not available, using CPU for inference")
+                logger.info("CUDA is not available, using CPU for inference")
                 n_gpu_layers = 0  # Use CPU only
             
             # Import here to avoid loading unnecessary dependencies
@@ -99,10 +101,10 @@ class LLMProcessor:
                 verbose=False
             )
             
-            self.logger.info("LLM model loaded successfully")
+            logger.info("LLM model loaded successfully")
             
         except Exception as e:
-            self.logger.error(f"Failed to load LLM model: {e}")
+            logger.error(f"Failed to load LLM model: {e}")
             self.model = None
     
     def _is_cuda_available(self) -> bool:
@@ -116,11 +118,11 @@ class LLMProcessor:
     def start(self):
         """Start the LLM processor."""
         if self.is_running:
-            self.logger.warning("LLM processor is already running")
+            logger.warning("LLM processor is already running")
             return False
         
         if self.model is None:
-            self.logger.error("Cannot start LLM processor: Model not loaded")
+            logger.error("Cannot start LLM processor: Model not loaded")
             return False
         
         self.is_running = True
@@ -129,7 +131,7 @@ class LLMProcessor:
         self.process_thread = threading.Thread(target=self._process_loop, daemon=True)
         self.process_thread.start()
         
-        self.logger.info("LLM processor started")
+        logger.info("LLM processor started")
         return True
     
     def stop(self):
@@ -146,7 +148,7 @@ class LLMProcessor:
         if self.process_thread is not None and self.process_thread.is_alive():
             self.process_thread.join(timeout=2.0)
         
-        self.logger.info("LLM processor stopped")
+        logger.info("LLM processor stopped")
     
     def process_query(self, query: str):
         """
@@ -156,7 +158,7 @@ class LLMProcessor:
             query: The user query.
         """
         if not self.is_running:
-            self.logger.warning("LLM processor is not running")
+            logger.warning("LLM processor is not running")
             return
         
         # Add the query to the queue
@@ -173,7 +175,7 @@ class LLMProcessor:
             Tuple of (response text, metadata).
         """
         if self.model is None:
-            self.logger.error("Cannot process query: Model not loaded")
+            logger.error("Cannot process query: Model not loaded")
             return "Sorry, I'm not ready yet.", {"emotion": "confused"}
         
         # Prepare prompt
@@ -200,12 +202,12 @@ class LLMProcessor:
             # Update conversation history
             self._update_history(query, response_text)
             
-            self.logger.info(f"Generated response in {generation_time:.2f}s: '{response_text}'")
+            logger.info(f"Generated response in {generation_time:.2f}s: '{response_text}'")
             
             return response_text, metadata
             
         except Exception as e:
-            self.logger.error(f"Error processing query: {e}")
+            logger.error(f"Error processing query: {e}")
             return "Sorry, I couldn't process that.", {"emotion": "confused"}
     
     def _process_loop(self):
@@ -230,7 +232,7 @@ class LLMProcessor:
                 self.query_queue.task_done()
                 
         except Exception as e:
-            self.logger.error(f"Error in process loop: {e}")
+            logger.error(f"Error in process loop: {e}")
             self.is_running = False
     
     def _prepare_prompt(self, query: str) -> str:
@@ -311,7 +313,7 @@ class LLMProcessor:
     def reset_conversation(self):
         """Reset the conversation history."""
         self.conversation_history = []
-        self.logger.info("Conversation history reset")
+        logger.info("Conversation history reset")
     
     def set_system_prompt(self, system_prompt: str):
         """
@@ -321,7 +323,7 @@ class LLMProcessor:
             system_prompt: The new system prompt.
         """
         self.system_prompt = system_prompt
-        self.logger.info("System prompt updated")
+        logger.info("System prompt updated")
     
     def set_max_history_turns(self, max_turns: int):
         """
@@ -336,4 +338,10 @@ class LLMProcessor:
         if len(self.conversation_history) > self.max_history_turns:
             self.conversation_history = self.conversation_history[-self.max_history_turns:]
         
-        self.logger.info(f"Max history turns set to {self.max_history_turns}") 
+        logger.info(f"Max history turns set to {self.max_history_turns}")
+
+    def process(self, text):
+        """Process text with LLM and return response"""
+        logger.info(f"Processing text with LLM: {text}")
+        # Return simple response for now
+        return f"I received: {text}" 
