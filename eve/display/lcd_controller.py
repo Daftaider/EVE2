@@ -25,7 +25,7 @@ class LCDController:
     manages the rendering of emotive eye animations.
     """
     
-    def __init__(self, width=800, height=480, fullscreen=False, resolution=None):
+    def __init__(self, width=800, height=480, fullscreen=False, resolution=None, fps=30):
         """
         Initialize the display controller
         
@@ -35,6 +35,7 @@ class LCDController:
             fullscreen (bool): Whether to use fullscreen mode
             resolution (tuple): Optional (width, height) tuple that can be used instead of 
                                separate width and height parameters
+            fps (int): Target frames per second for the display
         """
         # If resolution is provided, use it instead of width/height parameters
         if resolution and isinstance(resolution, tuple) and len(resolution) == 2:
@@ -44,6 +45,7 @@ class LCDController:
             self.height = height
         
         self.fullscreen = fullscreen
+        self.fps = fps  # Store the target FPS
         self.running = False
         self.render_thread = None
         self.current_emotion = "neutral"

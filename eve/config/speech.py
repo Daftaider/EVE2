@@ -59,9 +59,15 @@ TTS_VOICE = "en-US-Standard-C"
 TTS_VOICE_ID = "en-US-1"
 TTS_RATE = 1.0
 TTS_PITCH = 1.0
-TTS_ENGINE = "pyttsx3"  # Options: "pyttsx3", "google", "espeak"
+TTS_ENGINE = "pyttsx3"  # Options: "pyttsx3", "google", "espeak", "coqui"
 TTS_VOLUME = 1.0
 TTS_CACHE_DIR = "cache/tts"
+
+# Coqui TTS settings (open-source TTS)
+COQUI_MODEL_PATH = "models/tts/coqui/tts_model.pth"
+COQUI_CONFIG_PATH = "models/tts/coqui/config.json"
+COQUI_VOCODER_PATH = "models/tts/coqui/vocoder.pth"
+COQUI_VOCODER_CONFIG = "models/tts/coqui/vocoder_config.json"
 
 # Audio processing
 NOISE_REDUCTION_ENABLED = True
