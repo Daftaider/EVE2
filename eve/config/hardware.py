@@ -5,6 +5,17 @@ Hardware configuration settings for EVE2
 # System role (e.g., 'master', 'display', 'audio', etc.)
 ROLE = "master"
 
+# Distributed mode - determines if EVE runs as a single system or distributed across multiple devices
+DISTRIBUTED_MODE = False
+
+# Network settings for distributed mode
+NETWORK = {
+    "master_ip": "192.168.1.100",
+    "master_port": 5000,
+    "discovery_port": 5001,
+    "heartbeat_interval": 5.0  # seconds
+}
+
 # Hardware capabilities
 CAPABILITIES = {
     "display": True,
