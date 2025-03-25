@@ -2,6 +2,14 @@
 Speech system configuration for EVE2
 """
 
+# LLM Processing
+LLM_MODEL_TYPE = "simple"  # Add this line - options could be "simple", "openai", "huggingface", etc.
+LLM_API_KEY = ""
+LLM_MAX_TOKENS = 100
+LLM_TEMPERATURE = 0.7
+LLM_MODEL_NAME = "text-davinci-003"
+LLM_SYSTEM_PROMPT = "You are EVE, an intelligent assistant."
+
 # General speech settings
 SPEECH_ENABLED = True
 SPEECH_DEBUG = False

@@ -106,6 +106,12 @@ class SpeechRecognizer:
             logger.info(f"Using Vosk model at: {self.vosk_model_path}")
         elif self.model_type == "whisper" and self.whisper_model_name:
             logger.info(f"Using Whisper model: {self.whisper_model_name}")
+        
+        # Check if model files exist
+        if self.model_type and not self._check_model_exists(self.model_type):
+            logger.error(f"Model file not found: {self.model_type}")
+            # Fall back to a simple model that doesn't require external files
+            self.model_type = "simple"
     
     def _load_model(self):
         """Load the Whisper speech recognition model."""
@@ -373,8 +379,26 @@ class SpeechRecognizer:
             logger.error(f"Error recognizing speech from file: {e}")
             return "", 0.0
 
+    def _check_model_exists(self, model_type):
+        """Check if the specified model files exist"""
+        if model_type == "google":
+            # Google doesn't require local model files
+            return True
+        elif model_type == "vosk" and self.vosk_model_path:
+            return os.path.exists(self.vosk_model_path)
+        elif model_type == "whisper" and self.whisper_model_name:
+            # Whisper models are downloaded on first use
+            return True
+        return False
+    
     def recognize(self, audio_data):
         """Convert audio data to text"""
         logger.info(f"Processing speech recognition with {self.model_type} model")
-        # Return placeholder text for now
-        return "Hello EVE" 
+        
+        # Simple fallback implementation
+        if self.model_type == "simple":
+            # Just return a placeholder response
+            return "Hello EVE"
+            
+        # In a real implementation, we would use the actual model here
+        return "Speech recognition placeholder" 

@@ -104,7 +104,7 @@ class LCDController:
         logger.info("Loading display assets")
         
         # Check if assets directory exists
-        assets_dir = config.ASSETS_DIR / "emotions"
+        assets_dir = config.ASSETS_DIR
         if assets_dir.exists():
             # Load emotion images from files
             self._load_emotion_images(assets_dir)
@@ -126,8 +126,8 @@ class LCDController:
             for emotion in config.display.EMOTIONS:
                 # Look for common image formats
                 for ext in ['.png', '.jpg', '.jpeg', '.bmp']:
-                    image_path = assets_dir / f"{emotion}{ext}"
-                    if image_path.exists():
+                    image_path = os.path.join(assets_dir, "emotions", f"{emotion}{ext}")
+                    if os.path.exists(image_path):
                         # Load the image
                         image = pygame.image.load(str(image_path))
                         
