@@ -105,7 +105,7 @@ class LCDController:
         
         # Check if assets directory exists
         assets_dir = config.ASSETS_DIR
-        if assets_dir.exists():
+        if os.path.exists(assets_dir):
             # Load emotion images from files
             self._load_emotion_images(assets_dir)
         else:
@@ -529,3 +529,22 @@ class LCDController:
         
         # Update the display
         pygame.display.flip() 
+
+    def _create_default_assets(self):
+        """Create default assets for testing when real assets are not available"""
+        logger.info("Creating default assets")
+        # Create minimal assets in memory
+        import pygame
+        
+        # Create a simple background
+        self.background = pygame.Surface((800, 480))
+        self.background.fill((0, 0, 0))  # Black background
+        
+        # Create simple eye assets
+        self.eye = pygame.Surface((50, 50))
+        pygame.draw.circle(self.eye, (0, 191, 255), (25, 25), 25)
+        
+        # Add text
+        font = pygame.font.SysFont(None, 36)
+        text = font.render("EVE2 Default Display", True, (255, 255, 255))
+        self.background.blit(text, (400 - text.get_width() // 2, 50)) 

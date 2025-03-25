@@ -3,7 +3,8 @@ Speech system configuration for EVE2
 """
 
 # LLM Processing
-LLM_MODEL_TYPE = "simple"  # Add this line - options could be "simple", "openai", "huggingface", etc.
+LLM_MODEL_TYPE = "simple"
+LLM_MODEL_PATH = "models/llm/simple_model"
 LLM_API_KEY = ""
 LLM_MAX_TOKENS = 100
 LLM_TEMPERATURE = 0.7

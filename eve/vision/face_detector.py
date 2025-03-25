@@ -71,6 +71,18 @@ class FaceDetector:
         # Load known faces if directory is provided and recognition is enabled
         if self.recognition_enabled and self.known_faces_dir is not None:
             self._load_known_faces()
+        
+        # Create camera if not provided
+        if self.camera_index is None:
+            from eve.vision.camera import Camera
+            try:
+                self.camera = Camera(camera_index=config.hardware.CAMERA_INDEX)
+                logger.info("Camera initialized for face detection")
+            except Exception as e:
+                logger.error(f"Error initializing camera: {e}")
+                self.camera = MockCamera()  # Use a mock camera as fallback
+        else:
+            self.camera = None
     
     def _load_known_faces(self) -> None:
         """Load known faces from the specified directory."""
@@ -303,4 +315,45 @@ class FaceDetector:
             # Clear the queue to avoid processing old frames
             self.frame_queue.clear()
             
-            return frame, faces 
+            return frame, faces
+
+class MockCamera:
+    """Mock camera implementation for testing"""
+    def __init__(self):
+        self.frame_count = 0
+        logger.info("Initialized mock camera for face detection")
+        
+    def get_frame(self):
+        """Generate a mock frame for testing"""
+        self.frame_count += 1
+        
+        # Create a valid frame with test pattern
+        width, height = 640, 480
+        frame = np.zeros((height, width, 3), dtype=np.uint8)
+        
+        # Draw a moving circle as a "face"
+        center_x = width // 2 + int(100 * np.sin(self.frame_count / 30))
+        center_y = height // 2 + int(50 * np.cos(self.frame_count / 20))
+        
+        # Draw face
+        cv2.circle(frame, (center_x, center_y), 100, (200, 200, 200), -1)
+        
+        # Draw eyes
+        cv2.circle(frame, (center_x - 30, center_y - 20), 20, (255, 255, 255), -1)
+        cv2.circle(frame, (center_x + 30, center_y - 20), 20, (255, 255, 255), -1)
+        
+        # Draw mouth
+        cv2.ellipse(frame, (center_x, center_y + 30), (50, 20), 0, 0, 180, (255, 255, 255), -1)
+        
+        # Add text
+        cv2.putText(frame, f"Frame {self.frame_count}", (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        
+        # Simulate processing delay
+        time.sleep(0.05)
+        
+        return frame
+        
+    def release(self):
+        """Mock release method"""
+        pass 
