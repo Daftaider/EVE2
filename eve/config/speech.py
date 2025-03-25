@@ -8,6 +8,9 @@ RECOGNITION_TIMEOUT_SEC = 5.0
 SPEECH_RECOGNITION_MODEL = "google"  # Options: "google", "vosk", "whisper", "deepspeech"
 SPEECH_RECOGNITION_THRESHOLD = 0.7
 
+# Vosk speech recognition
+VOSK_MODEL_PATH = "models/vosk/vosk-model-small-en-us"  # Path to Vosk language model
+
 # Wake word detection
 WAKE_WORD_ENABLED = True
 WAKE_WORD = "hey eve"

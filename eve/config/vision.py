@@ -17,6 +17,7 @@ FACE_RECOGNITION_ENABLED = False
 FACE_RECOGNITION_MODEL = "facenet"
 FACE_RECOGNITION_THRESHOLD = 0.6
 FACE_DATABASE_PATH = "data/faces"
+KNOWN_FACES_DIR = "data/faces/known"  # Directory for storing known face encodings
 
 # Emotion detection settings
 EMOTION_DETECTION_ENABLED = True
