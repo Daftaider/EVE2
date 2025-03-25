@@ -10,8 +10,15 @@ DISTRIBUTED_MODE = False
 
 # Device capabilities (enable/disable hardware components)
 CAMERA_ENABLED = True
-MICROPHONE_ENABLED = True
-SPEAKER_ENABLED = True
+CAMERA_INDEX = 0  # For selecting specific camera device when multiple are available
+
+# Audio settings
+AUDIO_INPUT_ENABLED = True  # Microphone
+AUDIO_OUTPUT_ENABLED = True  # Speaker
+MICROPHONE_ENABLED = True    # Alternative name for backward compatibility
+SPEAKER_ENABLED = True       # Alternative name for backward compatibility
+
+# Display settings
 DISPLAY_ENABLED = True
 GPIO_ENABLED = True
 
@@ -48,8 +55,12 @@ DISPLAY_BRIGHTNESS = 80  # percentage
 # Camera settings
 CAMERA_TYPE = "picamera"
 CAMERA_ROTATION = 0
+CAMERA_RESOLUTION = (640, 480)
+CAMERA_FRAMERATE = 30
 
 # Audio settings
 AUDIO_INPUT_DEVICE = "default"
 AUDIO_OUTPUT_DEVICE = "default"
-AUDIO_VOLUME = 80  # percentage 
+AUDIO_VOLUME = 80  # percentage
+AUDIO_SAMPLE_RATE = 16000
+AUDIO_CHANNELS = 1 
