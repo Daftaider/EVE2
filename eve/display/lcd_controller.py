@@ -25,7 +25,8 @@ class LCDController:
     manages the rendering of emotive eye animations.
     """
     
-    def __init__(self, width=800, height=480, fullscreen=False, resolution=None, fps=30, default_emotion="neutral"):
+    def __init__(self, width=800, height=480, fullscreen=False, resolution=None, fps=30, 
+                 default_emotion="neutral", background_color=(0, 0, 0)):
         """
         Initialize the display controller
         
@@ -36,6 +37,7 @@ class LCDController:
             resolution (tuple): Optional (width, height) tuple
             fps (int): Target frames per second for the display
             default_emotion (str): Default emotion to display on startup
+            background_color (tuple): RGB color tuple for background (0-255 for each component)
         """
         # If resolution is provided, use it instead of width/height parameters
         if resolution and isinstance(resolution, tuple) and len(resolution) == 2:
@@ -47,9 +49,10 @@ class LCDController:
         self.fullscreen = fullscreen
         self.fps = fps
         self.default_emotion = default_emotion
+        self.background_color = background_color
         self.running = False
         self.render_thread = None
-        self.current_emotion = default_emotion  # Use the provided default
+        self.current_emotion = default_emotion
         self.emotion_images = {}
         self.logger = logging.getLogger(__name__)
         
@@ -258,19 +261,16 @@ class LCDController:
     
     def _render_loop(self) -> None:
         """Main rendering loop running in a separate thread."""
-        logger.info("Rendering loop started")
-        
-        while self.running:
-            try:
-                # Handle pygame events
+        self.logger.info("Rendering loop started")
+        try:
+            while self.running:
+                # Handle events
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         self.running = False
-                        break
-                    elif event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_ESCAPE and self.fullscreen:
-                            self.running = False
-                            break
+                
+                # Clear screen with the background color
+                self.screen.fill(self.background_color)
                 
                 # Update emotion transition
                 self._update_transition()
@@ -281,9 +281,9 @@ class LCDController:
                 # Cap the frame rate
                 self.clock.tick(self.fps)
             
-            except Exception as e:
-                logger.error(f"Error in rendering loop: {e}")
-                time.sleep(0.1)
+        except Exception as e:
+            logger.error(f"Error in rendering loop: {e}")
+            time.sleep(0.1)
         
         logger.info("Rendering loop stopped")
     
@@ -305,9 +305,6 @@ class LCDController:
     
     def _render_frame(self) -> None:
         """Render the current frame to the display."""
-        # Clear the screen
-        self.screen.fill(self.background_color)
-        
         if self.transition_progress < 1.0:
             # During transition, blend between current and target emotions
             if self.current_emotion in self.emotion_images and self.target_emotion in self.emotion_images:

@@ -46,39 +46,41 @@ class LLMProcessor:
         
         logger.info(f"Initializing LLM processor with model type: {self.model_type}")
         
-        # Only attempt to load the model if it's not "simple"
-        if self.model_type != "simple" and self.model_path:
-            try:
-                logger.info(f"Loading LLM model from {self.model_path}")
-                
-                # Check for CUDA availability
-                try:
-                    import torch
-                    if torch.cuda.is_available():
-                        self.device = "cuda"
-                        logger.info("Using CUDA for inference")
-                    else:
-                        self.device = "cpu"
-                        logger.info("CUDA is not available, using CPU for inference")
-                except ImportError:
-                    self.device = "cpu"
-                    logger.info("PyTorch not available, using CPU for inference")
-                
-                # Try to load the model - this is just a placeholder
-                if not os.path.exists(self.model_path):
-                    logger.error(f"Failed to load LLM model: Failed to load model from file: {self.model_path}")
-                    self.model_type = "simple"  # Fall back to simple model
-                else:
-                    # This would be real model loading code
-                    self.model = "loaded_model"
-            except Exception as e:
-                logger.error(f"Failed to load LLM model: {e}")
-                self.model_type = "simple"  # Fall back to simple model
-        
-        # Always initialize a simple model as fallback
+        # For simple model, just initialize the basic version and don't try to load anything
         if self.model_type == "simple":
-            self.model = "simple_model"
+            self.model = "simple_model"  # Just a placeholder
             logger.info("Using simple LLM model (rule-based responses)")
+            return
+        
+        # Only attempt to load external models for non-simple types
+        try:
+            logger.info(f"Loading LLM model from {self.model_path}")
+            
+            # Check for CUDA availability
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    self.device = "cuda"
+                    logger.info("Using CUDA for inference")
+                else:
+                    self.device = "cpu"
+                    logger.info("CUDA is not available, using CPU for inference")
+            except ImportError:
+                self.device = "cpu"
+                logger.info("PyTorch not available, using CPU for inference")
+            
+            # Try to load the model
+            if not os.path.exists(self.model_path):
+                logger.error(f"Failed to load LLM model: Failed to load model from file: {self.model_path}")
+                self.model_type = "simple"
+                self.model = "simple_model"  # Fall back to simple model
+            else:
+                # This would be real model loading code
+                self.model = "loaded_model"
+        except Exception as e:
+            logger.error(f"Failed to load LLM model: {e}")
+            self.model_type = "simple" 
+            self.model = "simple_model"  # Fall back to simple model
         
         # State
         self.is_running = False

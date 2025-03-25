@@ -32,18 +32,20 @@ class TextToSpeech:
     that can run efficiently on Raspberry Pi hardware.
     """
     
-    def __init__(self, voice=None, rate=1.0, pitch=1.0, volume=1.0, engine=None):
+    def __init__(self, voice=None, rate=1.0, pitch=1.0, volume=1.0, engine=None, voice_id=None):
         """
         Initialize text to speech synthesizer
         
         Args:
-            voice (str): Voice ID or name to use
+            voice (str): Voice name to use
+            voice_id (str): Alternative voice identifier (used by some engines)
             rate (float): Speech rate (1.0 is normal speed)
             pitch (float): Voice pitch (1.0 is normal pitch)
             volume (float): Audio volume (0.0-1.0)
             engine (str): TTS engine to use ('pyttsx3', 'espeak', etc.)
         """
         self.voice = voice
+        self.voice_id = voice_id or voice  # Use voice as fallback if voice_id not provided
         self.rate = rate
         self.pitch = pitch
         self.volume = volume
@@ -61,8 +63,10 @@ class TextToSpeech:
             try:
                 import pyttsx3
                 self.tts_engine = pyttsx3.init()
-                if self.voice:
-                    self.tts_engine.setProperty('voice', self.voice)
+                # Use voice_id if available, otherwise use voice
+                voice_to_use = self.voice_id if self.voice_id else self.voice
+                if voice_to_use:
+                    self.tts_engine.setProperty('voice', voice_to_use)
                 self.tts_engine.setProperty('rate', int(self.rate * 200))  # Base rate is around 200
                 self.tts_engine.setProperty('volume', self.volume)
                 logger.info("Initialized pyttsx3 engine")
