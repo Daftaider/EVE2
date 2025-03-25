@@ -39,7 +39,9 @@ class SpeechRecognizer:
         silence_duration_sec: float = 1.5,
         vad_threshold: float = 0.3,
         callback: Optional[Callable[[str, float], None]] = None,
-        model_type: Optional[str] = None
+        model_type: Optional[str] = None,
+        vosk_model_path: Optional[str] = None,
+        whisper_model_name: Optional[str] = None
     ):
         """
         Initialize the speech recognizer.
@@ -56,6 +58,8 @@ class SpeechRecognizer:
             vad_threshold: Voice activity detection threshold.
             callback: Callback function to be called when speech is recognized.
             model_type: The type of speech recognition model to use ('google', 'vosk', 'whisper', etc.)
+            vosk_model_path: Path to Vosk model directory
+            whisper_model_name: Name of Whisper model to use
         """
         logger.info("Initializing speech recognizer")
         
@@ -71,6 +75,8 @@ class SpeechRecognizer:
         self.vad_threshold = vad_threshold
         self.callback = callback
         self.model_type = model_type or "default"
+        self.vosk_model_path = vosk_model_path
+        self.whisper_model_name = whisper_model_name
         
         # Internal state
         self.is_running = False
@@ -94,6 +100,12 @@ class SpeechRecognizer:
             self._load_model()
         else:
             logger.error(f"Model file not found: {self.model_path}")
+        
+        logger.info(f"Initializing speech recognizer with model type: {self.model_type}")
+        if self.model_type == "vosk" and self.vosk_model_path:
+            logger.info(f"Using Vosk model at: {self.vosk_model_path}")
+        elif self.model_type == "whisper" and self.whisper_model_name:
+            logger.info(f"Using Whisper model: {self.whisper_model_name}")
     
     def _load_model(self):
         """Load the Whisper speech recognition model."""

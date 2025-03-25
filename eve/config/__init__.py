@@ -31,6 +31,7 @@ class ConfigContainer:
         self.LOG_LEVEL = "INFO"
         self.PROJECT_NAME = "EVE2"
         self.SAVE_PATH = "data/"
+        self.ASSETS_DIR = "assets/"
 
 # Create the config instance
 config = ConfigContainer()

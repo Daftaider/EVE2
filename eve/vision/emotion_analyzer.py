@@ -83,8 +83,21 @@ class EmotionAnalyzer:
     This class uses the FER library to detect emotions from facial images.
     """
     
-    def __init__(self):
+    def __init__(self, confidence_threshold=0.5, detection_interval=1.0, model_type=None):
+        """
+        Initialize emotion analyzer
+        
+        Args:
+            confidence_threshold (float): Minimum confidence threshold for emotions (0.0-1.0)
+            detection_interval (float): Time between emotion detections in seconds
+            model_type (str): Type of emotion detection model to use
+        """
+        self.confidence_threshold = confidence_threshold
+        self.detection_interval = detection_interval
+        self.model_type = model_type
         self.emotions = ["neutral", "happy", "sad", "surprise", "angry"]
+        
+        logger.info(f"Initializing EmotionAnalyzer with confidence threshold: {confidence_threshold}")
         
         if USE_FER:
             try:
@@ -173,8 +186,8 @@ class EmotionAnalyzer:
             emotion, score = max_emotion
             
             # Check if the confidence exceeds the threshold
-            if score < 0.5:
-                logger.debug(f"Emotion confidence ({score:.2f}) below threshold (0.5)")
+            if score < self.confidence_threshold:
+                logger.debug(f"Emotion confidence ({score:.2f}) below threshold ({self.confidence_threshold})")
                 return None
             
             logger.debug(f"Detected emotion: {emotion} with confidence: {score:.2f}")
