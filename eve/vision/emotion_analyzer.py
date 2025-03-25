@@ -53,7 +53,8 @@ def setup_dependency_mocks():
         # Create class with make_predict_function method
         class MockModel:
             def __init__(self):
-                pass
+                self.input_shape = (1, 48, 48, 1)  # Add input_shape attribute
+                self.output_shape = (1, 7)
             
             def make_predict_function(self):
                 pass

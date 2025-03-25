@@ -170,28 +170,39 @@ class FaceDetector:
     
     def _detection_loop(self) -> None:
         """Main detection loop running in a separate thread."""
-        logger.info("Face detection loop started")
-        
-        # Calculate frame interval based on target FPS
-        frame_interval = 1.0 / self.fps
-        
-        # Define detection interval based on config
         detection_interval = config.vision.FACE_DETECTION_INTERVAL_SEC
         
         while self.running:
             try:
                 # Get a frame from the camera
                 frame = self.video_capture.read()
-                if frame is None:
-                    logger.warning("Failed to capture frame")
-                    time.sleep(detection_interval)  # Wait before trying again
+                
+                # Check if frame is valid before processing
+                if frame is None or not isinstance(frame, np.ndarray) or frame.size == 0:
+                    logger.warning("Invalid or empty frame received")
+                    time.sleep(detection_interval)
                     continue
+                
+                # Make a copy to avoid potential reference issues
+                frame_copy = frame.copy()
+                
+                # Verify frame dimensions
+                if len(frame_copy.shape) < 2:
+                    logger.error(f"Invalid frame shape: {frame_copy.shape}")
+                    time.sleep(detection_interval)
+                    continue
+                
+                # Convert to grayscale for face detection if needed
+                if len(frame_copy.shape) == 3:  # Color image
+                    gray = cv2.cvtColor(frame_copy, cv2.COLOR_BGR2GRAY)
+                else:  # Already grayscale
+                    gray = frame_copy
                 
                 # Detect faces at regular intervals
                 current_time = time.time()
                 if current_time - self.last_detection_time >= detection_interval:
                     # Detect faces in the current frame
-                    faces = self._detect_faces(frame)
+                    faces = self._detect_faces(gray)
                     self.last_detection_time = current_time
                 else:
                     # Reuse the last detected faces
@@ -200,18 +211,10 @@ class FaceDetector:
                 # Add the frame and faces to the queue
                 with self.frame_lock:
                     self.frame_queue.append((frame, faces))
-                
-                # Calculate time elapsed and sleep if necessary to maintain target FPS
-                elapsed = time.time() - loop_start_time
-                sleep_time = max(0, frame_interval - elapsed)
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
             
             except Exception as e:
                 logger.error(f"Error in face detection loop: {e}")
                 time.sleep(detection_interval)
-        
-        logger.info("Face detection loop stopped")
     
     def _detect_faces(self, frame: np.ndarray) -> List[Dict[str, Any]]:
         """

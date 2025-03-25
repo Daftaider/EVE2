@@ -39,7 +39,9 @@ CAMERA_EXPOSURE_MODE = "auto"
 
 # Audio hardware settings
 AUDIO_INPUT_DEVICE = "default"
+audio_input_device = "default"  # Add lowercase version for compatibility
 AUDIO_OUTPUT_DEVICE = "default"
+audio_output_device = "default"  # Add lowercase version for compatibility
 AUDIO_VOLUME = 80  # percentage
 AUDIO_SAMPLE_RATE = 16000
 AUDIO_CHANNELS = 1
