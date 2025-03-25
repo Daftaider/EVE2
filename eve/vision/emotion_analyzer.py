@@ -19,34 +19,61 @@ import importlib
 # Set up logger first, before using it
 logger = logging.getLogger(__name__)
 
-# Create more sophisticated mocks for TensorFlow and FER
-if 'tensorflow' not in sys.modules:
-    tf_module = types.ModuleType('tensorflow')
-    keras_module = types.ModuleType('tensorflow.keras')
-    models_module = types.ModuleType('tensorflow.keras.models')
+# Define the setup_dependency_mocks function that was missing
+def setup_dependency_mocks():
+    """Set up mock implementations for dependencies like moviepy and tensorflow"""
+    # Create moviepy mock
+    if 'moviepy' not in sys.modules:
+        moviepy_module = types.ModuleType('moviepy')
+        sys.modules['moviepy'] = moviepy_module
     
-    # Create class with make_predict_function method
-    class MockModel:
-        def __init__(self):
-            pass
+        editor_module = types.ModuleType('moviepy.editor')
+        sys.modules['moviepy.editor'] = editor_module
+        sys.modules['moviepy'].editor = editor_module
         
-        def make_predict_function(self):
-            pass
+        class MockVideoFileClip:
+            def __init__(self, *args, **kwargs):
+                pass
+            def close(self):
+                pass
+            def subclip(self, *args, **kwargs):
+                return self
+            def resize(self, *args, **kwargs):
+                return self
+        
+        editor_module.VideoFileClip = MockVideoFileClip
+        editor_module.__all__ = ['VideoFileClip']
+    
+    # Create tensorflow mock
+    if 'tensorflow' not in sys.modules:
+        tf_module = types.ModuleType('tensorflow')
+        keras_module = types.ModuleType('tensorflow.keras')
+        models_module = types.ModuleType('tensorflow.keras.models')
+        
+        # Create class with make_predict_function method
+        class MockModel:
+            def __init__(self):
+                pass
             
-        def predict(self, *args, **kwargs):
-            return np.zeros((1, 7))  # Return empty emotion predictions
+            def make_predict_function(self):
+                pass
+                
+            def predict(self, *args, **kwargs):
+                return np.zeros((1, 7))  # Return empty emotion predictions
+        
+        def load_model(*args, **kwargs):
+            return MockModel()
+        
+        models_module.load_model = load_model
+        sys.modules['tensorflow'] = tf_module
+        sys.modules['tensorflow.keras'] = keras_module
+        sys.modules['tensorflow.keras.models'] = models_module
+        tf_module.keras = keras_module
+        keras_module.models = models_module
     
-    def load_model(*args, **kwargs):
-        return MockModel()
-    
-    models_module.load_model = load_model
-    sys.modules['tensorflow'] = tf_module
-    sys.modules['tensorflow.keras'] = keras_module
-    sys.modules['tensorflow.keras.models'] = models_module
-    tf_module.keras = keras_module
-    keras_module.models = models_module
+    logger.info("Mock dependencies set up successfully")
 
-# Set up our mocks BEFORE any imports
+# Call the function to set up mocks
 setup_dependency_mocks()
 
 # Now try to import FER
@@ -83,11 +110,10 @@ class EmotionAnalyzer:
         logger.info(f"Initializing EmotionAnalyzer with confidence threshold: {confidence_threshold}")
         
         try:
-            from fer import FER
             self.detector = FER()
-            logger.info("Successfully initialized FER")
+            logger.info("Successfully initialized FER detector")
         except Exception as e:
-            logger.error(f"Failed to initialize FER: {e}")
+            logger.error(f"Failed to initialize FER detector: {e}")
             logger.info("Using fallback emotion detection")
             self.detector = None
     
