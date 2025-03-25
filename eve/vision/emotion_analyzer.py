@@ -12,6 +12,16 @@ from fer import FER
 
 from eve import config
 
+import sys
+import types
+
+# Create a mock for moviepy.editor if it's missing
+if 'moviepy.editor' not in sys.modules:
+    mock_module = types.ModuleType('moviepy.editor')
+    sys.modules['moviepy.editor'] = mock_module
+    sys.modules['moviepy'] = types.ModuleType('moviepy')
+    sys.modules['moviepy'].editor = mock_module
+
 logger = logging.getLogger(__name__)
 
 class EmotionAnalyzer:
