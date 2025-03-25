@@ -11,6 +11,9 @@ SPEECH_RECOGNITION_THRESHOLD = 0.7
 # Vosk speech recognition
 VOSK_MODEL_PATH = "models/vosk/vosk-model-small-en-us"  # Path to Vosk language model
 
+# Whisper speech recognition
+WHISPER_MODEL_NAME = "tiny"  # Add this line - options: "tiny", "base", "small", "medium", "large"
+
 # Wake word detection
 WAKE_WORD_ENABLED = True
 WAKE_WORD = "hey eve"

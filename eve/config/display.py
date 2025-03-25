@@ -24,6 +24,7 @@ DISPLAY_HEIGHT = 480
 BACKGROUND_COLOR = (0, 0, 0)  # Black background
 TEXT_COLOR = (255, 255, 255)  # White text
 ACCENT_COLOR = (0, 120, 215)  # Blue accent
+EYE_COLOR = (0, 191, 255)  # Deep Sky Blue for eyes
 
 # Animation settings
 ANIMATION_FPS = 30
