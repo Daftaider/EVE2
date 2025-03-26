@@ -47,6 +47,8 @@ class LCDController:
         self.render_thread = None
         self.use_fallback = headless  # Start in fallback mode if headless
         self.emotion_images = {}
+        self.clock = None
+        self.screen = None
         
         # Initialize pygame in headless mode if specified
         self._init_display()
@@ -80,7 +82,7 @@ class LCDController:
             return pygame.image.fromstring(data, size, mode)
             
         except Exception as e:
-            self.logger.error(f"Error generating default emotion: {e}")
+            self.logger.error("Error generating default emotion: {}".format(str(e)))
             # Return a simple colored surface as last resort
             surface = pygame.Surface((self.width, self.height))
             surface.fill(self.background_color)
@@ -100,26 +102,26 @@ class LCDController:
             
             # Load or generate each emotion
             for emotion in basic_emotions:
-                image_path = os.path.join(assets_path, f"{emotion}.png")
+                image_path = os.path.join(assets_path, "{}.png".format(emotion))
                 
                 if os.path.exists(image_path):
                     try:
                         self.emotion_images[emotion] = pygame.image.load(image_path)
                     except pygame.error:
-                        self.logger.warning(f"Failed to load image for emotion: {emotion}, generating default")
+                        self.logger.warning("Failed to load image for emotion: {}".format(emotion))
                         self.emotion_images[emotion] = self._generate_default_emotion()
                 else:
-                    self.logger.warning(f"No image found for emotion: {emotion}, generating default")
+                    self.logger.warning("No image found for emotion: {}".format(emotion))
                     self.emotion_images[emotion] = self._generate_default_emotion()
                     
                     # Save generated emotion for future use
                     try:
                         pygame.image.save(self.emotion_images[emotion], image_path)
                     except pygame.error as e:
-                        self.logger.warning(f"Could not save generated emotion: {e}")
+                        self.logger.warning("Could not save generated emotion: {}".format(str(e)))
                         
         except Exception as e:
-            self.logger.error(f"Error loading assets: {e}")
+            self.logger.error("Error loading assets: {}".format(str(e)))
             # Ensure at least neutral emotion exists
             self.emotion_images['neutral'] = self._generate_default_emotion()
 
@@ -149,17 +151,14 @@ class LCDController:
                         self.screen = pygame.display.set_mode((self.width, self.height))
                     pygame.display.set_caption("EVE2 Display")
                 except pygame.error:
-                    self.logger.warning("Failed to initialize hardware-accelerated display, using software rendering")
-                    # Try software rendering
-                    os.environ['SDL_VIDEODRIVER'] = 'x11'
-                    pygame.display.quit()
-                    pygame.display.init()
-                    self.screen = pygame.display.set_mode((self.width, self.height), pygame.SWSURFACE)
+                    self.logger.warning("Failed to initialize hardware-accelerated display")
+                    self.use_fallback = True
+                    self.screen = pygame.Surface((self.width, self.height))
             
             self.clock = pygame.time.Clock()
             
         except Exception as e:
-            self.logger.error(f"Display initialization error: {e}")
+            self.logger.error("Display initialization error: {}".format(str(e)))
             self.use_fallback = True
             self.screen = pygame.Surface((self.width, self.height))
             pygame.init()
@@ -171,7 +170,7 @@ class LCDController:
             self.render_thread = threading.Thread(target=self._render_loop)
             self.render_thread.daemon = True
             self.render_thread.start()
-            self.logger.info(f"Display controller started in {'headless' if self.use_fallback else 'display'} mode")
+            self.logger.info("Display controller started")
 
     def stop(self):
         """Stop the display controller"""
@@ -188,18 +187,19 @@ class LCDController:
     def set_emotion(self, emotion):
         """Set the current emotion to display"""
         if emotion not in self.emotion_images:
-            self.logger.warning(f"Unknown emotion: {emotion}, using neutral")
+            self.logger.warning("Unknown emotion: {}, using neutral".format(emotion))
             emotion = 'neutral'
         self.target_emotion = emotion
         self.current_emotion = emotion
         
         if self.use_fallback:
-            self.logger.debug(f"Emotion set to {emotion} (headless mode)")
+            self.logger.debug("Emotion set to {} (headless mode)".format(emotion))
         return True
 
     def _render_loop(self):
         """Main rendering loop with headless mode support"""
-        self.logger.info(f"Starting render loop in {'headless' if self.use_fallback else 'display'} mode")
+        self.logger.info("Starting render loop in {} mode".format(
+            'headless' if self.use_fallback else 'display'))
         last_state_log = 0
         state_log_interval = 5.0  # Log state every 5 seconds in headless mode
         
@@ -221,17 +221,18 @@ class LCDController:
                     try:
                         pygame.display.flip()
                     except pygame.error as e:
-                        self.logger.debug(f"Display update failed (expected in headless mode): {e}")
+                        self.logger.debug("Display update failed: {}".format(str(e)))
                         self.use_fallback = True
                 elif current_time - last_state_log >= state_log_interval:
-                    self.logger.debug(f"Headless mode - Current emotion: {self.current_emotion}")
+                    self.logger.debug("Headless mode - Current emotion: {}".format(
+                        self.current_emotion))
                     last_state_log = current_time
                 
                 # Maintain frame rate
                 self.clock.tick(self.fps)
                 
             except Exception as e:
-                self.logger.error(f"Render loop error: {e}")
+                self.logger.error("Render loop error: {}".format(str(e)))
                 time.sleep(1)  # Prevent tight error loop
 
     def _render_current_state(self):
@@ -243,7 +244,10 @@ class LCDController:
                 y = (self.height - image.get_height()) // 2
                 self.screen.blit(image, (x, y))
         except Exception as e:
-            self.logger.debug(f"Error rendering emotion (expected in headless mode): {e}")
+            self.logger.debug("Error rendering emotion: {}".format(str(e)))
+
+    def is_active(self):
+        return self.running and self.render_thread and self.render_thread.is_alive()
 
     def _create_default_assets(self):
         """Create default assets for testing when real assets are not available"""
