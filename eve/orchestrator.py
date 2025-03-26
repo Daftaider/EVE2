@@ -102,25 +102,19 @@ class EVEOrchestrator:
         """Initialize all subsystems with proper error handling"""
         # Initialize speech subsystem
         try:
-            # Create speech configuration dictionary
-            speech_params = {
-                'sample_rate': getattr(speech_config, 'SAMPLE_RATE', 16000),
-                'channels': getattr(speech_config, 'CHANNELS', 1),
-                'chunk_size': getattr(speech_config, 'CHUNK_SIZE', 1024),
-                'threshold': getattr(speech_config, 'THRESHOLD', 0.01)
-            }
+            # Initialize audio capture with direct parameters
+            self.audio_capture = AudioCapture(
+                sample_rate=getattr(speech_config, 'SAMPLE_RATE', 16000),
+                channels=getattr(speech_config, 'CHANNELS', 1),
+                chunk_size=getattr(speech_config, 'CHUNK_SIZE', 1024),
+                threshold=getattr(speech_config, 'THRESHOLD', 0.01)
+            )
             
-            # Initialize audio capture
-            self.audio_capture = AudioCapture(**speech_params)
-            
-            # Get model type if available
-            model_type = getattr(speech_config, 'MODEL_TYPE', 'google')
-            
-            # Initialize speech recognizer
+            # Initialize speech recognizer with direct module
             self.speech_recognizer = SpeechRecognizer(
-                config=speech_config,
+                config=speech_config,  # Pass the module directly
                 post_event_callback=self.post_event,
-                model_type=model_type
+                model_type=getattr(speech_config, 'MODEL_TYPE', 'google')
             )
             
             self.logger.info("Speech subsystem initialized successfully")
@@ -378,9 +372,15 @@ class Event:
         self.data = data
         self.timestamp = time.time()
 
-def create_orchestrator() -> EVEOrchestrator:
-    """Create and return an Orchestrator instance."""
-    return EVEOrchestrator()
+def create_orchestrator():
+    """Create and initialize an EVE orchestrator instance"""
+    try:
+        # Create orchestrator with flat configuration
+        orchestrator = EVEOrchestrator()
+        return orchestrator
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Error creating orchestrator: {e}")
+        raise
 
 
 if __name__ == "__main__":

@@ -76,7 +76,7 @@ class SpeechRecognizer:
         """Initialize the speech recognizer
         
         Args:
-            config: Configuration object or dictionary
+            config: Configuration object or module
             post_event_callback: Callback for posting events
             model_type: Type of speech recognition model to use (google, coqui, etc.)
             **kwargs: Additional configuration parameters
@@ -85,27 +85,21 @@ class SpeechRecognizer:
         self.post_event = post_event_callback
         self.running = False
         
-        # Handle model_type parameter
-        self.model_type = model_type
-        if self.model_type is None and config is not None:
-            if isinstance(config, dict):
-                self.model_type = config.get('MODEL_TYPE', 'google')
-            else:
-                self.model_type = getattr(config, 'MODEL_TYPE', 'google')
+        # Initialize with default values
+        self.model_type = model_type or "google"
+        self.min_confidence = 0.6
+        self.sample_rate = 16000
+        self.model_path = None
+        
+        # Update from config if provided
+        if config is not None:
+            # Handle both module and object configurations
+            self.model_type = getattr(config, 'MODEL_TYPE', self.model_type)
+            self.min_confidence = getattr(config, 'MIN_CONFIDENCE', self.min_confidence)
+            self.sample_rate = getattr(config, 'SAMPLE_RATE', self.sample_rate)
+            self.model_path = getattr(config, 'RECOGNITION_MODEL_PATH', self.model_path)
         
         self.logger.info(f"Initializing speech recognizer with model type: {self.model_type}")
-        
-        # Extract configuration parameters
-        if config is None:
-            config = {}
-            
-        # Get configuration values with defaults
-        if isinstance(config, dict):
-            self.min_confidence = config.get('MIN_CONFIDENCE', 0.6)
-            self.sample_rate = config.get('SAMPLE_RATE', 16000)
-        else:  # Assume it's an object with attributes
-            self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.6)
-            self.sample_rate = getattr(config, 'SAMPLE_RATE', 16000)
         
         # Initialize mock responses
         self.mock_responses = [
@@ -119,7 +113,6 @@ class SpeechRecognizer:
         self.logger.info("Speech recognizer initialized in mock mode")
         
         # Configuration
-        self.model_path = config.speech.recognition_model if hasattr(config, 'recognition_model') else None
         self.threshold = config.speech.recognition_threshold if hasattr(config, 'recognition_threshold') else 0.5
         self.language = config.speech.language if hasattr(config, 'language') else "en"
         self.device_index = config.hardware.audio_input_device if hasattr(config, 'hardware') and hasattr(config.hardware, 'audio_input_device') else None
@@ -456,10 +449,11 @@ class SpeechRecognizer:
         return self.running
 
     def get_status(self):
-        """Get current status of the recognizer"""
+        """Get the current status of the recognizer"""
         return {
             'running': self.running,
             'mock_mode': True,
+            'model_type': self.model_type,
             'timestamp': time.time()
         }
 
