@@ -42,80 +42,67 @@ class LCDController:
             eye_color (tuple): RGB color tuple for eyes
             transition_time_ms (int): Time in milliseconds for emotion transitions
         """
-        # If resolution is provided, use it instead of width/height parameters
-        if resolution and isinstance(resolution, tuple) and len(resolution) == 2:
-            self.width, self.height = resolution
-        else:
-            self.width = width
-            self.height = height
-        
+        self.logger = logging.getLogger(__name__)
+        self.width = width
+        self.height = height
         self.fullscreen = fullscreen
         self.fps = fps
-        self.default_emotion = default_emotion
         self.background_color = background_color
         self.eye_color = eye_color
         self.transition_time_ms = transition_time_ms
-        self.current_transition = None
-        self.transition_start_time = 0
-        
-        self.running = False
-        self.render_thread = None
         self.current_emotion = default_emotion
         self.target_emotion = default_emotion
-        self.emotion_images = {}
-        self.logger = logging.getLogger(__name__)
         
-        # Initialize pygame with software rendering fallback
-        self._init_pygame()
+        # Initialize state
+        self.running = False
+        self.render_thread = None
+        self.use_fallback = False
+        self.gl_context_error_count = 0
+        self.max_gl_errors = 3  # Switch to fallback after this many errors
         
-        # Load display assets
-        self._load_assets()
+        # Try to initialize display
+        self._init_display()
         
-    def _init_pygame(self) -> None:
-        """Initialize pygame with fallback options"""
+    def _init_display(self):
+        """Initialize display with fallback options"""
         try:
-            logger.info("Initializing pygame")
+            # Try SDL video driver first
+            os.environ['SDL_VIDEODRIVER'] = 'x11'
             pygame.init()
-            
-            # Try to set hardware acceleration first
+            pygame.display.init()
+        except pygame.error:
+            self.logger.warning("Failed to initialize X11 display, trying dummy driver")
             try:
-                # Set the SDL_VIDEODRIVER environment variable to 'x11' for Raspberry Pi
-                os.environ['SDL_VIDEODRIVER'] = 'x11'
-                
-                # Try to create the display
-                flags = pygame.HWSURFACE | pygame.DOUBLEBUF
-                if self.fullscreen:
-                    flags |= pygame.FULLSCREEN
-                    
-                self.screen = pygame.display.set_mode((self.width, self.height), flags)
-                logger.info("Using hardware accelerated rendering")
-                
+                # Try dummy driver as fallback
+                os.environ['SDL_VIDEODRIVER'] = 'dummy'
+                pygame.init()
+                pygame.display.init()
+                self.use_fallback = True
             except pygame.error as e:
-                logger.warning(f"Hardware acceleration failed: {e}")
-                
-                # Fall back to software rendering
-                os.environ['SDL_VIDEODRIVER'] = 'fbcon'  # Try framebuffer console
-                try:
-                    flags = pygame.SWSURFACE
-                    if self.fullscreen:
-                        flags |= pygame.FULLSCREEN
-                    self.screen = pygame.display.set_mode((self.width, self.height), flags)
-                    logger.info("Using framebuffer console rendering")
-                except pygame.error:
-                    # Final fallback - dummy display
-                    os.environ['SDL_VIDEODRIVER'] = 'dummy'
+                self.logger.error(f"Failed to initialize display: {e}")
+                self.use_fallback = True
+                return
+
+        try:
+            if not self.use_fallback:
+                # Try to set up the display
+                if self.fullscreen:
+                    self.screen = pygame.display.set_mode((self.width, self.height), 
+                                                        pygame.FULLSCREEN | pygame.HWSURFACE)
+                else:
                     self.screen = pygame.display.set_mode((self.width, self.height))
-                    logger.warning("Using dummy display driver - no visible output")
+                
+                pygame.display.set_caption("EVE2 Display")
+            else:
+                # Create a surface for fallback mode
+                self.screen = pygame.Surface((self.width, self.height))
             
-            pygame.display.set_caption("EVE2")
             self.clock = pygame.time.Clock()
-            self.font = pygame.font.SysFont(None, 36)
-            logger.info("Pygame initialized successfully")
-            
+            self._load_assets()
         except Exception as e:
-            logger.error(f"Failed to initialize pygame: {e}")
-            raise
-    
+            self.logger.error(f"Display initialization error: {e}")
+            self.use_fallback = True
+        
     def _load_assets(self) -> None:
         """Load emotion assets or generate default ones."""
         logger.info("Loading display assets")
@@ -269,74 +256,65 @@ class LCDController:
         return True
     
     def _render_loop(self) -> None:
-        """Main rendering loop running in a separate thread."""
-        self.logger.info("Rendering loop started")
-        try:
-            while self.running:
-                # Handle events
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        self.running = False
+        """Main rendering loop with error handling and fallback mode"""
+        self.logger.info("Starting render loop")
+        last_error_time = 0
+        error_cooldown = 5  # Seconds between logging repeated errors
+        
+        while self.running:
+            try:
+                # Process events only in non-fallback mode
+                if not self.use_fallback:
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
+                            self.running = False
                 
-                # Clear screen with the background color
+                # Clear screen
                 self.screen.fill(self.background_color)
                 
-                # Handle emotion transitions
-                current_time = pygame.time.get_ticks()
-                if self.current_transition:
-                    progress = (current_time - self.transition_start_time) / self.transition_time_ms
-                    if progress >= 1.0:
-                        # Transition complete
-                        self.current_emotion = self.target_emotion
-                        self.current_transition = None
-                    else:
-                        # Render transition
-                        self._render_transition(progress)
+                # Render current emotion
+                self._render_current_state()
+                
+                # Update display with error handling
+                if not self.use_fallback:
+                    try:
+                        pygame.display.flip()
+                    except pygame.error as e:
+                        current_time = time.time()
+                        if current_time - last_error_time > error_cooldown:
+                            self.logger.error(f"Error updating display: {e}")
+                            last_error_time = current_time
+                            self.gl_context_error_count += 1
+                            
+                        if self.gl_context_error_count >= self.max_gl_errors:
+                            self.logger.warning("Too many GL errors, switching to fallback mode")
+                            self.use_fallback = True
                 else:
-                    # Render current emotion
-                    self._render_emotion(self.current_emotion)
+                    # In fallback mode, just log the current state periodically
+                    if time.time() - last_error_time > error_cooldown:
+                        self.logger.info(f"Fallback mode active - Current emotion: {self.current_emotion}")
+                        last_error_time = time.time()
                 
-                # Update display
-                try:
-                    pygame.display.flip()
-                except pygame.error as e:
-                    self.logger.error(f"Error updating display: {e}")
-                
-                # Cap at specified FPS
+                # Maintain frame rate
                 self.clock.tick(self.fps)
-            
+                
+            except Exception as e:
+                current_time = time.time()
+                if current_time - last_error_time > error_cooldown:
+                    self.logger.error(f"Render loop error: {e}")
+                    last_error_time = current_time
+    
+    def _render_current_state(self):
+        """Render the current display state"""
+        try:
+            if self.current_emotion in self.emotion_images:
+                image = self.emotion_images[self.current_emotion]
+                if not self.use_fallback:
+                    x = (self.width - image.get_width()) // 2
+                    y = (self.height - image.get_height()) // 2
+                    self.screen.blit(image, (x, y))
         except Exception as e:
-            self.logger.error(f"Error in rendering loop: {e}")
-        
-        self.logger.info("Rendering loop stopped")
-    
-    def _render_transition(self, progress):
-        """Render transition between emotions"""
-        if self.current_emotion in self.emotion_images and self.target_emotion in self.emotion_images:
-            current_img = self.emotion_images[self.current_emotion]
-            target_img = self.emotion_images[self.target_emotion]
-            
-            # Create transition surface
-            transition = pygame.Surface((current_img.get_width(), current_img.get_height()))
-            transition.fill(self.background_color)
-            
-            # Blend images based on progress
-            transition.blit(current_img, (0, 0))
-            target_img.set_alpha(int(255 * progress))
-            transition.blit(target_img, (0, 0))
-            
-            # Draw to screen
-            x = (self.width - transition.get_width()) // 2
-            y = (self.height - transition.get_height()) // 2
-            self.screen.blit(transition, (x, y))
-    
-    def _render_emotion(self, emotion: str) -> None:
-        """Render the current emotion to the display."""
-        if emotion in self.emotion_images:
-            self.screen.blit(self.emotion_images[emotion], (0, 0))
-        else:
-            # Fallback if image is missing
-            self._generate_emotion_image(emotion)
+            self.logger.error(f"Error rendering emotion: {e}")
 
     def _create_default_assets(self):
         """Create default assets for testing when real assets are not available"""
