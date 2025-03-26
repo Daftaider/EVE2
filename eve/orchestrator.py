@@ -84,7 +84,7 @@ class EVEOrchestrator:
         return DefaultConfig()
 
     def _init_subsystems(self) -> None:
-        """Initialize all subsystems based on configuration."""
+        """Initialize all subsystems with proper error handling"""
         role = config.hardware.ROLE.lower()
         
         # Check if we're in distributed mode
@@ -156,22 +156,31 @@ class EVEOrchestrator:
         
         logger.info("Initializing speech subsystem")
         try:
-            # Initialize audio capture if input is enabled
-            if config.hardware.AUDIO_INPUT_ENABLED:
-                self.audio_capture = speech_recorder.AudioCapture(
-                    device_index=config.hardware.AUDIO_INPUT_DEVICE,
-                    sample_rate=config.hardware.AUDIO_SAMPLE_RATE
-                )
-                
-                # Initialize speech recognizer
-                self.speech_recognizer = speech_recognizer.SpeechRecognizer(
-                    model_type=config.speech.SPEECH_RECOGNITION_MODEL,
-                    vosk_model_path=config.speech.VOSK_MODEL_PATH,
-                    whisper_model_name=config.speech.WHISPER_MODEL_NAME
-                )
-            else:
-                self.audio_capture = None
-                self.speech_recognizer = None
+            # Create speech configuration dictionary for components that need it
+            speech_config = {
+                'sample_rate': getattr(self.config.speech, 'SAMPLE_RATE', 16000),
+                'channels': getattr(self.config.speech, 'CHANNELS', 1),
+                'chunk_size': getattr(self.config.speech, 'CHUNK_SIZE', 1024),
+                'threshold': getattr(self.config.speech, 'THRESHOLD', 0.01)
+            }
+            
+            # Initialize audio capture
+            self.audio_capture = speech_recorder.AudioCapture(**speech_config)
+            
+            # Get model type if available
+            model_type = getattr(self.config.speech, 'MODEL_TYPE', 'google')
+            
+            # Initialize speech recognizer with needed parameters
+            recognizer_params = {
+                'config': self.config.speech,
+                'post_event_callback': self.post_event,
+                'model_type': model_type
+            }
+            
+            # Remove any None values
+            recognizer_params = {k: v for k, v in recognizer_params.items() if v is not None}
+            
+            self.speech_recognizer = speech_recognizer.SpeechRecognizer(**recognizer_params)
             
             # Initialize LLM processor
             self.llm_processor = llm_processor.LLMProcessor(
@@ -195,7 +204,7 @@ class EVEOrchestrator:
             
             logger.info("Speech subsystem initialized successfully")
         except Exception as e:
-            logger.error(f"Failed to initialize speech subsystem: {e}")
+            self.logger.error(f"Failed to initialize speech subsystem: {e}")
             self.audio_capture = None
             self.speech_recognizer = None
             self.llm_processor = None

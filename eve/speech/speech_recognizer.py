@@ -72,16 +72,28 @@ class SpeechRecognizer:
     it to text using the Whisper speech recognition model.
     """
     
-    def __init__(self, config=None, post_event_callback=None):
+    def __init__(self, config=None, post_event_callback=None, model_type=None, **kwargs):
         """Initialize the speech recognizer
         
         Args:
             config: Configuration object or dictionary
             post_event_callback: Callback for posting events
+            model_type: Type of speech recognition model to use (google, coqui, etc.)
+            **kwargs: Additional configuration parameters
         """
         self.logger = logging.getLogger(__name__)
         self.post_event = post_event_callback
         self.running = False
+        
+        # Handle model_type parameter
+        self.model_type = model_type
+        if self.model_type is None and config is not None:
+            if isinstance(config, dict):
+                self.model_type = config.get('MODEL_TYPE', 'google')
+            else:
+                self.model_type = getattr(config, 'MODEL_TYPE', 'google')
+        
+        self.logger.info(f"Initializing speech recognizer with model type: {self.model_type}")
         
         # Extract configuration parameters
         if config is None:
@@ -116,7 +128,6 @@ class SpeechRecognizer:
         self.silence_duration_sec = config.speech.silence_duration_sec if hasattr(config, 'speech') and hasattr(config.speech, 'silence_duration_sec') else 1.5
         self.vad_threshold = config.speech.vad_threshold if hasattr(config, 'speech') and hasattr(config.speech, 'vad_threshold') else 0.3
         self.callback = config.speech.callback if hasattr(config, 'speech') and hasattr(config.speech, 'callback') else None
-        self.model_type = config.speech.model_type if hasattr(config, 'speech') and hasattr(config.speech, 'model_type') else "default"
         self.vosk_model_path = config.speech.vosk_model_path if hasattr(config, 'speech') and hasattr(config.speech, 'vosk_model_path') else None
         self.whisper_model_name = config.speech.whisper_model_name if hasattr(config, 'speech') and hasattr(config.speech, 'whisper_model_name') else None
         self.config = config
@@ -144,7 +155,6 @@ class SpeechRecognizer:
         else:
             logger.error(f"Model file not found: {self.model_path}")
         
-        logger.info(f"Initializing speech recognizer with model type: {self.model_type}")
         if self.model_type == "vosk" and self.vosk_model_path:
             logger.info(f"Using Vosk model at: {self.vosk_model_path}")
         elif self.model_type == "whisper" and self.whisper_model_name:
@@ -421,37 +431,23 @@ class SpeechRecognizer:
             raise
 
     def process_audio(self, audio_data):
-        """Process audio data and return recognition results"""
+        """Process audio data and generate mock recognition results"""
         if not isinstance(audio_data, np.ndarray):
             self.logger.error("Invalid audio data format")
             return
             
         try:
-            # Simulate speech detection (30% chance)
-            if random.random() < 0.3:
-                # Simulate recognition
-                if random.random() < 0.1:  # 10% chance of not understanding
-                    raise UnknownValueError()
-                if random.random() < 0.05:  # 5% chance of service error
-                    raise RequestError("Mock recognition service error")
-                
-                # Generate mock recognition result
+            if random.random() < 0.3:  # 30% chance of speech detection
                 text = random.choice(self.mock_responses)
                 confidence = random.uniform(0.7, 1.0)
-                
                 self.logger.info(f"Recognized: '{text}' (confidence: {confidence:.2f})")
                 
-                # Post recognition event
-                self.post_event(TOPICS['SPEECH_RECOGNIZED'], {
-                    'text': text,
-                    'confidence': confidence,
-                    'timestamp': time.time()
-                })
-                
-        except UnknownValueError:
-            self.logger.debug("Speech not understood")
-        except RequestError as e:
-            self.logger.error(f"Recognition service error: {e}")
+                if self.post_event:
+                    self.post_event(TOPICS['SPEECH_RECOGNIZED'], {
+                        'text': text,
+                        'confidence': confidence,
+                        'timestamp': time.time()
+                    })
         except Exception as e:
             self.logger.error(f"Error processing audio: {e}")
 
