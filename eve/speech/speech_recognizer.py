@@ -18,8 +18,40 @@ from faster_whisper import WhisperModel
 import eve.config as config
 import random
 import speech_recognition as sr
+from eve.config.communication import TOPICS
 
 logger = logging.getLogger(__name__)
+
+class MockSpeechRecognition:
+    """Mock speech recognition for testing"""
+    class UnknownValueError(Exception):
+        pass
+    
+    class RequestError(Exception):
+        pass
+    
+    def recognize_google(self, audio_data):
+        """Mock google recognition"""
+        # Randomly fail sometimes to simulate real behavior
+        if random.random() < 0.1:  # 10% chance of not understanding
+            raise self.UnknownValueError()
+        if random.random() < 0.05:  # 5% chance of request error
+            raise self.RequestError("Mock request error")
+            
+        # Generate mock responses
+        responses = [
+            "Hello",
+            "How are you",
+            "What time is it",
+            "Tell me a story",
+            "That's interesting",
+            "I like that",
+            "Can you help me",
+            "What's the weather like",
+            "Good morning",
+            "Good evening"
+        ]
+        return random.choice(responses)
 
 class SpeechRecognizer:
     """
@@ -378,4 +410,60 @@ class SpeechRecognizer:
             return "Hello EVE"
             
         # In a real implementation, we would use the actual model here
-        return "Speech recognition placeholder" 
+        return "Speech recognition placeholder"
+
+    def _init_recognizer(self):
+        """Initialize the speech recognizer"""
+        try:
+            # Use mock recognizer
+            self.sr = MockSpeechRecognition()
+            self.recognizer = self.sr
+            self.logger.info("Using mock speech recognition")
+            
+        except Exception as e:
+            self.logger.error(f"Error initializing speech recognizer: {e}")
+            raise
+
+    def process_audio(self, audio_data):
+        """Process audio data and return recognition results"""
+        if not isinstance(audio_data, np.ndarray):
+            self.logger.error("Invalid audio data format")
+            return
+            
+        try:
+            # Convert numpy array to appropriate format
+            # In mock mode, we just pass it through
+            audio = audio_data
+            
+            # Perform recognition
+            if random.random() < 0.3:  # 30% chance of detecting speech in mock mode
+                text = self.recognizer.recognize_google(audio)
+                confidence = random.uniform(0.7, 1.0)
+                
+                self.logger.info(f"Recognized: '{text}' (confidence: {confidence:.2f})")
+                
+                # Post recognition event
+                self.post_event(TOPICS['SPEECH_RECOGNIZED'], {
+                    'text': text,
+                    'confidence': confidence,
+                    'timestamp': time.time()
+                })
+                
+        except self.sr.UnknownValueError:
+            self.logger.debug("Speech not understood")
+        except self.sr.RequestError as e:
+            self.logger.error(f"Recognition error: {e}")
+        except Exception as e:
+            self.logger.error(f"Error processing audio: {e}")
+
+    def is_running(self):
+        """Check if the recognizer is running"""
+        return self.is_running
+
+    def get_status(self):
+        """Get current status of the recognizer"""
+        return {
+            'running': self.is_running,
+            'mock_mode': self.model_type == "simple",
+            'timestamp': time.time()
+        } 
