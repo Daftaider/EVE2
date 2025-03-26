@@ -10,8 +10,7 @@ logger = logging.getLogger(__name__)
 class AudioCapture:
     """Records audio from microphone for speech processing"""
     
-    def __init__(self, device_index=None, sample_rate=16000, channels=1, chunk_size=1024, 
-                 threshold=0.01, mock_if_failed=True):
+    def __init__(self, sample_rate=16000, channels=1, chunk_size=1024, threshold=0.01):
         """Initialize audio capture with fallback to mock"""
         self.logger = logging.getLogger(__name__)
         self.sample_rate = sample_rate
@@ -19,7 +18,6 @@ class AudioCapture:
         self.chunk_size = chunk_size
         self.threshold = threshold
         self.running = False
-        self.mock_mode = True
         self.audio_queue = queue.Queue(maxsize=100)
         self.latest_audio = None
         self.last_audio_time = 0
@@ -100,7 +98,8 @@ class AudioCapture:
                             break
                         chunk = mock_audio[i:i + self.chunk_size]
                         if len(chunk) == self.chunk_size and not self.audio_queue.full():
-                            self.audio_queue.put_nowait(chunk.astype(np.float32))
+                            chunk = chunk.astype(np.float32)
+                            self.audio_queue.put_nowait(chunk)
                             self.latest_audio = chunk
                             self.last_audio_time = time.time()
                 
