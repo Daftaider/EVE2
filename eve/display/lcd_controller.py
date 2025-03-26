@@ -40,15 +40,19 @@ class LCDController:
         
         self.running = False
         self.render_thread = None
-        self.use_fallback = 'DISPLAY' not in os.environ
+        self.use_fallback = False
         self.emotion_images = {}
         self.screen = None
         self.clock = None
         
+        # Force software rendering to avoid GL context issues
+        os.environ['SDL_VIDEODRIVER'] = 'x11'
+        os.environ['SDL_RENDERER_DRIVER'] = 'software'
+        
         # Initialize pygame and display
         self._init_display()
         
-        # Load emotions (or generate them if missing)
+        # Load or generate emotions
         self._load_assets()
         
         # Ensure we have at least a neutral emotion
@@ -71,27 +75,24 @@ class LCDController:
             # Initialize pygame
             pygame.init()
             
-            # Check for display
-            if 'DISPLAY' not in os.environ:
-                self.logger.info("No display detected, using dummy driver")
-                os.environ['SDL_VIDEODRIVER'] = 'dummy'
+            # Try different display modes in order of preference
+            display_methods = [
+                self._try_software_mode,
+                self._try_dummy_mode
+            ]
+            
+            success = False
+            for method in display_methods:
+                if method():
+                    success = True
+                    break
+                    
+            if not success:
+                self.logger.error("Failed to initialize display with any method")
+                # Create a fallback surface as last resort
                 self.use_fallback = True
-            
-            # Try to set up the display
-            if not self.use_fallback:
-                try:
-                    self.screen = pygame.display.set_mode((self.width, self.height))
-                    pygame.display.set_caption("EVE2 Display")
-                    self.logger.info(f"Display initialized: {self.width}x{self.height}")
-                except pygame.error as e:
-                    self.logger.error(f"Error setting display mode: {e}")
-                    self.use_fallback = True
-            
-            # Use fallback surface if needed
-            if self.use_fallback:
                 self.screen = pygame.Surface((self.width, self.height))
-                self.logger.info("Using fallback surface for headless mode")
-            
+                
             # Initialize clock
             self.clock = pygame.time.Clock()
             
@@ -100,6 +101,54 @@ class LCDController:
             # Ensure we at least have a surface
             self.use_fallback = True
             self.screen = pygame.Surface((self.width, self.height))
+
+    def _try_software_mode(self):
+        """Try to initialize display in software rendering mode"""
+        try:
+            # Set software rendering flags
+            os.environ['SDL_VIDEODRIVER'] = 'x11'
+            os.environ['SDL_RENDERER_DRIVER'] = 'software'
+            
+            # Reinitialize pygame display subsystem
+            pygame.display.quit()
+            pygame.display.init()
+            
+            # Create display surface with software rendering
+            self.screen = pygame.display.set_mode(
+                (self.width, self.height),
+                pygame.SWSURFACE
+            )
+            pygame.display.set_caption("EVE2 Display (Software Rendering)")
+            
+            # Test if it works
+            self.screen.fill(self.background_color)
+            pygame.display.flip()
+            
+            self.logger.info("Display initialized in software rendering mode")
+            return True
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize software rendering: {e}")
+            return False
+
+    def _try_dummy_mode(self):
+        """Try to initialize display with dummy driver"""
+        try:
+            # Set dummy driver
+            os.environ['SDL_VIDEODRIVER'] = 'dummy'
+            
+            # Reinitialize pygame display subsystem
+            pygame.display.quit()
+            pygame.display.init()
+            
+            # Create a surface
+            self.screen = pygame.Surface((self.width, self.height))
+            self.use_fallback = True
+            
+            self.logger.info("Display initialized with dummy driver")
+            return True
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize dummy driver: {e}")
+            return False
 
     def _generate_default_emotion(self):
         """Generate a default emotion face"""
@@ -433,8 +482,12 @@ class LCDController:
                 pass  # Last resort, just ignore if even this fails
 
     def _render_loop(self):
-        """Main rendering loop"""
+        """Main rendering loop with error recovery"""
         self.logger.info(f"Starting render loop in {'headless' if self.use_fallback else 'display'} mode")
+        
+        gl_error_count = 0
+        max_gl_errors = 3
+        last_error_time = 0
         
         while self.running:
             try:
@@ -451,9 +504,27 @@ class LCDController:
                 if not self.use_fallback:
                     try:
                         pygame.display.flip()
+                        # Reset error count on success
+                        gl_error_count = 0
                     except pygame.error as e:
-                        self.logger.error(f"Error updating display: {e}")
-                        self.use_fallback = True
+                        error_str = str(e)
+                        current_time = time.time()
+                        
+                        # Only log errors periodically to avoid spam
+                        if current_time - last_error_time > 5.0:
+                            self.logger.error(f"Error updating display: {e}")
+                            last_error_time = current_time
+                        
+                        # Check for GL context errors
+                        if "GL context" in error_str or "BadAccess" in error_str:
+                            gl_error_count += 1
+                            if gl_error_count >= max_gl_errors:
+                                self.logger.warning("Too many GL errors, switching to fallback mode")
+                                # Try to reinitialize in software mode
+                                if self._try_software_mode():
+                                    gl_error_count = 0
+                                else:
+                                    self.use_fallback = True
                 
                 # Maintain frame rate
                 self.clock.tick(self.fps)
