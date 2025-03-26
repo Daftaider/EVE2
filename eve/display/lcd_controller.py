@@ -26,7 +26,8 @@ class LCDController:
     """
     
     def __init__(self, width=800, height=480, fullscreen=False, resolution=None, fps=30, 
-                 default_emotion="neutral", background_color=(0, 0, 0), eye_color=(0, 191, 255)):
+                 default_emotion="neutral", background_color=(0, 0, 0), eye_color=(0, 191, 255),
+                 transition_time_ms=500):
         """
         Initialize the display controller
         
@@ -38,7 +39,8 @@ class LCDController:
             fps (int): Target frames per second for the display
             default_emotion (str): Default emotion to display on startup
             background_color (tuple): RGB color tuple for background
-            eye_color (tuple): RGB color tuple for eyes (default: deep sky blue)
+            eye_color (tuple): RGB color tuple for eyes
+            transition_time_ms (int): Time in milliseconds for emotion transitions
         """
         # If resolution is provided, use it instead of width/height parameters
         if resolution and isinstance(resolution, tuple) and len(resolution) == 2:
@@ -52,9 +54,14 @@ class LCDController:
         self.default_emotion = default_emotion
         self.background_color = background_color
         self.eye_color = eye_color
+        self.transition_time_ms = transition_time_ms
+        self.current_transition = None
+        self.transition_start_time = 0
+        
         self.running = False
         self.render_thread = None
         self.current_emotion = default_emotion
+        self.target_emotion = default_emotion
         self.emotion_images = {}
         self.logger = logging.getLogger(__name__)
         
@@ -274,79 +281,62 @@ class LCDController:
                 # Clear screen with the background color
                 self.screen.fill(self.background_color)
                 
-                # Update emotion transition
-                self._update_transition()
+                # Handle emotion transitions
+                current_time = pygame.time.get_ticks()
+                if self.current_transition:
+                    progress = (current_time - self.transition_start_time) / self.transition_time_ms
+                    if progress >= 1.0:
+                        # Transition complete
+                        self.current_emotion = self.target_emotion
+                        self.current_transition = None
+                    else:
+                        # Render transition
+                        self._render_transition(progress)
+                else:
+                    # Render current emotion
+                    self._render_emotion(self.current_emotion)
                 
-                # Render the current frame
-                self._render_frame()
+                # Update display
+                try:
+                    pygame.display.flip()
+                except pygame.error as e:
+                    self.logger.error(f"Error updating display: {e}")
                 
-                # Cap the frame rate
+                # Cap at specified FPS
                 self.clock.tick(self.fps)
             
         except Exception as e:
-            logger.error(f"Error in rendering loop: {e}")
-            time.sleep(0.1)
+            self.logger.error(f"Error in rendering loop: {e}")
         
-        logger.info("Rendering loop stopped")
+        self.logger.info("Rendering loop stopped")
     
-    def _update_transition(self) -> None:
-        """Update the emotion transition progress."""
-        # Skip if no transition is in progress
-        if self.transition_progress >= 1.0:
-            return
-        
-        # Calculate time elapsed since transition started
-        elapsed = time.time() - self.transition_start_time
-        
-        # Calculate transition progress (0.0 to 1.0)
-        self.transition_progress = min(1.0, elapsed / (self.transition_time_ms / 1000.0))
-        
-        # If transition is complete, update current emotion
-        if self.transition_progress >= 1.0:
-            self.current_emotion = self.target_emotion
+    def _render_transition(self, progress):
+        """Render transition between emotions"""
+        if self.current_emotion in self.emotion_images and self.target_emotion in self.emotion_images:
+            current_img = self.emotion_images[self.current_emotion]
+            target_img = self.emotion_images[self.target_emotion]
+            
+            # Create transition surface
+            transition = pygame.Surface((current_img.get_width(), current_img.get_height()))
+            transition.fill(self.background_color)
+            
+            # Blend images based on progress
+            transition.blit(current_img, (0, 0))
+            target_img.set_alpha(int(255 * progress))
+            transition.blit(target_img, (0, 0))
+            
+            # Draw to screen
+            x = (self.width - transition.get_width()) // 2
+            y = (self.height - transition.get_height()) // 2
+            self.screen.blit(transition, (x, y))
     
-    def _render_frame(self) -> None:
-        """Render the current frame to the display."""
-        if self.transition_progress < 1.0:
-            # During transition, blend between current and target emotions
-            if self.current_emotion in self.emotion_images and self.target_emotion in self.emotion_images:
-                current_img = self.emotion_images[self.current_emotion]
-                target_img = self.emotion_images[self.target_emotion]
-                
-                # Create a temporary surface for the blended result
-                temp_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
-                
-                # Draw the current emotion image with fading alpha
-                current_alpha = int(255 * (1.0 - self.transition_progress))
-                current_img.set_alpha(current_alpha)
-                temp_surface.blit(current_img, (0, 0))
-                
-                # Draw the target emotion image with increasing alpha
-                target_alpha = int(255 * self.transition_progress)
-                target_img.set_alpha(target_alpha)
-                temp_surface.blit(target_img, (0, 0))
-                
-                # Draw the blended result to the screen
-                self.screen.blit(temp_surface, (0, 0))
-            else:
-                # Fallback if images are missing
-                if self.target_emotion in self.emotion_images:
-                    self.screen.blit(self.emotion_images[self.target_emotion], (0, 0))
-                elif self.current_emotion in self.emotion_images:
-                    self.screen.blit(self.emotion_images[self.current_emotion], (0, 0))
-                else:
-                    # Last resort: draw default eyes
-                    self._generate_emotion_image(self.default_emotion)
+    def _render_emotion(self, emotion: str) -> None:
+        """Render the current emotion to the display."""
+        if emotion in self.emotion_images:
+            self.screen.blit(self.emotion_images[emotion], (0, 0))
         else:
-            # No transition, just draw the current emotion
-            if self.current_emotion in self.emotion_images:
-                self.screen.blit(self.emotion_images[self.current_emotion], (0, 0))
-            else:
-                # Fallback if image is missing
-                self._generate_emotion_image(self.default_emotion)
-        
-        # Update the display
-        pygame.display.flip()
+            # Fallback if image is missing
+            self._generate_emotion_image(emotion)
 
     def _create_default_assets(self):
         """Create default assets for testing when real assets are not available"""

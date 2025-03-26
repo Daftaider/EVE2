@@ -63,7 +63,24 @@ class TextToSpeech:
     def _init_tts_engine(self):
         """Initialize the selected TTS engine"""
         if self.engine == "pyttsx3":
-            self._init_pyttsx3()
+            try:
+                import pyttsx3
+                self.tts_engine = pyttsx3.init()
+                if self.voice_id:
+                    self.tts_engine.setProperty('voice', self.voice_id)
+                self.tts_engine.setProperty('rate', int(self.rate * 200))
+                self.tts_engine.setProperty('volume', self.volume)
+                logger.info("Initialized pyttsx3 engine")
+            except ImportError:
+                logger.error("Failed to initialize pyttsx3: No module named 'pyttsx3'")
+                logger.info("Falling back to espeak")
+                self.engine = "espeak"
+                self._init_espeak()
+            except Exception as e:
+                logger.error(f"Failed to initialize pyttsx3: {e}")
+                logger.info("Falling back to espeak")
+                self.engine = "espeak"
+                self._init_espeak()
         elif self.engine == "espeak":
             self._init_espeak()
         elif self.engine == "coqui":
@@ -72,26 +89,21 @@ class TextToSpeech:
             logger.warning(f"Unknown TTS engine: {self.engine}, using fallback")
             self._init_fallback()
     
-    def _init_pyttsx3(self):
-        """Initialize pyttsx3 TTS engine"""
-        try:
-            import pyttsx3
-            self.tts_engine = pyttsx3.init()
-            # Use voice_id if available, otherwise use voice
-            voice_to_use = self.voice_id if self.voice_id else self.voice
-            if voice_to_use:
-                self.tts_engine.setProperty('voice', voice_to_use)
-            self.tts_engine.setProperty('rate', int(self.rate * 200))  # Base rate is around 200
-            self.tts_engine.setProperty('volume', self.volume)
-            logger.info("Initialized pyttsx3 engine")
-        except Exception as e:
-            logger.error(f"Failed to initialize pyttsx3: {e}")
-            self.tts_engine = None
-    
     def _init_espeak(self):
-        """Initialize espeak TTS engine"""
-        logger.info("Using espeak engine")
-        self.tts_engine = "espeak"
+        """Initialize espeak as fallback"""
+        try:
+            # Check if espeak is available
+            import subprocess
+            result = subprocess.run(['which', 'espeak'], capture_output=True, text=True)
+            if result.returncode == 0:
+                logger.info("Using espeak as fallback TTS engine")
+                self.tts_engine = "espeak"
+            else:
+                logger.warning("espeak not found, using silent fallback")
+                self._init_fallback()
+        except Exception as e:
+            logger.error(f"Failed to initialize espeak: {e}")
+            self._init_fallback()
     
     def _init_coqui(self):
         """Initialize Coqui TTS engine"""
@@ -108,11 +120,9 @@ class TextToSpeech:
             self._init_fallback()
     
     def _init_fallback(self):
-        """Fallback method when TTS engines fail"""
-        logger.info(f"[FALLBACK TTS] {self.voice}")
-        # In a real implementation, this might use a very simple beep or
-        # just log the text that would have been spoken
-        self.tts_engine = None
+        """Initialize fallback (silent) TTS"""
+        logger.info("Using silent fallback TTS")
+        self.tts_engine = "fallback"
     
     def speak(self, text):
         """Convert text to speech and play it"""
@@ -122,38 +132,29 @@ class TextToSpeech:
             
         logger.info(f"Speaking: {text[:50]}...")
         
-        if self.tts_engine is None:
-            logger.warning("No TTS engine available, using fallback")
-            return self._fallback_speak(text)
-            
         try:
-            if self.engine == "pyttsx3" and self.tts_engine:
+            if self.engine == "pyttsx3" and isinstance(self.tts_engine, object):
                 self.tts_engine.say(text)
                 self.tts_engine.runAndWait()
                 return True
             elif self.engine == "espeak":
                 import subprocess
-                cmd = ["espeak", f"-a {int(self.volume * 100)}", f"-s {int(self.rate * 150)}", f"-p {int(self.pitch * 50)}"]
-                if self.voice:
-                    cmd.append(f"-v {self.voice}")
-                cmd.append(f'"{text}"')
-                subprocess.run(" ".join(cmd), shell=True)
+                cmd = ["espeak"]
+                if self.voice_id:
+                    cmd.extend(["-v", self.voice_id])
+                cmd.extend(["-a", str(int(self.volume * 100))])
+                cmd.extend(["-s", str(int(self.rate * 150))])
+                cmd.extend(["-p", str(int(self.pitch * 50))])
+                cmd.append(text)
+                subprocess.run(cmd)
                 return True
-            elif self.engine == "coqui":
-                # Coqui TTS handling would go here
-                return False
             else:
-                return self._fallback_speak(text)
+                # Fallback just logs the text
+                logger.info(f"[FALLBACK TTS] Would speak: {text}")
+                return True
         except Exception as e:
             logger.error(f"Error in TTS: {e}")
-            return self._fallback_speak(text)
-    
-    def _fallback_speak(self, text):
-        """Fallback method when TTS engines fail"""
-        logger.info(f"[FALLBACK TTS] {text}")
-        # In a real implementation, this might use a very simple beep or
-        # just log the text that would have been spoken
-        return True
+            return False
 
     def start(self):
         """Start the text-to-speech processor."""
