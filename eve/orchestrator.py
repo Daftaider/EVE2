@@ -30,6 +30,40 @@ from eve.speech.speech_recognizer import SpeechRecognizer
 from eve.vision.face_detector import FaceDetector
 from eve.display.lcd_controller import LCDController
 
+# Import config modules directly
+try:
+    from eve.config import speech as speech_config
+except ImportError:
+    # Create fallback speech config
+    class speech_config:
+        SAMPLE_RATE = 16000
+        CHANNELS = 1
+        CHUNK_SIZE = 1024
+        THRESHOLD = 0.01
+        MODEL_TYPE = "google"
+        MIN_CONFIDENCE = 0.6
+
+try:
+    from eve.config import display as display_config
+except ImportError:
+    # Create fallback display config
+    class display_config:
+        WIDTH = 800
+        HEIGHT = 480
+        FPS = 30
+        DEFAULT_EMOTION = "neutral"
+        BACKGROUND_COLOR = (0, 0, 0)
+        EYE_COLOR = (0, 191, 255)
+
+try:
+    from eve.config import vision as vision_config
+except ImportError:
+    # Create fallback vision config
+    class vision_config:
+        CAMERA_INDEX = 0
+        RESOLUTION = (640, 480)
+        FPS = 30
+
 logger = logging.getLogger(__name__)
 
 class EVEOrchestrator:
@@ -40,10 +74,9 @@ class EVEOrchestrator:
     and coordinates the flow of data between modules.
     """
     
-    def __init__(self, config=None):
+    def __init__(self):
         """Initialize the EVE orchestrator"""
         self.logger = logging.getLogger(__name__)
-        self.config = config or self._get_default_config()
         self.running = False
         self.event_queue = queue.Queue()
         
@@ -65,228 +98,75 @@ class EVEOrchestrator:
             config.communication.TOPICS['ERROR']: self._handle_error,
         }
 
-    def _get_default_config(self):
-        """Load configuration from modules or use defaults"""
-        class ConfigWrapper:
-            pass
-            
-        config = ConfigWrapper()
-        
-        # Try to load speech config
-        try:
-            speech_config = importlib.import_module('eve.config.speech')
-            config.speech = speech_config
-        except ImportError:
-            # Create default speech config
-            config.speech = ConfigWrapper()
-            config.speech.SAMPLE_RATE = 16000
-            config.speech.CHANNELS = 1
-            config.speech.CHUNK_SIZE = 1024
-            config.speech.THRESHOLD = 0.01
-            config.speech.MODEL_TYPE = "google"
-            config.speech.MIN_CONFIDENCE = 0.6
-        
-        # Try to load display config
-        try:
-            display_config = importlib.import_module('eve.config.display')
-            config.display = display_config
-        except ImportError:
-            # Create default display config
-            config.display = ConfigWrapper()
-            config.display.WIDTH = 800
-            config.display.HEIGHT = 480
-            config.display.FPS = 30
-            config.display.DEFAULT_EMOTION = "neutral"
-            config.display.BACKGROUND_COLOR = (0, 0, 0)
-            config.display.EYE_COLOR = (0, 191, 255)
-        
-        # Try to load vision config
-        try:
-            vision_config = importlib.import_module('eve.config.vision')
-            config.vision = vision_config
-        except ImportError:
-            # Create default vision config
-            config.vision = ConfigWrapper()
-            config.vision.CAMERA_INDEX = 0
-            config.vision.RESOLUTION = (640, 480)
-            config.vision.FPS = 30
-            
-        return config
-
     def _init_subsystems(self) -> None:
         """Initialize all subsystems with proper error handling"""
-        role = config.hardware.ROLE.lower()
-        
-        # Check if we're in distributed mode
-        if config.hardware.DISTRIBUTED_MODE:
-            logger.info(f"Initializing in distributed mode with role: {role}")
-            # Initialize only the subsystems relevant to our role
-            if role in ["all", "master"]:
-                self._init_api_server()
-            
-            if role in ["all", "vision"]:
-                self._init_vision_subsystem()
-            
-            if role in ["all", "speech"]:
-                self._init_speech_subsystem()
-            
-            if role in ["all", "display"]:
-                self._init_display_subsystem()
-                
-            # If not master, initialize API client to communicate with master
-            if role not in ["all", "master"]:
-                self._init_api_client()
-        else:
-            # Initialize all subsystems for standalone mode
-            logger.info("Initializing in standalone mode")
-            self._init_vision_subsystem()
-            self._init_speech_subsystem()
-            self._init_display_subsystem()
-    
-    def _init_vision_subsystem(self) -> None:
-        """Initialize the vision subsystem (camera, face detection, emotion analysis)."""
-        if not config.hardware.CAMERA_ENABLED:
-            logger.info("Camera disabled in configuration, skipping vision subsystem")
-            self.face_detector = None
-            self.emotion_analyzer = None
-            return
-        
-        logger.info("Initializing vision subsystem")
-        try:
-            # Initialize face detector
-            vision_config = getattr(self.config, 'vision', None)
-            self.face_detector = face_detector.FaceDetector(
-                config=vision_config,
-                post_event_callback=self.post_event
-            )
-            
-            # Initialize emotion analyzer if enabled
-            if config.vision.EMOTION_DETECTION_ENABLED:
-                self.emotion_analyzer = emotion_analyzer.EmotionAnalyzer(
-                    confidence_threshold=config.vision.EMOTION_CONFIDENCE_THRESHOLD
-                )
-            else:
-                self.emotion_analyzer = None
-            
-            logger.info("Vision subsystem initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize vision subsystem: {e}")
-            self.face_detector = None
-            self.emotion_analyzer = None
-    
-    def _init_speech_subsystem(self) -> None:
-        """Initialize the speech subsystem (audio, ASR, LLM, TTS)."""
-        if not (config.hardware.AUDIO_INPUT_ENABLED or config.hardware.AUDIO_OUTPUT_ENABLED):
-            logger.info("Audio disabled in configuration, skipping speech subsystem")
-            self.audio_capture = None
-            self.speech_recognizer = None
-            self.llm_processor = None
-            self.text_to_speech = None
-            return
-        
-        logger.info("Initializing speech subsystem")
+        # Initialize speech subsystem
         try:
             # Create speech configuration dictionary
-            speech_config = {
-                'sample_rate': getattr(self.config.speech, 'SAMPLE_RATE', 16000),
-                'channels': getattr(self.config.speech, 'CHANNELS', 1),
-                'chunk_size': getattr(self.config.speech, 'CHUNK_SIZE', 1024),
-                'threshold': getattr(self.config.speech, 'THRESHOLD', 0.01)
+            speech_params = {
+                'sample_rate': getattr(speech_config, 'SAMPLE_RATE', 16000),
+                'channels': getattr(speech_config, 'CHANNELS', 1),
+                'chunk_size': getattr(speech_config, 'CHUNK_SIZE', 1024),
+                'threshold': getattr(speech_config, 'THRESHOLD', 0.01)
             }
             
             # Initialize audio capture
-            self.audio_capture = AudioCapture(**speech_config)
+            self.audio_capture = AudioCapture(**speech_params)
             
             # Get model type if available
-            model_type = getattr(self.config.speech, 'MODEL_TYPE', 'google')
+            model_type = getattr(speech_config, 'MODEL_TYPE', 'google')
             
             # Initialize speech recognizer
             self.speech_recognizer = SpeechRecognizer(
-                config=self.config.speech,
+                config=speech_config,
                 post_event_callback=self.post_event,
                 model_type=model_type
             )
             
-            # Initialize LLM processor
-            self.llm_processor = llm_processor.LLMProcessor(
-                model_type=config.speech.LLM_MODEL_TYPE,
-                model_path=config.speech.LLM_MODEL_PATH,
-                context_length=config.speech.LLM_CONTEXT_LENGTH,
-                max_tokens=config.speech.LLM_MAX_TOKENS,
-                temperature=config.speech.LLM_TEMPERATURE
-            )
-            
-            # Initialize text-to-speech if output is enabled
-            if config.hardware.AUDIO_OUTPUT_ENABLED:
-                self.text_to_speech = text_to_speech.TextToSpeech(
-                    engine=config.speech.TTS_ENGINE,
-                    voice_id=config.speech.TTS_VOICE_ID,
-                    rate=config.speech.TTS_RATE,
-                    coqui_model_path=config.speech.COQUI_MODEL_PATH
-                )
-            else:
-                self.text_to_speech = None
-            
-            logger.info("Speech subsystem initialized successfully")
+            self.logger.info("Speech subsystem initialized successfully")
         except Exception as e:
             self.logger.error(f"Failed to initialize speech subsystem: {e}")
-            self.audio_capture = None
-            self.speech_recognizer = None
-            self.llm_processor = None
-            self.text_to_speech = None
-    
-    def _init_display_subsystem(self) -> None:
-        """Initialize the display subsystem (LCD controller)."""
-        if not config.hardware.DISPLAY_ENABLED:
-            logger.info("Display disabled in configuration, skipping display subsystem")
-            self.lcd_controller = None
-            return
-        
-        logger.info("Initializing display subsystem")
+            raise
+
+        # Initialize display subsystem
         try:
+            # Create display configuration dictionary
+            display_params = {
+                'width': getattr(display_config, 'WIDTH', 800),
+                'height': getattr(display_config, 'HEIGHT', 480),
+                'fps': getattr(display_config, 'FPS', 30),
+                'default_emotion': getattr(display_config, 'DEFAULT_EMOTION', 'neutral'),
+                'background_color': getattr(display_config, 'BACKGROUND_COLOR', (0, 0, 0)),
+                'eye_color': getattr(display_config, 'EYE_COLOR', (0, 191, 255))
+            }
+            
             # Initialize LCD controller
-            self.lcd_controller = LCDController(
-                resolution=config.hardware.DISPLAY_RESOLUTION,
-                fullscreen=config.hardware.FULLSCREEN,
-                fps=config.display.ANIMATION_FPS,
-                default_emotion=config.display.DEFAULT_EMOTION,
-                background_color=config.display.BACKGROUND_COLOR,
-                eye_color=config.display.EYE_COLOR,
-                transition_time_ms=config.display.EMOTION_TRANSITION_TIME_MS
+            self.lcd_controller = LCDController(**display_params)
+            
+            self.logger.info("Display subsystem initialized successfully")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize display subsystem: {e}")
+            raise
+
+        # Initialize vision subsystem
+        try:
+            # Create vision configuration dictionary
+            vision_params = {
+                'camera_index': getattr(vision_config, 'CAMERA_INDEX', 0),
+                'resolution': getattr(vision_config, 'RESOLUTION', (640, 480)),
+                'fps': getattr(vision_config, 'FPS', 30)
+            }
+            
+            # Initialize face detector
+            self.face_detector = FaceDetector(
+                config=vision_params,
+                post_event_callback=self.post_event
             )
             
-            logger.info("Display subsystem initialized successfully")
+            self.logger.info("Vision subsystem initialized successfully")
         except Exception as e:
-            logger.error(f"Failed to initialize display subsystem: {e}")
-            self.lcd_controller = None
-    
-    def _init_api_server(self) -> None:
-        """Initialize the API server for distributed mode."""
-        logger.info("Initializing API server")
-        try:
-            self.api_server = api.APIServer(
-                host=config.communication.API_HOST,
-                port=config.communication.API_PORT,
-                debug=config.communication.API_DEBUG,
-                message_queue=self.message_queue
-            )
-            logger.info("API server initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize API server: {e}")
-            self.api_server = None
-    
-    def _init_api_client(self) -> None:
-        """Initialize the API client for distributed mode."""
-        logger.info("Initializing API client")
-        try:
-            self.api_client = api.APIClient(
-                host=config.hardware.MASTER_IP,
-                port=config.hardware.MASTER_PORT
-            )
-            logger.info("API client initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize API client: {e}")
-            self.api_client = None
+            self.logger.error(f"Failed to initialize vision subsystem: {e}")
+            raise
     
     def start(self) -> None:
         """Start all subsystems and the main event loop."""
@@ -296,10 +176,6 @@ class EVEOrchestrator:
         
         logger.info("Starting EVE2 system")
         self.running = True
-        
-        # Start API server if in distributed mode
-        if config.hardware.DISTRIBUTED_MODE and hasattr(self, 'api_server') and self.api_server:
-            threading.Thread(target=self.api_server.start, daemon=True).start()
         
         # Start face detector if enabled
         if self.face_detector:
@@ -328,10 +204,6 @@ class EVEOrchestrator:
         
         logger.info("Stopping EVE2 system")
         self.running = False
-        
-        # Stop API server if in distributed mode
-        if hasattr(self, 'api_server') and self.api_server:
-            self.api_server.stop()
         
         # Stop face detector if enabled
         if self.face_detector:
@@ -508,7 +380,7 @@ class Event:
 
 def create_orchestrator() -> EVEOrchestrator:
     """Create and return an Orchestrator instance."""
-    return EVEOrchestrator(config)
+    return EVEOrchestrator()
 
 
 if __name__ == "__main__":

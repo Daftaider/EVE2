@@ -33,23 +33,29 @@ class FaceDetector:
         """Initialize the face detector
         
         Args:
-            config: Configuration object with vision settings
+            config: Configuration dictionary or object
             post_event_callback: Callback function for posting events
         """
         self.logger = logging.getLogger(__name__)
-        self.config = config
         self.post_event = post_event_callback
         self.running = False
         self.detection_thread = None
         self.empty_frame_count = 0
         self.total_frame_count = 0
         
-        # Extract camera configuration
-        camera_config = {
-            'camera_index': getattr(config, 'CAMERA_INDEX', 0),
-            'resolution': getattr(config, 'RESOLUTION', (640, 480)),
-            'fps': getattr(config, 'FPS', 30)
-        }
+        # Extract camera configuration (handle both dict and object)
+        if config is None:
+            config = {}
+            
+        if isinstance(config, dict):
+            camera_config = config
+        else:
+            # Extract from object
+            camera_config = {
+                'camera_index': getattr(config, 'CAMERA_INDEX', 0),
+                'resolution': getattr(config, 'RESOLUTION', (640, 480)),
+                'fps': getattr(config, 'FPS', 30)
+            }
         
         # Initialize camera with proper parameters
         self.camera = Camera(**camera_config)
