@@ -49,39 +49,67 @@ class Camera:
             self._init_mock_camera()
 
     def _init_mock_camera(self):
-        """Initialize mock camera with test patterns"""
+        """Initialize mock camera with test patterns including faces"""
         self.mock_patterns = []
         
-        # Generate test patterns
+        # Generate test patterns with faces
         for i in range(3):
+            # Create base frame
             frame = np.zeros((self.resolution[1], self.resolution[0], 3), dtype=np.uint8)
+            frame.fill(64)  # Dark gray background
             
             # Add face-like features
             center_x = self.resolution[0] // 2
             center_y = self.resolution[1] // 2
             
-            # Draw face outline
+            # Draw face outline (skin colored)
             radius = min(self.resolution) // 3
-            cv2.circle(frame, (center_x, center_y), radius, (200, 200, 200), 2)
+            face_color = (205, 200, 255)  # BGR format
+            cv2.ellipse(frame, 
+                       (center_x, center_y),
+                       (radius, int(radius * 1.2)),
+                       0, 0, 360, face_color, -1)
             
             # Draw eyes
-            eye_radius = radius // 4
-            left_eye = (center_x - radius//2, center_y - radius//4)
-            right_eye = (center_x + radius//2, center_y - radius//4)
-            cv2.circle(frame, left_eye, eye_radius, (255, 255, 255), -1)
-            cv2.circle(frame, right_eye, eye_radius, (255, 255, 255), -1)
+            eye_color = (255, 255, 255)
+            eye_radius = radius // 6
+            eye_offset_x = radius // 2
+            eye_offset_y = radius // 4
             
-            # Draw mouth
-            mouth_y = center_y + radius//3
-            cv2.line(frame, 
-                    (center_x - radius//2, mouth_y),
-                    (center_x + radius//2, mouth_y),
-                    (255, 255, 255), 2)
+            # Left eye
+            cv2.circle(frame, 
+                      (center_x - eye_offset_x, center_y - eye_offset_y),
+                      eye_radius, eye_color, -1)
+            cv2.circle(frame,
+                      (center_x - eye_offset_x, center_y - eye_offset_y),
+                      eye_radius // 2, (50, 50, 50), -1)
             
-            # Add frame number
-            cv2.putText(frame, f"Mock Frame {i+1}", 
-                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
-                       1, (255, 255, 255), 2)
+            # Right eye
+            cv2.circle(frame,
+                      (center_x + eye_offset_x, center_y - eye_offset_y),
+                      eye_radius, eye_color, -1)
+            cv2.circle(frame,
+                      (center_x + eye_offset_x, center_y - eye_offset_y),
+                      eye_radius // 2, (50, 50, 50), -1)
+            
+            # Draw mouth (slight smile)
+            mouth_color = (150, 150, 150)
+            mouth_start = (center_x - radius//2, center_y + radius//3)
+            mouth_end = (center_x + radius//2, center_y + radius//3)
+            mouth_control = (center_x, center_y + radius//2)
+            
+            # Draw curved mouth using Bezier curve
+            pts = np.array([mouth_start, mouth_control, mouth_end], np.int32)
+            cv2.polylines(frame, [pts], False, mouth_color, 2)
+            
+            # Add frame counter
+            cv2.putText(frame,
+                       f"Mock Frame {i+1}",
+                       (10, 30),
+                       cv2.FONT_HERSHEY_SIMPLEX,
+                       1,
+                       (255, 255, 255),
+                       2)
             
             self.mock_patterns.append(frame)
         
@@ -98,14 +126,23 @@ class Camera:
             self.current_pattern = (self.current_pattern + 1) % len(self.mock_patterns)
             self.pattern_change_time = current_time
         
-        # Get base pattern and ensure it's uint8
+        # Get base pattern
         frame = self.mock_patterns[self.current_pattern].copy()
         
-        # Generate noise as uint8
-        noise = np.random.normal(0, 5, frame.shape).astype(np.int16)
+        # Add subtle movement to simulate video
+        shift_x = int(np.sin(current_time * 2) * 5)
+        shift_y = int(np.cos(current_time * 2) * 5)
         
-        # Add noise while ensuring we stay within uint8 bounds
-        frame = np.clip(frame.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+        # Create translation matrix
+        M = np.float32([[1, 0, shift_x], [0, 1, shift_y]])
+        
+        # Apply the translation
+        frame = cv2.warpAffine(frame, M, (frame.shape[1], frame.shape[0]))
+        
+        # Ensure frame is valid
+        if frame is None or frame.size == 0:
+            self.logger.error("Failed to generate mock frame")
+            return False, None
         
         self.frame_count += 1
         self.last_frame_time = time.time()
