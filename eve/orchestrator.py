@@ -11,6 +11,7 @@ import threading
 import time
 from typing import Dict, List, Optional, Union, Any
 import queue
+import importlib
 
 from eve import config
 from eve.utils import logging_utils
@@ -22,6 +23,12 @@ from eve.communication import message_queue
 import types
 api = types.SimpleNamespace()
 api.initialize = lambda: None
+
+from eve.config.communication import TOPICS
+from eve.speech.speech_recorder import AudioCapture
+from eve.speech.speech_recognizer import SpeechRecognizer
+from eve.vision.face_detector import FaceDetector
+from eve.display.lcd_controller import LCDController
 
 logger = logging.getLogger(__name__)
 
@@ -59,29 +66,52 @@ class EVEOrchestrator:
         }
 
     def _get_default_config(self):
-        """Create default configuration if none provided"""
-        class DefaultConfig:
-            class speech:
-                SAMPLE_RATE = 16000
-                CHANNELS = 1
-                CHUNK_SIZE = 1024
-                THRESHOLD = 0.01
-                MIN_CONFIDENCE = 0.6
+        """Load configuration from modules or use defaults"""
+        class ConfigWrapper:
+            pass
             
-            class display:
-                WIDTH = 800
-                HEIGHT = 480
-                FPS = 30
-                DEFAULT_EMOTION = "neutral"
-                BACKGROUND_COLOR = (0, 0, 0)
-                EYE_COLOR = (0, 191, 255)
+        config = ConfigWrapper()
+        
+        # Try to load speech config
+        try:
+            speech_config = importlib.import_module('eve.config.speech')
+            config.speech = speech_config
+        except ImportError:
+            # Create default speech config
+            config.speech = ConfigWrapper()
+            config.speech.SAMPLE_RATE = 16000
+            config.speech.CHANNELS = 1
+            config.speech.CHUNK_SIZE = 1024
+            config.speech.THRESHOLD = 0.01
+            config.speech.MODEL_TYPE = "google"
+            config.speech.MIN_CONFIDENCE = 0.6
+        
+        # Try to load display config
+        try:
+            display_config = importlib.import_module('eve.config.display')
+            config.display = display_config
+        except ImportError:
+            # Create default display config
+            config.display = ConfigWrapper()
+            config.display.WIDTH = 800
+            config.display.HEIGHT = 480
+            config.display.FPS = 30
+            config.display.DEFAULT_EMOTION = "neutral"
+            config.display.BACKGROUND_COLOR = (0, 0, 0)
+            config.display.EYE_COLOR = (0, 191, 255)
+        
+        # Try to load vision config
+        try:
+            vision_config = importlib.import_module('eve.config.vision')
+            config.vision = vision_config
+        except ImportError:
+            # Create default vision config
+            config.vision = ConfigWrapper()
+            config.vision.CAMERA_INDEX = 0
+            config.vision.RESOLUTION = (640, 480)
+            config.vision.FPS = 30
             
-            class vision:
-                CAMERA_INDEX = 0
-                RESOLUTION = (640, 480)
-                FPS = 30
-                
-        return DefaultConfig()
+        return config
 
     def _init_subsystems(self) -> None:
         """Initialize all subsystems with proper error handling"""
@@ -156,7 +186,7 @@ class EVEOrchestrator:
         
         logger.info("Initializing speech subsystem")
         try:
-            # Create speech configuration dictionary for components that need it
+            # Create speech configuration dictionary
             speech_config = {
                 'sample_rate': getattr(self.config.speech, 'SAMPLE_RATE', 16000),
                 'channels': getattr(self.config.speech, 'CHANNELS', 1),
@@ -165,22 +195,17 @@ class EVEOrchestrator:
             }
             
             # Initialize audio capture
-            self.audio_capture = speech_recorder.AudioCapture(**speech_config)
+            self.audio_capture = AudioCapture(**speech_config)
             
             # Get model type if available
             model_type = getattr(self.config.speech, 'MODEL_TYPE', 'google')
             
-            # Initialize speech recognizer with needed parameters
-            recognizer_params = {
-                'config': self.config.speech,
-                'post_event_callback': self.post_event,
-                'model_type': model_type
-            }
-            
-            # Remove any None values
-            recognizer_params = {k: v for k, v in recognizer_params.items() if v is not None}
-            
-            self.speech_recognizer = speech_recognizer.SpeechRecognizer(**recognizer_params)
+            # Initialize speech recognizer
+            self.speech_recognizer = SpeechRecognizer(
+                config=self.config.speech,
+                post_event_callback=self.post_event,
+                model_type=model_type
+            )
             
             # Initialize LLM processor
             self.llm_processor = llm_processor.LLMProcessor(
@@ -220,7 +245,7 @@ class EVEOrchestrator:
         logger.info("Initializing display subsystem")
         try:
             # Initialize LCD controller
-            self.lcd_controller = lcd_controller.LCDController(
+            self.lcd_controller = LCDController(
                 resolution=config.hardware.DISPLAY_RESOLUTION,
                 fullscreen=config.hardware.FULLSCREEN,
                 fps=config.display.ANIMATION_FPS,

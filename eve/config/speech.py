@@ -56,7 +56,7 @@ WAKE_WORD_PATH = "models/wake_word/hey_eve.ppn"
 # Text-to-speech settings
 TTS_ENABLED = True
 TTS_VOICE = "en-US-Standard-C"
-TTS_VOICE_ID = "en-US-1"
+TTS_VOICE_ID = None
 TTS_RATE = 1.0
 TTS_PITCH = 1.0
 TTS_ENGINE = "pyttsx3"  # Options: "pyttsx3", "google", "espeak", "coqui"
@@ -73,4 +73,14 @@ COQUI_VOCODER_CONFIG = "models/tts/coqui/vocoder_config.json"
 NOISE_REDUCTION_ENABLED = True
 AUDIO_ENERGY_THRESHOLD = 300
 VAD_ENABLED = True  # Voice Activity Detection
-VAD_MODE = 3  # 0-3, higher is more aggressive 
+VAD_MODE = 3  # 0-3, higher is more aggressive
+
+# Audio capture settings
+SAMPLE_RATE = 16000
+CHANNELS = 1
+CHUNK_SIZE = 1024
+THRESHOLD = 0.01
+
+# Speech recognition settings
+MODEL_TYPE = "google"
+MIN_CONFIDENCE = 0.6 
