@@ -78,18 +78,45 @@ class Camera:
                     (center_x + radius//2, mouth_y),
                     (255, 255, 255), 2)
             
+            # Add frame number
+            cv2.putText(frame, f"Mock Frame {i+1}", 
+                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
+                       1, (255, 255, 255), 2)
+            
             self.mock_patterns.append(frame)
         
         self.current_pattern = 0
         self.pattern_change_time = time.time()
         self.logger.info(f"Mock camera initialized with {len(self.mock_patterns)} test patterns")
 
+    def _get_mock_frame(self):
+        """Generate a mock frame with proper type handling"""
+        current_time = time.time()
+        
+        # Change pattern every 3 seconds
+        if current_time - self.pattern_change_time > 3.0:
+            self.current_pattern = (self.current_pattern + 1) % len(self.mock_patterns)
+            self.pattern_change_time = current_time
+        
+        # Get base pattern and ensure it's uint8
+        frame = self.mock_patterns[self.current_pattern].copy()
+        
+        # Generate noise as uint8
+        noise = np.random.normal(0, 5, frame.shape).astype(np.int16)
+        
+        # Add noise while ensuring we stay within uint8 bounds
+        frame = np.clip(frame.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+        
+        self.frame_count += 1
+        self.last_frame_time = time.time()
+        self.current_frame = frame
+        
+        return True, frame
+
     def get_frame(self):
-        """Get the latest frame (alias for read)"""
+        """Get the latest frame"""
         ret, frame = self.read()
-        if ret:
-            self.current_frame = frame
-        return ret, self.current_frame
+        return ret, frame
 
     def read(self):
         """Read a frame from the camera or mock camera"""
@@ -106,26 +133,6 @@ class Camera:
         
         return False, None
 
-    def _get_mock_frame(self):
-        """Generate a mock frame"""
-        current_time = time.time()
-        
-        # Change pattern every 3 seconds
-        if current_time - self.pattern_change_time > 3.0:
-            self.current_pattern = (self.current_pattern + 1) % len(self.mock_patterns)
-            self.pattern_change_time = current_time
-        
-        frame = self.mock_patterns[self.current_pattern].copy()
-        
-        # Add some random noise
-        noise = np.random.normal(0, 5, frame.shape).astype(np.int8)
-        frame = cv2.add(frame, noise)
-        
-        self.frame_count += 1
-        self.last_frame_time = time.time()
-        
-        return True, frame
-
     def get_fps(self):
         """Calculate actual FPS"""
         if self.frame_count == 0:
@@ -137,9 +144,7 @@ class Camera:
 
     def is_open(self):
         """Check if camera is open and operational"""
-        if self.mock_mode:
-            return True
-        return self.cap is not None and self.cap.isOpened()
+        return self.mock_mode or (self.cap is not None and self.cap.isOpened())
 
     def get_resolution(self):
         """Get current resolution"""
@@ -150,5 +155,5 @@ class Camera:
         if self.cap:
             self.cap.release()
         self.cap = None
-        self.frame_count = 0
-        self.last_frame_time = 0 
+        self.current_frame = None
+        self.frame_count = 0 
