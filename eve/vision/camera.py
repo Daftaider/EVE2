@@ -10,18 +10,18 @@ logger = logging.getLogger(__name__)
 class Camera:
     """Camera interface for accessing video frames"""
     
-    def __init__(self, config=None, camera_index=0, resolution=(640, 480), fps=30, **kwargs):
-        self.logger = logging.getLogger(__name__)
+    def __init__(self, camera_index=0, resolution=(640, 480), fps=30):
+        """Initialize camera with specified parameters
         
-        # Initialize with defaults or config values
-        if config:
-            self.camera_index = getattr(config, 'CAMERA_INDEX', camera_index)
-            self.resolution = getattr(config, 'RESOLUTION', resolution)
-            self.fps = getattr(config, 'FPS', fps)
-        else:
-            self.camera_index = camera_index
-            self.resolution = resolution
-            self.fps = fps
+        Args:
+            camera_index (int): Index of the camera to use
+            resolution (tuple): Desired resolution as (width, height)
+            fps (int): Desired frames per second
+        """
+        self.logger = logging.getLogger(__name__)
+        self.camera_index = camera_index
+        self.resolution = resolution
+        self.fps = fps
         
         self.cap = None
         self.mock_mode = False

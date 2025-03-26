@@ -28,6 +28,12 @@ class FaceDetector:
     """
     
     def __init__(self, config=None, post_event_callback=None):
+        """Initialize the face detector
+        
+        Args:
+            config: Configuration object with vision settings
+            post_event_callback: Callback function for posting events
+        """
         self.logger = logging.getLogger(__name__)
         self.config = config
         self.post_event = post_event_callback
@@ -36,8 +42,15 @@ class FaceDetector:
         self.empty_frame_count = 0
         self.total_frame_count = 0
         
-        # Initialize camera
-        self.camera = Camera(config=config)
+        # Extract camera configuration
+        camera_config = {
+            'camera_index': getattr(config, 'CAMERA_INDEX', 0),
+            'resolution': getattr(config, 'RESOLUTION', (640, 480)),
+            'fps': getattr(config, 'FPS', 30)
+        }
+        
+        # Initialize camera with proper parameters
+        self.camera = Camera(**camera_config)
         
         # Load face cascade classifier
         try:

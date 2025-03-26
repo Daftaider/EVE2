@@ -123,14 +123,10 @@ class EVEOrchestrator:
         logger.info("Initializing vision subsystem")
         try:
             # Initialize face detector
+            vision_config = getattr(self.config, 'vision', None)
             self.face_detector = face_detector.FaceDetector(
-                camera_index=config.hardware.CAMERA_INDEX,
-                resolution=config.hardware.CAMERA_RESOLUTION,
-                fps=config.hardware.CAMERA_FPS,
-                detection_model=config.vision.FACE_DETECTION_MODEL,
-                known_faces_dir=config.vision.KNOWN_FACES_DIR,
-                recognition_enabled=config.vision.FACE_RECOGNITION_ENABLED,
-                recognition_tolerance=config.vision.FACE_RECOGNITION_TOLERANCE
+                config=vision_config,
+                post_event_callback=self.post_event
             )
             
             # Initialize emotion analyzer if enabled
