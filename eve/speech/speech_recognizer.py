@@ -72,62 +72,54 @@ class SpeechRecognizer:
     it to text using the Whisper speech recognition model.
     """
     
-    def __init__(
-        self,
-        model_path: Optional[str] = None,
-        threshold: float = 0.5,
-        language: str = "en",
-        device_index: Optional[int] = None,
-        sample_rate: int = 16000,
-        buffer_duration_sec: float = 2.0,
-        max_recording_sec: float = 30.0,
-        silence_duration_sec: float = 1.5,
-        vad_threshold: float = 0.3,
-        callback: Optional[Callable[[str, float], None]] = None,
-        model_type: Optional[str] = None,
-        vosk_model_path: Optional[str] = None,
-        whisper_model_name: Optional[str] = None,
-        config=None,
-        post_event_callback=None
-    ):
-        """
-        Initialize the speech recognizer.
+    def __init__(self, config=None, post_event_callback=None):
+        """Initialize the speech recognizer
         
         Args:
-            model_path: Path to the Whisper model. If None, uses the model from config.
-            threshold: Confidence threshold for speech recognition.
-            language: Language code for speech recognition.
-            device_index: Audio input device index. If None, uses the default device.
-            sample_rate: Audio sample rate.
-            buffer_duration_sec: Duration of the audio buffer in seconds.
-            max_recording_sec: Maximum recording duration in seconds.
-            silence_duration_sec: Silence duration in seconds to consider speech ended.
-            vad_threshold: Voice activity detection threshold.
-            callback: Callback function to be called when speech is recognized.
-            model_type: The type of speech recognition model to use ('google', 'vosk', 'whisper', etc.)
-            vosk_model_path: Path to Vosk model directory
-            whisper_model_name: Name of Whisper model to use
-            config: Configuration object
-            post_event_callback: Callback function to post recognition results
+            config: Configuration object or dictionary
+            post_event_callback: Callback for posting events
         """
-        logger.info("Initializing speech recognizer")
+        self.logger = logging.getLogger(__name__)
+        self.post_event = post_event_callback
+        self.running = False
+        
+        # Extract configuration parameters
+        if config is None:
+            config = {}
+            
+        # Get configuration values with defaults
+        if isinstance(config, dict):
+            self.min_confidence = config.get('MIN_CONFIDENCE', 0.6)
+            self.sample_rate = config.get('SAMPLE_RATE', 16000)
+        else:  # Assume it's an object with attributes
+            self.min_confidence = getattr(config, 'MIN_CONFIDENCE', 0.6)
+            self.sample_rate = getattr(config, 'SAMPLE_RATE', 16000)
+        
+        # Initialize mock responses
+        self.mock_responses = [
+            "Hello", "How are you", "What time is it",
+            "Tell me a story", "That's interesting",
+            "I like that", "Can you help me",
+            "What's the weather like", "Good morning",
+            "Good evening"
+        ]
+        
+        self.logger.info("Speech recognizer initialized in mock mode")
         
         # Configuration
-        self.model_path = model_path or config.speech.recognition_model
-        self.threshold = threshold or config.speech.recognition_threshold
-        self.language = language or config.speech.language
-        self.device_index = device_index or config.hardware.audio_input_device
-        self.sample_rate = sample_rate or config.hardware.audio_sample_rate
-        self.buffer_duration_sec = buffer_duration_sec
-        self.max_recording_sec = max_recording_sec
-        self.silence_duration_sec = silence_duration_sec
-        self.vad_threshold = vad_threshold
-        self.callback = callback
-        self.model_type = model_type or "default"
-        self.vosk_model_path = vosk_model_path
-        self.whisper_model_name = whisper_model_name
+        self.model_path = config.speech.recognition_model if hasattr(config, 'recognition_model') else None
+        self.threshold = config.speech.recognition_threshold if hasattr(config, 'recognition_threshold') else 0.5
+        self.language = config.speech.language if hasattr(config, 'language') else "en"
+        self.device_index = config.hardware.audio_input_device if hasattr(config, 'hardware') and hasattr(config.hardware, 'audio_input_device') else None
+        self.buffer_duration_sec = config.speech.buffer_duration_sec if hasattr(config, 'speech') and hasattr(config.speech, 'buffer_duration_sec') else 2.0
+        self.max_recording_sec = config.speech.max_recording_sec if hasattr(config, 'speech') and hasattr(config.speech, 'max_recording_sec') else 30.0
+        self.silence_duration_sec = config.speech.silence_duration_sec if hasattr(config, 'speech') and hasattr(config.speech, 'silence_duration_sec') else 1.5
+        self.vad_threshold = config.speech.vad_threshold if hasattr(config, 'speech') and hasattr(config.speech, 'vad_threshold') else 0.3
+        self.callback = config.speech.callback if hasattr(config, 'speech') and hasattr(config.speech, 'callback') else None
+        self.model_type = config.speech.model_type if hasattr(config, 'speech') and hasattr(config.speech, 'model_type') else "default"
+        self.vosk_model_path = config.speech.vosk_model_path if hasattr(config, 'speech') and hasattr(config.speech, 'vosk_model_path') else None
+        self.whisper_model_name = config.speech.whisper_model_name if hasattr(config, 'speech') and hasattr(config.speech, 'whisper_model_name') else None
         self.config = config
-        self.post_event = post_event_callback
         
         # Internal state
         self.is_running = False
@@ -147,7 +139,7 @@ class SpeechRecognizer:
         
         # Load the model if the path exists
         self.model = None
-        if os.path.exists(self.model_path):
+        if self.model_path and os.path.exists(self.model_path):
             self._load_model()
         else:
             logger.error(f"Model file not found: {self.model_path}")
@@ -199,7 +191,7 @@ class SpeechRecognizer:
     
     def start(self):
         """Start the speech recognizer."""
-        if self.is_running:
+        if self.running:
             logger.warning("Speech recognizer is already running")
             return False
         
@@ -207,7 +199,7 @@ class SpeechRecognizer:
             logger.error("Cannot start speech recognizer: Model not loaded")
             return False
         
-        self.is_running = True
+        self.running = True
         self.is_listening = False
         
         # Start the processing thread
@@ -223,10 +215,10 @@ class SpeechRecognizer:
     
     def stop(self):
         """Stop the speech recognizer."""
-        if not self.is_running:
+        if not self.running:
             return
         
-        self.is_running = False
+        self.running = False
         self.is_listening = False
         
         # Stop the audio stream if active
@@ -277,17 +269,17 @@ class SpeechRecognizer:
             logger.info("Audio stream started")
             
             # Keep the thread alive while running
-            while self.is_running:
+            while self.running:
                 time.sleep(0.1)
                 
         except Exception as e:
             logger.error(f"Error in listen loop: {e}")
-            self.is_running = False
+            self.running = False
     
     def _process_loop(self):
         """Processing thread that processes audio data and recognizes speech."""
         try:
-            while self.is_running:
+            while self.running:
                 # Get audio data from the queue
                 audio_data = self.audio_queue.get()
                 
@@ -303,7 +295,7 @@ class SpeechRecognizer:
                 
         except Exception as e:
             logger.error(f"Error in process loop: {e}")
-            self.is_running = False
+            self.running = False
     
     def _process_audio(self, audio_data: np.ndarray):
         """Process audio data and post recognition results"""
@@ -349,14 +341,7 @@ class SpeechRecognizer:
     
     def _generate_mock_response(self):
         """Generate mock speech recognition results"""
-        responses = [
-            "Hello there",
-            "How are you",
-            "What's the weather like",
-            "Tell me a joke",
-            "That's interesting"
-        ]
-        return random.choice(responses)
+        return random.choice(self.mock_responses)
     
     def recognize_file(self, file_path: str) -> Tuple[str, float]:
         """
@@ -472,12 +457,12 @@ class SpeechRecognizer:
 
     def is_running(self):
         """Check if the recognizer is running"""
-        return self.is_running
+        return self.running
 
     def get_status(self):
         """Get current status of the recognizer"""
         return {
-            'running': self.is_running,
+            'running': self.running,
             'mock_mode': True,
             'timestamp': time.time()
         }
@@ -504,606 +489,6 @@ class SpeechRecognizer:
             "Good evening"
         ]
         self.logger.info("Mock responses initialized")
-
-    def _generate_mock_response(self):
-        """Generate a mock response"""
-        return random.choice(self.mock_responses)
-
-    def _check_model_exists(self, model_type):
-        """Check if the specified model files exist"""
-        if model_type == "google":
-            # Google doesn't require local model files
-            return True
-        elif model_type == "vosk" and self.vosk_model_path:
-            return os.path.exists(self.vosk_model_path)
-        elif model_type == "whisper" and self.whisper_model_name:
-            # Whisper models are downloaded on first use
-            return True
-        return False
-
-    def _load_model(self):
-        """Load the Whisper speech recognition model."""
-        try:
-            logger.info(f"Loading Whisper model from {self.model_path}")
-            # Check for GPU or use CPU if not available
-            device = "cuda" if self._is_cuda_available() else "cpu"
-            compute_type = "float16" if device == "cuda" else "int8"
-            
-            # Load model - with beam_size=1 for faster inference
-            self.model = WhisperModel(
-                self.model_path,
-                device=device,
-                compute_type=compute_type,
-                download_root=None,
-                local_files_only=True,
-                beam_size=1
-            )
-            logger.info(f"Whisper model loaded successfully (device: {device})")
-        except Exception as e:
-            logger.error(f"Failed to load Whisper model: {e}")
-            self.model = None
-
-    def _is_cuda_available(self) -> bool:
-        """Check if CUDA is available for GPU acceleration."""
-        try:
-            import torch
-            return torch.cuda.is_available()
-        except ImportError:
-            return False
-
-    def _init_recognizer(self):
-        """Initialize the speech recognizer"""
-        try:
-            # Use mock recognizer
-            self.sr = MockSpeechRecognition()
-            self.recognizer = self.sr
-            self.logger.info("Using mock speech recognition")
-            
-        except Exception as e:
-            self.logger.error(f"Error initializing speech recognizer: {e}")
-            raise
-
-    def _process_audio(self, audio_data: np.ndarray):
-        """Process audio data and post recognition results"""
-        try:
-            if self.model_type == "simple":
-                # Generate mock recognition results
-                text = self._generate_mock_response()
-                confidence = random.uniform(0.7, 1.0)
-            else:
-                # Perform actual speech recognition
-                segments, info = self.model.transcribe(
-                    audio_data,
-                    language=self.language,
-                    beam_size=1,
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500)
-                )
-                text = " ".join(segment.text for segment in segments)
-                text = text.strip()
-                confidence = info.avg_logprob
-            
-            # Post recognition event
-            self.post_event(TOPICS['SPEECH_RECOGNIZED'], {
-                'text': text,
-                'confidence': confidence,
-                'timestamp': time.time()
-            })
-            
-        except sr.UnknownValueError:
-            self.logger.debug("Speech not understood")
-        except sr.RequestError as e:
-            self.logger.error(f"Speech recognition error: {e}")
-            self.post_event(TOPICS['ERROR'], {
-                'message': f"Speech recognition error: {e}",
-                'severity': 'ERROR'
-            })
-        except Exception as e:
-            self.logger.error(f"Error processing audio: {e}")
-            self.post_event(TOPICS['ERROR'], {
-                'message': f"Audio processing error: {e}",
-                'severity': 'ERROR'
-            })
-
-    def _generate_mock_response(self):
-        """Generate a mock response"""
-        return random.choice(self.mock_responses)
-
-    def _check_model_exists(self, model_type):
-        """Check if the specified model files exist"""
-        if model_type == "google":
-            # Google doesn't require local model files
-            return True
-        elif model_type == "vosk" and self.vosk_model_path:
-            return os.path.exists(self.vosk_model_path)
-        elif model_type == "whisper" and self.whisper_model_name:
-            # Whisper models are downloaded on first use
-            return True
-        return False
-
-    def _load_model(self):
-        """Load the Whisper speech recognition model."""
-        try:
-            logger.info(f"Loading Whisper model from {self.model_path}")
-            # Check for GPU or use CPU if not available
-            device = "cuda" if self._is_cuda_available() else "cpu"
-            compute_type = "float16" if device == "cuda" else "int8"
-            
-            # Load model - with beam_size=1 for faster inference
-            self.model = WhisperModel(
-                self.model_path,
-                device=device,
-                compute_type=compute_type,
-                download_root=None,
-                local_files_only=True,
-                beam_size=1
-            )
-            logger.info(f"Whisper model loaded successfully (device: {device})")
-        except Exception as e:
-            logger.error(f"Failed to load Whisper model: {e}")
-            self.model = None
-
-    def _is_cuda_available(self) -> bool:
-        """Check if CUDA is available for GPU acceleration."""
-        try:
-            import torch
-            return torch.cuda.is_available()
-        except ImportError:
-            return False
-
-    def _init_recognizer(self):
-        """Initialize the speech recognizer"""
-        try:
-            # Use mock recognizer
-            self.sr = MockSpeechRecognition()
-            self.recognizer = self.sr
-            self.logger.info("Using mock speech recognition")
-            
-        except Exception as e:
-            self.logger.error(f"Error initializing speech recognizer: {e}")
-            raise
-
-    def _process_audio(self, audio_data: np.ndarray):
-        """Process audio data and post recognition results"""
-        try:
-            if self.model_type == "simple":
-                # Generate mock recognition results
-                text = self._generate_mock_response()
-                confidence = random.uniform(0.7, 1.0)
-            else:
-                # Perform actual speech recognition
-                segments, info = self.model.transcribe(
-                    audio_data,
-                    language=self.language,
-                    beam_size=1,
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500)
-                )
-                text = " ".join(segment.text for segment in segments)
-                text = text.strip()
-                confidence = info.avg_logprob
-            
-            # Post recognition event
-            self.post_event(TOPICS['SPEECH_RECOGNIZED'], {
-                'text': text,
-                'confidence': confidence,
-                'timestamp': time.time()
-            })
-            
-        except sr.UnknownValueError:
-            self.logger.debug("Speech not understood")
-        except sr.RequestError as e:
-            self.logger.error(f"Speech recognition error: {e}")
-            self.post_event(TOPICS['ERROR'], {
-                'message': f"Speech recognition error: {e}",
-                'severity': 'ERROR'
-            })
-        except Exception as e:
-            self.logger.error(f"Error processing audio: {e}")
-            self.post_event(TOPICS['ERROR'], {
-                'message': f"Audio processing error: {e}",
-                'severity': 'ERROR'
-            })
-
-    def _generate_mock_response(self):
-        """Generate a mock response"""
-        return random.choice(self.mock_responses)
-
-    def _check_model_exists(self, model_type):
-        """Check if the specified model files exist"""
-        if model_type == "google":
-            # Google doesn't require local model files
-            return True
-        elif model_type == "vosk" and self.vosk_model_path:
-            return os.path.exists(self.vosk_model_path)
-        elif model_type == "whisper" and self.whisper_model_name:
-            # Whisper models are downloaded on first use
-            return True
-        return False
-
-    def _load_model(self):
-        """Load the Whisper speech recognition model."""
-        try:
-            logger.info(f"Loading Whisper model from {self.model_path}")
-            # Check for GPU or use CPU if not available
-            device = "cuda" if self._is_cuda_available() else "cpu"
-            compute_type = "float16" if device == "cuda" else "int8"
-            
-            # Load model - with beam_size=1 for faster inference
-            self.model = WhisperModel(
-                self.model_path,
-                device=device,
-                compute_type=compute_type,
-                download_root=None,
-                local_files_only=True,
-                beam_size=1
-            )
-            logger.info(f"Whisper model loaded successfully (device: {device})")
-        except Exception as e:
-            logger.error(f"Failed to load Whisper model: {e}")
-            self.model = None
-
-    def _is_cuda_available(self) -> bool:
-        """Check if CUDA is available for GPU acceleration."""
-        try:
-            import torch
-            return torch.cuda.is_available()
-        except ImportError:
-            return False
-
-    def _init_recognizer(self):
-        """Initialize the speech recognizer"""
-        try:
-            # Use mock recognizer
-            self.sr = MockSpeechRecognition()
-            self.recognizer = self.sr
-            self.logger.info("Using mock speech recognition")
-            
-        except Exception as e:
-            self.logger.error(f"Error initializing speech recognizer: {e}")
-            raise
-
-    def _process_audio(self, audio_data: np.ndarray):
-        """Process audio data and post recognition results"""
-        try:
-            if self.model_type == "simple":
-                # Generate mock recognition results
-                text = self._generate_mock_response()
-                confidence = random.uniform(0.7, 1.0)
-            else:
-                # Perform actual speech recognition
-                segments, info = self.model.transcribe(
-                    audio_data,
-                    language=self.language,
-                    beam_size=1,
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500)
-                )
-                text = " ".join(segment.text for segment in segments)
-                text = text.strip()
-                confidence = info.avg_logprob
-            
-            # Post recognition event
-            self.post_event(TOPICS['SPEECH_RECOGNIZED'], {
-                'text': text,
-                'confidence': confidence,
-                'timestamp': time.time()
-            })
-            
-        except sr.UnknownValueError:
-            self.logger.debug("Speech not understood")
-        except sr.RequestError as e:
-            self.logger.error(f"Speech recognition error: {e}")
-            self.post_event(TOPICS['ERROR'], {
-                'message': f"Speech recognition error: {e}",
-                'severity': 'ERROR'
-            })
-        except Exception as e:
-            self.logger.error(f"Error processing audio: {e}")
-            self.post_event(TOPICS['ERROR'], {
-                'message': f"Audio processing error: {e}",
-                'severity': 'ERROR'
-            })
-
-    def _generate_mock_response(self):
-        """Generate a mock response"""
-        return random.choice(self.mock_responses)
-
-    def _check_model_exists(self, model_type):
-        """Check if the specified model files exist"""
-        if model_type == "google":
-            # Google doesn't require local model files
-            return True
-        elif model_type == "vosk" and self.vosk_model_path:
-            return os.path.exists(self.vosk_model_path)
-        elif model_type == "whisper" and self.whisper_model_name:
-            # Whisper models are downloaded on first use
-            return True
-        return False
-
-    def _load_model(self):
-        """Load the Whisper speech recognition model."""
-        try:
-            logger.info(f"Loading Whisper model from {self.model_path}")
-            # Check for GPU or use CPU if not available
-            device = "cuda" if self._is_cuda_available() else "cpu"
-            compute_type = "float16" if device == "cuda" else "int8"
-            
-            # Load model - with beam_size=1 for faster inference
-            self.model = WhisperModel(
-                self.model_path,
-                device=device,
-                compute_type=compute_type,
-                download_root=None,
-                local_files_only=True,
-                beam_size=1
-            )
-            logger.info(f"Whisper model loaded successfully (device: {device})")
-        except Exception as e:
-            logger.error(f"Failed to load Whisper model: {e}")
-            self.model = None
-
-    def _is_cuda_available(self) -> bool:
-        """Check if CUDA is available for GPU acceleration."""
-        try:
-            import torch
-            return torch.cuda.is_available()
-        except ImportError:
-            return False
-
-    def _init_recognizer(self):
-        """Initialize the speech recognizer"""
-        try:
-            # Use mock recognizer
-            self.sr = MockSpeechRecognition()
-            self.recognizer = self.sr
-            self.logger.info("Using mock speech recognition")
-            
-        except Exception as e:
-            self.logger.error(f"Error initializing speech recognizer: {e}")
-            raise
-
-    def _process_audio(self, audio_data: np.ndarray):
-        """Process audio data and post recognition results"""
-        try:
-            if self.model_type == "simple":
-                # Generate mock recognition results
-                text = self._generate_mock_response()
-                confidence = random.uniform(0.7, 1.0)
-            else:
-                # Perform actual speech recognition
-                segments, info = self.model.transcribe(
-                    audio_data,
-                    language=self.language,
-                    beam_size=1,
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500)
-                )
-                text = " ".join(segment.text for segment in segments)
-                text = text.strip()
-                confidence = info.avg_logprob
-            
-            # Post recognition event
-            self.post_event(TOPICS['SPEECH_RECOGNIZED'], {
-                'text': text,
-                'confidence': confidence,
-                'timestamp': time.time()
-            })
-            
-        except sr.UnknownValueError:
-            self.logger.debug("Speech not understood")
-        except sr.RequestError as e:
-            self.logger.error(f"Speech recognition error: {e}")
-            self.post_event(TOPICS['ERROR'], {
-                'message': f"Speech recognition error: {e}",
-                'severity': 'ERROR'
-            })
-        except Exception as e:
-            self.logger.error(f"Error processing audio: {e}")
-            self.post_event(TOPICS['ERROR'], {
-                'message': f"Audio processing error: {e}",
-                'severity': 'ERROR'
-            })
-
-    def _generate_mock_response(self):
-        """Generate a mock response"""
-        return random.choice(self.mock_responses)
-
-    def _check_model_exists(self, model_type):
-        """Check if the specified model files exist"""
-        if model_type == "google":
-            # Google doesn't require local model files
-            return True
-        elif model_type == "vosk" and self.vosk_model_path:
-            return os.path.exists(self.vosk_model_path)
-        elif model_type == "whisper" and self.whisper_model_name:
-            # Whisper models are downloaded on first use
-            return True
-        return False
-
-    def _load_model(self):
-        """Load the Whisper speech recognition model."""
-        try:
-            logger.info(f"Loading Whisper model from {self.model_path}")
-            # Check for GPU or use CPU if not available
-            device = "cuda" if self._is_cuda_available() else "cpu"
-            compute_type = "float16" if device == "cuda" else "int8"
-            
-            # Load model - with beam_size=1 for faster inference
-            self.model = WhisperModel(
-                self.model_path,
-                device=device,
-                compute_type=compute_type,
-                download_root=None,
-                local_files_only=True,
-                beam_size=1
-            )
-            logger.info(f"Whisper model loaded successfully (device: {device})")
-        except Exception as e:
-            logger.error(f"Failed to load Whisper model: {e}")
-            self.model = None
-
-    def _is_cuda_available(self) -> bool:
-        """Check if CUDA is available for GPU acceleration."""
-        try:
-            import torch
-            return torch.cuda.is_available()
-        except ImportError:
-            return False
-
-    def _init_recognizer(self):
-        """Initialize the speech recognizer"""
-        try:
-            # Use mock recognizer
-            self.sr = MockSpeechRecognition()
-            self.recognizer = self.sr
-            self.logger.info("Using mock speech recognition")
-            
-        except Exception as e:
-            self.logger.error(f"Error initializing speech recognizer: {e}")
-            raise
-
-    def _process_audio(self, audio_data: np.ndarray):
-        """Process audio data and post recognition results"""
-        try:
-            if self.model_type == "simple":
-                # Generate mock recognition results
-                text = self._generate_mock_response()
-                confidence = random.uniform(0.7, 1.0)
-            else:
-                # Perform actual speech recognition
-                segments, info = self.model.transcribe(
-                    audio_data,
-                    language=self.language,
-                    beam_size=1,
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500)
-                )
-                text = " ".join(segment.text for segment in segments)
-                text = text.strip()
-                confidence = info.avg_logprob
-            
-            # Post recognition event
-            self.post_event(TOPICS['SPEECH_RECOGNIZED'], {
-                'text': text,
-                'confidence': confidence,
-                'timestamp': time.time()
-            })
-            
-        except sr.UnknownValueError:
-            self.logger.debug("Speech not understood")
-        except sr.RequestError as e:
-            self.logger.error(f"Speech recognition error: {e}")
-            self.post_event(TOPICS['ERROR'], {
-                'message': f"Speech recognition error: {e}",
-                'severity': 'ERROR'
-            })
-        except Exception as e:
-            self.logger.error(f"Error processing audio: {e}")
-            self.post_event(TOPICS['ERROR'], {
-                'message': f"Audio processing error: {e}",
-                'severity': 'ERROR'
-            })
-
-    def _generate_mock_response(self):
-        """Generate a mock response"""
-        return random.choice(self.mock_responses)
-
-    def _check_model_exists(self, model_type):
-        """Check if the specified model files exist"""
-        if model_type == "google":
-            # Google doesn't require local model files
-            return True
-        elif model_type == "vosk" and self.vosk_model_path:
-            return os.path.exists(self.vosk_model_path)
-        elif model_type == "whisper" and self.whisper_model_name:
-            # Whisper models are downloaded on first use
-            return True
-        return False
-
-    def _load_model(self):
-        """Load the Whisper speech recognition model."""
-        try:
-            logger.info(f"Loading Whisper model from {self.model_path}")
-            # Check for GPU or use CPU if not available
-            device = "cuda" if self._is_cuda_available() else "cpu"
-            compute_type = "float16" if device == "cuda" else "int8"
-            
-            # Load model - with beam_size=1 for faster inference
-            self.model = WhisperModel(
-                self.model_path,
-                device=device,
-                compute_type=compute_type,
-                download_root=None,
-                local_files_only=True,
-                beam_size=1
-            )
-            logger.info(f"Whisper model loaded successfully (device: {device})")
-        except Exception as e:
-            logger.error(f"Failed to load Whisper model: {e}")
-            self.model = None
-
-    def _is_cuda_available(self) -> bool:
-        """Check if CUDA is available for GPU acceleration."""
-        try:
-            import torch
-            return torch.cuda.is_available()
-        except ImportError:
-            return False
-
-    def _init_recognizer(self):
-        """Initialize the speech recognizer"""
-        try:
-            # Use mock recognizer
-            self.sr = MockSpeechRecognition()
-            self.recognizer = self.sr
-            self.logger.info("Using mock speech recognition")
-            
-        except Exception as e:
-            self.logger.error(f"Error initializing speech recognizer: {e}")
-            raise
-
-    def _process_audio(self, audio_data: np.ndarray):
-        """Process audio data and post recognition results"""
-        try:
-            if self.model_type == "simple":
-                # Generate mock recognition results
-                text = self._generate_mock_response()
-                confidence = random.uniform(0.7, 1.0)
-            else:
-                # Perform actual speech recognition
-                segments, info = self.model.transcribe(
-                    audio_data,
-                    language=self.language,
-                    beam_size=1,
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500)
-                )
-                text = " ".join(segment.text for segment in segments)
-                text = text.strip()
-                confidence = info.avg_logprob
-            
-            # Post recognition event
-            self.post_event(TOPICS['SPEECH_RECOGNIZED'], {
-                'text': text,
-                'confidence': confidence,
-                'timestamp': time.time()
-            })
-            
-        except sr.UnknownValueError:
-            self.logger.debug("Speech not understood")
-        except sr.RequestError as e:
-            self.logger.error(f"Speech recognition error: {e}")
-            self.post_event(TOPICS['ERROR'], {
-                'message': f"Speech recognition error: {e}",
-                'severity': 'ERROR'
-            })
-        except Exception as e:
-            self.logger.error(f"Error processing audio: {e}")
-            self.post_event(TOPICS['ERROR'], {
-                'message': f"Audio processing error: {e}",
-                'severity': 'ERROR'
-            })
 
     def _generate_mock_response(self):
         """Generate a mock response"""

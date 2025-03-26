@@ -10,9 +10,16 @@ logger = logging.getLogger(__name__)
 class AudioCapture:
     """Records audio from microphone for speech processing"""
     
-    def __init__(self, config=None, sample_rate=16000, channels=1, chunk_size=1024, 
-                 threshold=0.01, **kwargs):  # Added **kwargs to handle extra arguments
-        """Initialize audio capture with fallback to mock"""
+    def __init__(self, sample_rate=16000, channels=1, chunk_size=1024, threshold=0.01, **kwargs):
+        """Initialize audio capture with mock implementation
+        
+        Args:
+            sample_rate: Audio sample rate in Hz
+            channels: Number of audio channels
+            chunk_size: Size of audio chunks
+            threshold: Audio detection threshold
+            **kwargs: Additional arguments (ignored)
+        """
         self.logger = logging.getLogger(__name__)
         self.sample_rate = sample_rate
         self.channels = channels
@@ -23,14 +30,6 @@ class AudioCapture:
         self.latest_audio = None
         self.last_audio_time = 0
         self.mock_audio_thread = None
-        
-        # Handle config if provided
-        if config:
-            self.sample_rate = getattr(config, 'SAMPLE_RATE', self.sample_rate)
-            self.channels = getattr(config, 'CHANNELS', self.channels)
-            self.chunk_size = getattr(config, 'CHUNK_SIZE', self.chunk_size)
-            self.threshold = getattr(config, 'THRESHOLD', self.threshold)
-        
         self.logger.info("Using mock audio capture")
 
     def get_latest_audio(self):

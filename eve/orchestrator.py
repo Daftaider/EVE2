@@ -41,7 +41,7 @@ class EVEOrchestrator:
         self.event_queue = queue.Queue()
         
         # Initialize state
-        self.current_emotion = "neutral"  # Add default emotion
+        self.current_emotion = "neutral"
         self.last_face_detected = 0
         self.last_speech_detected = 0
         
@@ -66,6 +66,7 @@ class EVEOrchestrator:
                 CHANNELS = 1
                 CHUNK_SIZE = 1024
                 THRESHOLD = 0.01
+                MIN_CONFIDENCE = 0.6
             
             class display:
                 WIDTH = 800
