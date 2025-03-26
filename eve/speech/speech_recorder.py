@@ -20,7 +20,40 @@ class AudioCapture:
         self.audio_queue = queue.Queue()
         self._recording_thread = None
         self._stream = None
+        self._last_check_time = time.time()
+        self._audio_threshold = 0.01  # Threshold for detecting non-silent audio
         
+    def has_new_audio(self):
+        """Check if new audio data is available and above noise threshold"""
+        try:
+            # Peek at the queue without removing the data
+            audio_data = self.audio_queue.queue[0] if not self.audio_queue.empty() else None
+            
+            if audio_data is not None:
+                # Check if audio is above threshold (not just silence)
+                audio_level = np.abs(audio_data).mean()
+                return audio_level > self._audio_threshold
+            return False
+        except Exception as e:
+            logger.error(f"Error checking for new audio: {e}")
+            return False
+    
+    def get_audio_level(self):
+        """Get current audio level (for monitoring)"""
+        try:
+            if not self.audio_queue.empty():
+                audio_data = self.audio_queue.queue[0]
+                return np.abs(audio_data).mean()
+            return 0.0
+        except Exception as e:
+            logger.error(f"Error getting audio level: {e}")
+            return 0.0
+    
+    def set_threshold(self, threshold):
+        """Set the audio detection threshold"""
+        self._audio_threshold = max(0.0, float(threshold))
+        logger.info(f"Audio detection threshold set to: {self._audio_threshold}")
+
     def start(self):
         """Start audio capture in a separate thread"""
         if self.is_recording:
@@ -87,6 +120,14 @@ class AudioCapture:
                 try:
                     data = self._stream.read(self.chunk_size, exception_on_overflow=False)
                     audio_data = np.frombuffer(data, dtype=np.float32)
+                    
+                    # Keep queue from growing too large
+                    while self.audio_queue.qsize() > 10:
+                        try:
+                            self.audio_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                            
                     self.audio_queue.put(audio_data)
                 except Exception as e:
                     logger.error(f"Error capturing audio: {e}")
@@ -111,8 +152,15 @@ class AudioCapture:
         """Generate mock audio data when real capture fails"""
         logger.info("Using mock audio capture")
         while self.is_recording:
-            # Generate silent audio data
-            mock_data = np.zeros(self.chunk_size, dtype=np.float32)
+            # Generate mock audio data with occasional "speech-like" patterns
+            t = time.time()
+            if int(t) % 10 < 3:  # Simulate speech every 10 seconds for 3 seconds
+                # Generate "speech-like" audio
+                mock_data = np.random.normal(0, 0.1, self.chunk_size).astype(np.float32)
+            else:
+                # Generate silence with very low noise
+                mock_data = np.random.normal(0, 0.001, self.chunk_size).astype(np.float32)
+                
             self.audio_queue.put(mock_data)
             time.sleep(self.chunk_size / self.sample_rate)  # Simulate real-time capture
             
