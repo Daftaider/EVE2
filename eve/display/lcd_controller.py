@@ -26,17 +26,32 @@ class LCDController:
     manages the rendering of emotive eye animations.
     """
     
-    def __init__(self, width=800, height=480, fps=30, default_emotion="neutral",
-                 background_color=(0, 0, 0), eye_color=(0, 191, 255)):
+    def __init__(self, config=None, width=800, height=480, fps=30, 
+                 default_emotion="neutral", background_color=(0, 0, 0), 
+                 eye_color=(0, 191, 255), **kwargs):  # Added **kwargs to handle extra arguments
         self.logger = logging.getLogger(__name__)
-        self.width = width
-        self.height = height
-        self.fps = fps
-        self.background_color = background_color
-        self.eye_color = eye_color
-        self.default_emotion = default_emotion
-        self.current_emotion = default_emotion
         
+        # Initialize with defaults or config values
+        if config:
+            self.width = getattr(config, 'WIDTH', width)
+            self.height = getattr(config, 'HEIGHT', height)
+            self.fps = getattr(config, 'FPS', fps)
+            self.default_emotion = getattr(config, 'DEFAULT_EMOTION', default_emotion)
+            self.background_color = getattr(config, 'BACKGROUND_COLOR', background_color)
+            self.eye_color = getattr(config, 'EYE_COLOR', eye_color)
+        else:
+            self.width = width
+            self.height = height
+            self.fps = fps
+            self.default_emotion = default_emotion
+            self.background_color = background_color
+            self.eye_color = eye_color
+
+        # Handle resolution from kwargs if provided
+        if 'resolution' in kwargs and kwargs['resolution']:
+            self.width, self.height = kwargs['resolution']
+        
+        self.current_emotion = self.default_emotion
         self.running = False
         self.render_thread = None
         self.use_fallback = 'DISPLAY' not in os.environ

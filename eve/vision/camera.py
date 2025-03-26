@@ -10,30 +10,32 @@ logger = logging.getLogger(__name__)
 class Camera:
     """Camera interface for accessing video frames"""
     
-    def __init__(self, camera_index=0, resolution=(640, 480), mock_if_failed=True, fps=30):
-        """Initialize camera with fallback to mock"""
+    def __init__(self, config=None, camera_index=0, resolution=(640, 480), fps=30, **kwargs):
         self.logger = logging.getLogger(__name__)
-        self.resolution = resolution
-        self.fps = fps
-        self.mock_mode = False
-        self.cap = None
-        self.running = False
-        self.frame_queue = queue.Queue(maxsize=2)  # Keep only latest frames
         
-        # Frame timing
-        self.last_frame_time = time.time()
-        self.frame_interval = 1.0 / fps
+        # Initialize with defaults or config values
+        if config:
+            self.camera_index = getattr(config, 'CAMERA_INDEX', camera_index)
+            self.resolution = getattr(config, 'RESOLUTION', resolution)
+            self.fps = getattr(config, 'FPS', fps)
+        else:
+            self.camera_index = camera_index
+            self.resolution = resolution
+            self.fps = fps
+        
+        self.cap = None
+        self.mock_mode = False
         self.frame_count = 0
+        self.last_frame_time = time.time()
         
         try:
-            self.cap = cv2.VideoCapture(camera_index)
+            self.cap = cv2.VideoCapture(self.camera_index)
             if not self.cap.isOpened():
-                raise RuntimeError(f"Failed to open camera {camera_index}")
-                
-            # Set camera properties
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, resolution[0])
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution[1])
-            self.cap.set(cv2.CAP_PROP_FPS, fps)
+                raise RuntimeError(f"Failed to open camera {self.camera_index}")
+            
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
+            self.cap.set(cv2.CAP_PROP_FPS, self.fps)
             
             # Test capture
             ret, _ = self.cap.read()
@@ -41,87 +43,62 @@ class Camera:
                 raise RuntimeError("Failed to capture test frame")
                 
         except Exception as e:
-            self.logger.warning(f"Failed to open camera {camera_index}, using mock camera")
-            if mock_if_failed:
-                self.mock_mode = True
-                self._init_mock_camera()
-            else:
-                raise
+            self.logger.warning(f"Failed to open camera {self.camera_index}, using mock camera")
+            self.mock_mode = True
+            self._init_mock_camera()
 
     def _init_mock_camera(self):
-        """Initialize mock camera with generated patterns"""
+        """Initialize mock camera with test patterns"""
         self.mock_patterns = []
         
         # Generate test patterns
         for i in range(3):
             frame = np.zeros((self.resolution[1], self.resolution[0], 3), dtype=np.uint8)
             
-            # Add some shapes
-            cv2.circle(frame, 
-                      (self.resolution[0]//2, self.resolution[1]//2),
-                      min(self.resolution)//4,
-                      (0, 255, 0),
-                      2)
-            
-            cv2.rectangle(frame,
-                         (self.resolution[0]//4, self.resolution[1]//4),
-                         (3*self.resolution[0]//4, 3*self.resolution[1]//4),
-                         (0, 0, 255),
-                         2)
-            
             # Add face-like features
-            eye_color = (255, 255, 255)
-            eye_size = min(self.resolution) // 16
-            left_eye_pos = (self.resolution[0]//3, self.resolution[1]//2)
-            right_eye_pos = (2*self.resolution[0]//3, self.resolution[1]//2)
+            center_x = self.resolution[0] // 2
+            center_y = self.resolution[1] // 2
             
-            cv2.circle(frame, left_eye_pos, eye_size, eye_color, -1)
-            cv2.circle(frame, right_eye_pos, eye_size, eye_color, -1)
+            # Draw face outline
+            radius = min(self.resolution) // 3
+            cv2.circle(frame, (center_x, center_y), radius, (200, 200, 200), 2)
             
-            # Add mouth
-            mouth_start = (self.resolution[0]//3, 2*self.resolution[1]//3)
-            mouth_end = (2*self.resolution[0]//3, 2*self.resolution[1]//3)
-            cv2.line(frame, mouth_start, mouth_end, (255, 255, 255), 2)
+            # Draw eyes
+            eye_radius = radius // 4
+            left_eye = (center_x - radius//2, center_y - radius//4)
+            right_eye = (center_x + radius//2, center_y - radius//4)
+            cv2.circle(frame, left_eye, eye_radius, (255, 255, 255), -1)
+            cv2.circle(frame, right_eye, eye_radius, (255, 255, 255), -1)
             
-            # Add frame number
-            cv2.putText(frame,
-                       f"Mock Frame {i+1}",
-                       (10, 30),
-                       cv2.FONT_HERSHEY_SIMPLEX,
-                       1,
-                       (255, 255, 255),
-                       2)
+            # Draw mouth
+            mouth_y = center_y + radius//3
+            cv2.line(frame, 
+                    (center_x - radius//2, mouth_y),
+                    (center_x + radius//2, mouth_y),
+                    (255, 255, 255), 2)
             
             self.mock_patterns.append(frame)
         
         self.current_pattern = 0
         self.pattern_change_time = time.time()
-        self.last_frame_time = time.time()
         self.logger.info(f"Mock camera initialized with {len(self.mock_patterns)} test patterns")
 
     def read(self):
-        """Read a frame from the camera"""
-        current_time = time.time()
-        
-        # Enforce frame rate
-        if current_time - self.last_frame_time < self.frame_interval:
-            time.sleep(max(0, self.frame_interval - (current_time - self.last_frame_time)))
-        
+        """Read a frame from the camera or mock camera"""
         if self.mock_mode:
-            ret, frame = self._get_mock_frame()
-        elif self.cap is not None:
+            return self._get_mock_frame()
+        
+        if self.cap and self.cap.isOpened():
             ret, frame = self.cap.read()
-        else:
-            return False, None
-            
-        if ret:
-            self.last_frame_time = time.time()
-            self.frame_count += 1
-            
-        return ret, frame
+            if ret:
+                self.frame_count += 1
+                self.last_frame_time = time.time()
+            return ret, frame
+        
+        return False, None
 
     def _get_mock_frame(self):
-        """Generate mock frame with movement simulation"""
+        """Generate a mock frame"""
         current_time = time.time()
         
         # Change pattern every 3 seconds
@@ -129,12 +106,14 @@ class Camera:
             self.current_pattern = (self.current_pattern + 1) % len(self.mock_patterns)
             self.pattern_change_time = current_time
         
-        # Get base pattern
         frame = self.mock_patterns[self.current_pattern].copy()
         
-        # Add some random noise to simulate movement
+        # Add some random noise
         noise = np.random.normal(0, 5, frame.shape).astype(np.int8)
         frame = cv2.add(frame, noise)
+        
+        self.frame_count += 1
+        self.last_frame_time = time.time()
         
         return True, frame
 
@@ -159,8 +138,8 @@ class Camera:
 
     def release(self):
         """Release camera resources"""
-        self.running = False
-        if self.cap is not None:
+        if self.cap:
             self.cap.release()
+        self.cap = None
         self.frame_count = 0
         self.last_frame_time = 0 
