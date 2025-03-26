@@ -16,6 +16,8 @@ from typing import Optional, Callable, Dict, Any, List, Tuple
 from pathlib import Path
 from faster_whisper import WhisperModel
 import eve.config as config
+import random
+import speech_recognition as sr
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,9 @@ class SpeechRecognizer:
         callback: Optional[Callable[[str, float], None]] = None,
         model_type: Optional[str] = None,
         vosk_model_path: Optional[str] = None,
-        whisper_model_name: Optional[str] = None
+        whisper_model_name: Optional[str] = None,
+        config=None,
+        post_event_callback=None
     ):
         """
         Initialize the speech recognizer.
@@ -60,6 +64,8 @@ class SpeechRecognizer:
             model_type: The type of speech recognition model to use ('google', 'vosk', 'whisper', etc.)
             vosk_model_path: Path to Vosk model directory
             whisper_model_name: Name of Whisper model to use
+            config: Configuration object
+            post_event_callback: Callback function to post recognition results
         """
         logger.info("Initializing speech recognizer")
         
@@ -77,6 +83,8 @@ class SpeechRecognizer:
         self.model_type = model_type or "default"
         self.vosk_model_path = vosk_model_path
         self.whisper_model_name = whisper_model_name
+        self.config = config
+        self.post_event = post_event_callback
         
         # Internal state
         self.is_running = False
@@ -112,6 +120,9 @@ class SpeechRecognizer:
             logger.error(f"Model file not found: {self.model_type}")
             # Fall back to a simple model that doesn't require external files
             self.model_type = "simple"
+        
+        # Initialize speech recognition
+        self._init_recognizer()
     
     def _load_model(self):
         """Load the Whisper speech recognition model."""
@@ -252,91 +263,57 @@ class SpeechRecognizer:
             self.is_running = False
     
     def _process_audio(self, audio_data: np.ndarray):
-        """
-        Process audio data to detect and recognize speech.
-        
-        Args:
-            audio_data: Audio data as a NumPy array.
-        """
-        # Calculate audio energy (for VAD)
-        energy = np.sqrt(np.mean(audio_data**2))
-        
-        # Voice activity detection
-        if not self.is_listening and energy > self.vad_threshold:
-            # Start of speech detected
-            self.is_listening = True
-            self.recording_buffer = [audio_data]
-            logger.debug("Speech detected, started recording")
-        elif self.is_listening:
-            # Add data to recording buffer
-            self.recording_buffer.append(audio_data)
-            
-            # Check if we've reached the maximum recording duration
-            if len(self.recording_buffer) * len(audio_data) >= self.max_samples:
-                self._recognize_speech()
-                return
-            
-            # Check for end of speech (silence)
-            if energy < self.vad_threshold:
-                # Count silent frames
-                silent_samples = 0
-                for i in range(min(3, len(self.recording_buffer))):
-                    idx = -(i + 1)
-                    frame = self.recording_buffer[idx]
-                    frame_energy = np.sqrt(np.mean(frame**2))
-                    if frame_energy < self.vad_threshold:
-                        silent_samples += len(frame)
-                
-                # If enough silence detected, process the speech
-                if silent_samples >= self.silence_samples:
-                    self._recognize_speech()
-    
-    def _recognize_speech(self):
-        """Recognize speech from the recorded audio buffer."""
-        if not self.recording_buffer:
-            self.is_listening = False
-            return
-        
-        # Combine all buffers into a single array
-        audio_data = np.concatenate(self.recording_buffer)
-        
-        # Reset state
-        self.recording_buffer = []
-        self.is_listening = False
-        
-        # Only process if the recording is long enough
-        if len(audio_data) < self.sample_rate * 0.5:  # Less than 0.5 second
-            logger.debug("Recording too short, ignoring")
-            return
-        
-        logger.debug(f"Processing {len(audio_data)/self.sample_rate:.2f}s of audio")
-        
+        """Process audio data and post recognition results"""
         try:
-            # Recognize speech
-            segments, info = self.model.transcribe(
-                audio_data,
-                language=self.language,
-                beam_size=1,
-                vad_filter=True,
-                vad_parameters=dict(min_silence_duration_ms=500)
-            )
+            if self.model_type == "simple":
+                # Generate mock recognition results
+                text = self._generate_mock_response()
+                confidence = random.uniform(0.7, 1.0)
+            else:
+                # Perform actual speech recognition
+                segments, info = self.model.transcribe(
+                    audio_data,
+                    language=self.language,
+                    beam_size=1,
+                    vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=500)
+                )
+                text = " ".join(segment.text for segment in segments)
+                text = text.strip()
+                confidence = info.avg_logprob
             
-            # Get the transcript
-            text = " ".join(segment.text for segment in segments)
-            text = text.strip()
+            # Post recognition event
+            self.post_event(TOPICS['SPEECH_RECOGNIZED'], {
+                'text': text,
+                'confidence': confidence,
+                'timestamp': time.time()
+            })
             
-            # Get confidence score
-            confidence = info.avg_logprob
-            
-            # Log the result
-            logger.debug(f"Recognized: '{text}' (confidence: {confidence:.2f})")
-            
-            # Invoke callback if confidence is high enough
-            if text and confidence > self.threshold and self.callback:
-                self.callback(text, confidence)
-                
+        except sr.UnknownValueError:
+            self.logger.debug("Speech not understood")
+        except sr.RequestError as e:
+            self.logger.error(f"Speech recognition error: {e}")
+            self.post_event(TOPICS['ERROR'], {
+                'message': f"Speech recognition error: {e}",
+                'severity': 'ERROR'
+            })
         except Exception as e:
-            logger.error(f"Error recognizing speech: {e}")
+            self.logger.error(f"Error processing audio: {e}")
+            self.post_event(TOPICS['ERROR'], {
+                'message': f"Audio processing error: {e}",
+                'severity': 'ERROR'
+            })
+    
+    def _generate_mock_response(self):
+        """Generate mock speech recognition results"""
+        responses = [
+            "Hello there",
+            "How are you",
+            "What's the weather like",
+            "Tell me a joke",
+            "That's interesting"
+        ]
+        return random.choice(responses)
     
     def recognize_file(self, file_path: str) -> Tuple[str, float]:
         """

@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 from typing import Dict, List, Optional, Union, Any
+import queue
 
 from eve import config
 from eve.utils import logging_utils
@@ -24,7 +25,7 @@ api.initialize = lambda: None
 
 logger = logging.getLogger(__name__)
 
-class Orchestrator:
+class EVEOrchestrator:
     """
     Main coordinator for the EVE2 system.
     
@@ -32,30 +33,26 @@ class Orchestrator:
     and coordinates the flow of data between modules.
     """
     
-    def __init__(self) -> None:
-        """Initialize the orchestrator and all subsystems."""
-        # Initialize logging
-        logging_utils.setup_logging()
-        logger.info("Initializing EVE2 system orchestrator")
+    def __init__(self, config):
+        """Initialize the EVE orchestrator"""
+        self.logger = logging.getLogger(__name__)
+        self.config = config
+        self.running = False
+        self.event_queue = queue.Queue()
         
-        # State tracking
-        self.running: bool = False
-        self.current_emotion: str = config.display.DEFAULT_EMOTION
-        self.current_face_id: Optional[str] = None
-        self.conversation_history: List[Dict[str, str]] = []
-        
-        # Initialize the message queue for inter-module communication
-        self.message_queue = message_queue.MessageQueue(config.communication.MESSAGE_QUEUE_SIZE)
-        
-        # Initialize subsystems based on configuration
+        # Initialize subsystems
         self._init_subsystems()
         
-        # Register signal handlers for graceful shutdown
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-        
-        logger.info("EVE2 orchestrator initialized successfully")
-    
+        # Define event handlers
+        self.event_handlers = {
+            config.communication.TOPICS['SPEECH_RECOGNIZED']: self._handle_speech_recognition,
+            config.communication.TOPICS['FACE_DETECTED']: self._handle_face_detection,
+            config.communication.TOPICS['FACE_LOST']: self._handle_face_lost,
+            config.communication.TOPICS['EMOTION_DETECTED']: self._handle_emotion_detection,
+            config.communication.TOPICS['AUDIO_LEVEL']: self._handle_audio_level,
+            config.communication.TOPICS['ERROR']: self._handle_error,
+        }
+
     def _init_subsystems(self) -> None:
         """Initialize all subsystems based on configuration."""
         role = config.hardware.ROLE.lower()
@@ -291,228 +288,167 @@ class Orchestrator:
         logger.info("EVE2 system stopped successfully")
     
     def _process_events(self) -> None:
-        """Main event processing loop."""
-        logger.info("Starting event processing loop")
-        
+        """Process events from the event queue"""
         while self.running:
             try:
-                # Process vision events
-                if self.face_detector and self.face_detector.has_new_frame():
-                    self._process_vision_events()
-                
-                # Process speech events
-                if self.audio_capture and self.audio_capture.has_new_audio():
-                    self._process_speech_events()
-                
-                # Process message queue events
-                while not self.message_queue.empty():
-                    message = self.message_queue.get()
-                    self._handle_message(message)
-                
-                # Small sleep to prevent CPU hogging
-                time.sleep(0.01)
-                
+                # Get event with timeout to allow for clean shutdown
+                try:
+                    event = self.event_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+
+                # Process the event
+                if event.topic in self.event_handlers:
+                    try:
+                        self.event_handlers[event.topic](event)
+                    except Exception as e:
+                        self.logger.error(f"Error handling event {event.topic}: {e}")
+                else:
+                    self.logger.warning(f"No handler for event topic: {event.topic}")
+
             except Exception as e:
-                logger.error(f"Error in event processing loop: {e}")
-        
-        logger.info("Event processing loop stopped")
+                self.logger.error(f"Error in event processing loop: {e}")
+                time.sleep(0.1)  # Prevent tight error loop
     
-    def _process_vision_events(self) -> None:
-        """Process vision events (face detection and emotion analysis)."""
-        # Get the latest frame from the face detector
-        frame, faces = self.face_detector.get_latest_frame()
-        
-        # Skip if no faces are detected
-        if not faces:
-            return
-        
-        # Process the first detected face for simplicity
-        # In a more advanced implementation, you might want to track multiple faces
-        face = faces[0]
-        face_id = face.get('id', 'unknown')
-        face_location = face.get('location')
-        
-        # Update current face ID if changed
-        if face_id != self.current_face_id:
-            self.current_face_id = face_id
-            logger.info(f"New face detected: {face_id}")
+    def _handle_speech_recognition(self, event):
+        """Handle speech recognition events"""
+        try:
+            text = event.data.get('text', '')
+            confidence = event.data.get('confidence', 0.0)
             
-            # Publish face detected event
-            self.message_queue.put({
-                'topic': config.communication.TOPICS['face_detected'],
-                'data': {
-                    'face_id': face_id,
-                    'timestamp': time.time()
-                }
-            })
-        
-        # Analyze emotion if enabled
-        if self.emotion_analyzer and face_location:
-            # Extract face region from frame
-            top, right, bottom, left = face_location
-            face_image = frame[top:bottom, left:right]
+            self.logger.info(f"Speech recognized: '{text}' (confidence: {confidence:.2f})")
             
-            # Analyze emotion
-            emotion = self.emotion_analyzer.analyze(face_image)
-            
-            if emotion and emotion != self.current_emotion:
-                self.current_emotion = emotion
-                logger.info(f"Emotion detected: {emotion}")
+            # Process the recognized speech
+            if confidence >= self.config.speech.MIN_CONFIDENCE:
+                # Generate response using LLM
+                response = self.llm_processor.process(text)
                 
-                # Update LCD display if enabled
+                # Speak the response
+                if response:
+                    self.text_to_speech.speak(response)
+                    
+                    # Update display emotion based on response
+                    emotion = self._determine_emotion_from_response(response)
+                    if emotion:
+                        self.lcd_controller.set_emotion(emotion)
+            
+        except Exception as e:
+            self.logger.error(f"Error handling speech recognition: {e}")
+
+    def _determine_emotion_from_response(self, response):
+        """Determine appropriate emotion based on response content"""
+        try:
+            # Simple keyword-based emotion mapping
+            emotion_keywords = {
+                'happy': ['happy', 'glad', 'great', 'wonderful', 'excited'],
+                'sad': ['sad', 'sorry', 'unfortunate', 'regret'],
+                'confused': ['unsure', 'perhaps', 'maybe', 'not certain'],
+                'surprised': ['wow', 'amazing', 'incredible', 'unexpected'],
+                'neutral': ['okay', 'alright', 'understood', 'indeed']
+            }
+            
+            response_lower = response.lower()
+            
+            # Check each emotion's keywords
+            for emotion, keywords in emotion_keywords.items():
+                if any(keyword in response_lower for keyword in keywords):
+                    return emotion
+            
+            return 'neutral'  # Default emotion
+            
+        except Exception as e:
+            self.logger.error(f"Error determining emotion: {e}")
+            return 'neutral'
+
+    def _handle_face_detection(self, event):
+        """Handle face detection events"""
+        try:
+            face_data = event.data
+            self.logger.debug(f"Face detected: {face_data}")
+            
+            # Update display based on face position
+            if self.lcd_controller:
+                # You might want to adjust the display based on face position
+                pass
+                
+        except Exception as e:
+            self.logger.error(f"Error handling face detection: {e}")
+
+    def _handle_face_lost(self, event):
+        """Handle face lost events"""
+        try:
+            self.logger.debug("Face lost from view")
+            
+            # Return to neutral expression
+            if self.lcd_controller:
+                self.lcd_controller.set_emotion('neutral')
+                
+        except Exception as e:
+            self.logger.error(f"Error handling face lost: {e}")
+
+    def _handle_emotion_detection(self, event):
+        """Handle emotion detection events"""
+        try:
+            emotion = event.data.get('emotion', 'neutral')
+            confidence = event.data.get('confidence', 0.0)
+            
+            self.logger.debug(f"Emotion detected: {emotion} ({confidence:.2f})")
+            
+            # Update display if confidence is high enough
+            if confidence >= self.config.vision.EMOTION_CONFIDENCE_THRESHOLD:
                 if self.lcd_controller:
                     self.lcd_controller.set_emotion(emotion)
-                
-                # Publish emotion detected event
-                self.message_queue.put({
-                    'topic': config.communication.TOPICS['emotion_detected'],
-                    'data': {
-                        'face_id': face_id,
-                        'emotion': emotion,
-                        'timestamp': time.time()
-                    }
-                })
-    
-    def _process_speech_events(self) -> None:
-        """Process speech events (speech recognition, LLM, TTS)."""
-        # Get the latest audio from the audio capture
-        audio = self.audio_capture.get_latest_audio()
-        
-        # Skip if no audio is available
-        if audio is None:
-            return
-        
-        # Recognize speech
-        if self.speech_recognizer:
-            text = self.speech_recognizer.recognize(audio)
-            
-            # Skip if no speech was recognized
-            if not text:
-                return
-            
-            logger.info(f"Speech recognized: {text}")
-            
-            # Publish speech recognized event
-            self.message_queue.put({
-                'topic': config.communication.TOPICS['speech_recognized'],
-                'data': {
-                    'text': text,
-                    'timestamp': time.time()
-                }
-            })
-            
-            # Add user message to conversation history
-            self.conversation_history.append({
-                'role': 'user',
-                'content': text
-            })
-            
-            # Generate response with LLM
-            if self.llm_processor:
-                response = self.llm_processor.generate_response(self.conversation_history)
-                
-                if response:
-                    logger.info(f"LLM response: {response}")
                     
-                    # Add assistant message to conversation history
-                    self.conversation_history.append({
-                        'role': 'assistant',
-                        'content': response
-                    })
-                    
-                    # Publish LLM response event
-                    self.message_queue.put({
-                        'topic': config.communication.TOPICS['llm_response'],
-                        'data': {
-                            'text': response,
-                            'timestamp': time.time()
-                        }
-                    })
-                    
-                    # Convert to speech if TTS is enabled
-                    if self.text_to_speech:
-                        self.text_to_speech.speak(response)
-    
-    def _handle_message(self, message: Dict[str, Any]) -> None:
-        """Handle messages from the message queue."""
-        topic = message.get('topic')
-        data = message.get('data', {})
-        
-        if not topic:
-            logger.warning("Received message with no topic")
-            return
-        
-        logger.debug(f"Handling message for topic: {topic}")
-        
-        # Handle different message topics
-        if topic == config.communication.TOPICS['face_detected']:
-            # Handle face detected event
-            face_id = data.get('face_id')
-            if face_id:
-                self.current_face_id = face_id
-                
-        elif topic == config.communication.TOPICS['emotion_detected']:
-            # Handle emotion detected event
-            emotion = data.get('emotion')
-            if emotion and emotion != self.current_emotion:
-                self.current_emotion = emotion
-                
-                # Update LCD display if enabled and local
+        except Exception as e:
+            self.logger.error(f"Error handling emotion detection: {e}")
+
+    def _handle_audio_level(self, event):
+        """Handle audio level events"""
+        try:
+            level = event.data.get('level', 0.0)
+            self.logger.debug(f"Audio level: {level:.2f}")
+            
+            # React to loud sounds
+            if level > self.config.audio.REACTION_THRESHOLD:
                 if self.lcd_controller:
-                    self.lcd_controller.set_emotion(emotion)
-                
-        elif topic == config.communication.TOPICS['speech_recognized']:
-            # Handle speech recognized event
-            text = data.get('text')
-            if text and self.llm_processor:
-                # Add user message to conversation history
-                self.conversation_history.append({
-                    'role': 'user',
-                    'content': text
-                })
-                
-                # Generate response with LLM
-                response = self.llm_processor.generate_response(self.conversation_history)
-                
-                if response:
-                    # Add assistant message to conversation history
-                    self.conversation_history.append({
-                        'role': 'assistant',
-                        'content': response
-                    })
+                    self.lcd_controller.set_emotion('surprised')
                     
-                    # Publish LLM response event
-                    self.message_queue.put({
-                        'topic': config.communication.TOPICS['llm_response'],
-                        'data': {
-                            'text': response,
-                            'timestamp': time.time()
-                        }
-                    })
-                    
-        elif topic == config.communication.TOPICS['llm_response']:
-            # Handle LLM response event
-            text = data.get('text')
-            if text and self.text_to_speech:
-                self.text_to_speech.speak(text)
-                
-        elif topic == config.communication.TOPICS['system_status']:
-            # Handle system status event
-            logger.info(f"System status update: {data}")
+        except Exception as e:
+            self.logger.error(f"Error handling audio level: {e}")
+
+    def _handle_error(self, event):
+        """Handle error events"""
+        try:
+            error_msg = event.data.get('message', 'Unknown error')
+            severity = event.data.get('severity', 'ERROR')
             
-        else:
-            logger.warning(f"Unknown message topic: {topic}")
-    
-    def _signal_handler(self, sig: int, frame: Any) -> None:
-        """Handle signals for graceful shutdown."""
-        logger.info(f"Received signal {sig}, shutting down")
-        self.stop()
-        sys.exit(0)
+            self.logger.error(f"{severity}: {error_msg}")
+            
+            # React to errors
+            if self.lcd_controller:
+                self.lcd_controller.set_emotion('confused')
+                
+        except Exception as e:
+            self.logger.error(f"Error handling error event: {e}")
 
+    def post_event(self, topic, data=None):
+        """Post an event to the event queue"""
+        try:
+            event = Event(topic, data or {})
+            self.event_queue.put(event)
+        except Exception as e:
+            self.logger.error(f"Error posting event: {e}")
 
-def create_orchestrator() -> Orchestrator:
+class Event:
+    """Event class for internal communication"""
+    def __init__(self, topic, data):
+        self.topic = topic
+        self.data = data
+        self.timestamp = time.time()
+
+def create_orchestrator() -> EVEOrchestrator:
     """Create and return an Orchestrator instance."""
-    return Orchestrator()
+    return EVEOrchestrator(config)
 
 
 if __name__ == "__main__":
