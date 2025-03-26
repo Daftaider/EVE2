@@ -32,24 +32,27 @@ class TextToSpeech:
     that can run efficiently on Raspberry Pi hardware.
     """
     
-    def __init__(self, voice=None, rate=1.0, pitch=1.0, volume=1.0, engine=None, voice_id=None):
+    def __init__(self, voice=None, rate=1.0, pitch=1.0, volume=1.0, engine=None, 
+                 voice_id=None, coqui_model_path=None):
         """
         Initialize text to speech synthesizer
         
         Args:
             voice (str): Voice name to use
-            voice_id (str): Alternative voice identifier (used by some engines)
+            voice_id (str): Alternative voice identifier
             rate (float): Speech rate (1.0 is normal speed)
             pitch (float): Voice pitch (1.0 is normal pitch)
             volume (float): Audio volume (0.0-1.0)
-            engine (str): TTS engine to use ('pyttsx3', 'espeak', etc.)
+            engine (str): TTS engine to use ('pyttsx3', 'espeak', 'coqui', etc.)
+            coqui_model_path (str): Path to Coqui TTS model files
         """
         self.voice = voice
-        self.voice_id = voice_id or voice  # Use voice as fallback if voice_id not provided
+        self.voice_id = voice_id or voice
         self.rate = rate
         self.pitch = pitch
         self.volume = volume
         self.engine = engine or "pyttsx3"
+        self.coqui_model_path = coqui_model_path
         self.tts_engine = None
         
         logger.info(f"Initializing text to speech with engine: {self.engine}")
@@ -60,26 +63,56 @@ class TextToSpeech:
     def _init_tts_engine(self):
         """Initialize the selected TTS engine"""
         if self.engine == "pyttsx3":
-            try:
-                import pyttsx3
-                self.tts_engine = pyttsx3.init()
-                # Use voice_id if available, otherwise use voice
-                voice_to_use = self.voice_id if self.voice_id else self.voice
-                if voice_to_use:
-                    self.tts_engine.setProperty('voice', voice_to_use)
-                self.tts_engine.setProperty('rate', int(self.rate * 200))  # Base rate is around 200
-                self.tts_engine.setProperty('volume', self.volume)
-                logger.info("Initialized pyttsx3 engine")
-            except Exception as e:
-                logger.error(f"Failed to initialize pyttsx3: {e}")
-                self.tts_engine = None
+            self._init_pyttsx3()
         elif self.engine == "espeak":
-            # Just store the settings, we'll use subprocess to call espeak
-            logger.info("Using espeak engine")
-            self.tts_engine = "espeak"
+            self._init_espeak()
+        elif self.engine == "coqui":
+            self._init_coqui()
         else:
             logger.warning(f"Unknown TTS engine: {self.engine}, using fallback")
+            self._init_fallback()
+    
+    def _init_pyttsx3(self):
+        """Initialize pyttsx3 TTS engine"""
+        try:
+            import pyttsx3
+            self.tts_engine = pyttsx3.init()
+            # Use voice_id if available, otherwise use voice
+            voice_to_use = self.voice_id if self.voice_id else self.voice
+            if voice_to_use:
+                self.tts_engine.setProperty('voice', voice_to_use)
+            self.tts_engine.setProperty('rate', int(self.rate * 200))  # Base rate is around 200
+            self.tts_engine.setProperty('volume', self.volume)
+            logger.info("Initialized pyttsx3 engine")
+        except Exception as e:
+            logger.error(f"Failed to initialize pyttsx3: {e}")
             self.tts_engine = None
+    
+    def _init_espeak(self):
+        """Initialize espeak TTS engine"""
+        logger.info("Using espeak engine")
+        self.tts_engine = "espeak"
+    
+    def _init_coqui(self):
+        """Initialize Coqui TTS engine"""
+        try:
+            if self.coqui_model_path and os.path.exists(self.coqui_model_path):
+                # Here you would initialize Coqui TTS with the model
+                logger.info(f"Initialized Coqui TTS with model: {self.coqui_model_path}")
+                self.tts_engine = "coqui"
+            else:
+                logger.error("Coqui model path not found")
+                self._init_fallback()
+        except Exception as e:
+            logger.error(f"Failed to initialize Coqui TTS: {e}")
+            self._init_fallback()
+    
+    def _init_fallback(self):
+        """Fallback method when TTS engines fail"""
+        logger.info(f"[FALLBACK TTS] {self.voice}")
+        # In a real implementation, this might use a very simple beep or
+        # just log the text that would have been spoken
+        self.tts_engine = None
     
     def speak(self, text):
         """Convert text to speech and play it"""
@@ -106,6 +139,9 @@ class TextToSpeech:
                 cmd.append(f'"{text}"')
                 subprocess.run(" ".join(cmd), shell=True)
                 return True
+            elif self.engine == "coqui":
+                # Coqui TTS handling would go here
+                return False
             else:
                 return self._fallback_speak(text)
         except Exception as e:

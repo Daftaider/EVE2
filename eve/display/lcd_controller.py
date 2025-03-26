@@ -26,7 +26,7 @@ class LCDController:
     """
     
     def __init__(self, width=800, height=480, fullscreen=False, resolution=None, fps=30, 
-                 default_emotion="neutral", background_color=(0, 0, 0)):
+                 default_emotion="neutral", background_color=(0, 0, 0), eye_color=(0, 191, 255)):
         """
         Initialize the display controller
         
@@ -37,7 +37,8 @@ class LCDController:
             resolution (tuple): Optional (width, height) tuple
             fps (int): Target frames per second for the display
             default_emotion (str): Default emotion to display on startup
-            background_color (tuple): RGB color tuple for background (0-255 for each component)
+            background_color (tuple): RGB color tuple for background
+            eye_color (tuple): RGB color tuple for eyes (default: deep sky blue)
         """
         # If resolution is provided, use it instead of width/height parameters
         if resolution and isinstance(resolution, tuple) and len(resolution) == 2:
@@ -50,6 +51,7 @@ class LCDController:
         self.fps = fps
         self.default_emotion = default_emotion
         self.background_color = background_color
+        self.eye_color = eye_color
         self.running = False
         self.render_thread = None
         self.current_emotion = default_emotion
@@ -155,16 +157,16 @@ class LCDController:
         """Generate a default image for an emotion"""
         # Create a surface
         img = pygame.Surface((300, 200))
-        img.fill(self.background_color)  # Black background
+        img.fill(self.background_color)
         
-        # Draw eyes
-        pygame.draw.circle(img, self.eye_color, (100, 80), 30)
-        pygame.draw.circle(img, self.eye_color, (200, 80), 30)
-        
-        # Draw different eye shapes based on the emotion
+        # Draw eyes using the specified eye color
         if emotion == "neutral":
+            pygame.draw.circle(img, self.eye_color, (100, 80), 30)
+            pygame.draw.circle(img, self.eye_color, (200, 80), 30)
             pygame.draw.rect(img, self.eye_color, (100, 140, 100, 20))
         elif emotion == "happy":
+            pygame.draw.circle(img, self.eye_color, (100, 80), 30)
+            pygame.draw.circle(img, self.eye_color, (200, 80), 30)
             pygame.draw.arc(img, self.eye_color, (75, 120, 150, 60), 0, 3.14, 5)
         elif emotion == "sad":
             pygame.draw.arc(img, self.eye_color, (75, 150, 150, 60), 3.14, 6.28, 5)
