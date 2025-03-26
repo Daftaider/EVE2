@@ -27,6 +27,7 @@ class Camera:
         self.mock_mode = False
         self.frame_count = 0
         self.last_frame_time = time.time()
+        self.current_frame = None
         
         try:
             self.cap = cv2.VideoCapture(self.camera_index)
@@ -83,6 +84,13 @@ class Camera:
         self.pattern_change_time = time.time()
         self.logger.info(f"Mock camera initialized with {len(self.mock_patterns)} test patterns")
 
+    def get_frame(self):
+        """Get the latest frame (alias for read)"""
+        ret, frame = self.read()
+        if ret:
+            self.current_frame = frame
+        return ret, self.current_frame
+
     def read(self):
         """Read a frame from the camera or mock camera"""
         if self.mock_mode:
@@ -93,6 +101,7 @@ class Camera:
             if ret:
                 self.frame_count += 1
                 self.last_frame_time = time.time()
+                self.current_frame = frame
             return ret, frame
         
         return False, None

@@ -33,12 +33,17 @@ class EVEOrchestrator:
     and coordinates the flow of data between modules.
     """
     
-    def __init__(self, config):
+    def __init__(self, config=None):
         """Initialize the EVE orchestrator"""
         self.logger = logging.getLogger(__name__)
-        self.config = config
+        self.config = config or self._get_default_config()
         self.running = False
         self.event_queue = queue.Queue()
+        
+        # Initialize state
+        self.current_emotion = "neutral"  # Add default emotion
+        self.last_face_detected = 0
+        self.last_speech_detected = 0
         
         # Initialize subsystems
         self._init_subsystems()
@@ -52,6 +57,30 @@ class EVEOrchestrator:
             config.communication.TOPICS['AUDIO_LEVEL']: self._handle_audio_level,
             config.communication.TOPICS['ERROR']: self._handle_error,
         }
+
+    def _get_default_config(self):
+        """Create default configuration if none provided"""
+        class DefaultConfig:
+            class speech:
+                SAMPLE_RATE = 16000
+                CHANNELS = 1
+                CHUNK_SIZE = 1024
+                THRESHOLD = 0.01
+            
+            class display:
+                WIDTH = 800
+                HEIGHT = 480
+                FPS = 30
+                DEFAULT_EMOTION = "neutral"
+                BACKGROUND_COLOR = (0, 0, 0)
+                EYE_COLOR = (0, 191, 255)
+            
+            class vision:
+                CAMERA_INDEX = 0
+                RESOLUTION = (640, 480)
+                FPS = 30
+                
+        return DefaultConfig()
 
     def _init_subsystems(self) -> None:
         """Initialize all subsystems based on configuration."""
