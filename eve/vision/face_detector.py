@@ -43,10 +43,10 @@ class FaceDetector:
         self.empty_frame_count = 0
         self.total_frame_count = 0
         
+        # Store the configuration
+        self.config = config or {}
+        
         # Extract camera configuration (handle both dict and object)
-        if config is None:
-            config = {}
-            
         if isinstance(config, dict):
             camera_config = config
         else:
@@ -56,6 +56,25 @@ class FaceDetector:
                 'resolution': getattr(config, 'RESOLUTION', (640, 480)),
                 'fps': getattr(config, 'FPS', 30)
             }
+        
+        # Set default detection parameters
+        self.scale_factor = 1.1
+        self.min_neighbors = 5
+        self.min_face_size = (30, 30)
+        self.debug_mode = False
+        
+        # Update from config if available
+        if config:
+            if isinstance(config, dict):
+                self.scale_factor = config.get('SCALE_FACTOR', self.scale_factor)
+                self.min_neighbors = config.get('MIN_NEIGHBORS', self.min_neighbors)
+                self.min_face_size = config.get('MIN_FACE_SIZE', self.min_face_size)
+                self.debug_mode = config.get('DEBUG', self.debug_mode)
+            else:
+                self.scale_factor = getattr(config, 'SCALE_FACTOR', self.scale_factor)
+                self.min_neighbors = getattr(config, 'MIN_NEIGHBORS', self.min_neighbors)
+                self.min_face_size = getattr(config, 'MIN_FACE_SIZE', self.min_face_size)
+                self.debug_mode = getattr(config, 'DEBUG', self.debug_mode)
         
         # Initialize camera with proper parameters
         self.camera = Camera(**camera_config)
@@ -82,9 +101,9 @@ class FaceDetector:
             # Detect faces
             faces = self.face_cascade.detectMultiScale(
                 gray,
-                scaleFactor=1.1,
-                minNeighbors=5,
-                minSize=(30, 30)
+                scaleFactor=self.scale_factor,
+                minNeighbors=self.min_neighbors,
+                minSize=self.min_face_size
             )
             
             return faces
@@ -132,12 +151,13 @@ class FaceDetector:
                     })
                     
                 # Add debug visualization if needed
-                if hasattr(self.config, 'DEBUG') and self.config.DEBUG:
+                if self.debug_mode:
+                    debug_frame = frame.copy()
                     for (x, y, w, h) in faces:
-                        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                        cv2.rectangle(debug_frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
                     
                     # Store debug frame
-                    self.current_debug_frame = frame
+                    self.current_debug_frame = debug_frame
                 
                 # Control detection rate
                 time.sleep(1.0 / 30)  # Limit to 30 FPS
