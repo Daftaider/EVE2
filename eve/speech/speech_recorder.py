@@ -21,6 +21,8 @@ class AudioCapture:
         self.running = False
         self.stream = None
         self.audio_queue = queue.Queue(maxsize=100)  # Limit queue size
+        self.latest_audio = None  # Store latest audio data
+        self.last_audio_time = 0  # Track when audio was last updated
         
         try:
             import pyaudio
@@ -55,6 +57,56 @@ class AudioCapture:
             else:
                 raise
 
+    def get_latest_audio(self):
+        """Get the most recent audio data"""
+        current_time = time.time()
+        
+        # Check if we have new audio data in the queue
+        while not self.audio_queue.empty():
+            try:
+                self.latest_audio = self.audio_queue.get_nowait()
+                self.last_audio_time = current_time
+            except queue.Empty:
+                break
+        
+        # Return None if audio is too old (more than 1 second)
+        if current_time - self.last_audio_time > 1.0:
+            return None
+            
+        return self.latest_audio
+
+    def get_audio(self):
+        """Get next audio chunk from queue (maintains backwards compatibility)"""
+        try:
+            return self.audio_queue.get_nowait()
+        except queue.Empty:
+            return None
+
+    def has_new_audio(self):
+        """Check if new audio data is available"""
+        if self.audio_queue.empty():
+            return False
+            
+        # Also check if latest audio is recent (within last second)
+        current_time = time.time()
+        return (current_time - self.last_audio_time) <= 1.0
+
+    def get_audio_level(self):
+        """Get current audio level"""
+        audio_data = self.get_latest_audio()
+        if audio_data is not None:
+            return np.abs(audio_data).mean()
+        return 0.0
+
+    def clear_audio(self):
+        """Clear any buffered audio data"""
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
+            except queue.Empty:
+                break
+        self.latest_audio = None
+
     def _audio_callback(self, in_data, frame_count, time_info, status):
         """Callback for real audio capture"""
         if status:
@@ -68,6 +120,8 @@ class AudioCapture:
             if np.abs(audio_data).mean() > self.threshold:
                 if not self.audio_queue.full():
                     self.audio_queue.put_nowait(audio_data)
+                    self.latest_audio = audio_data
+                    self.last_audio_time = time.time()
                 else:
                     self.logger.warning("Audio queue full, dropping data")
                     
@@ -96,7 +150,10 @@ class AudioCapture:
                     for i in range(0, len(mock_audio), self.chunk_size):
                         chunk = mock_audio[i:i + self.chunk_size]
                         if len(chunk) == self.chunk_size and not self.audio_queue.full():
-                            self.audio_queue.put_nowait(chunk.astype(np.float32))
+                            chunk = chunk.astype(np.float32)
+                            self.audio_queue.put_nowait(chunk)
+                            self.latest_audio = chunk
+                            self.last_audio_time = time.time()
                 
                 time.sleep(0.1)  # Prevent tight loop
                 
@@ -107,6 +164,7 @@ class AudioCapture:
     def start(self):
         """Start audio capture"""
         self.running = True
+        self.last_audio_time = time.time()  # Reset timer
         if self.mock_mode:
             self.mock_audio_thread = threading.Thread(target=self._generate_mock_audio)
             self.mock_audio_thread.daemon = True
@@ -123,37 +181,19 @@ class AudioCapture:
             self.stream.stop_stream()
             self.stream.close()
             self.pa.terminate()
+        self.clear_audio()
 
-    def get_audio(self):
-        """Get captured audio data"""
-        try:
-            return self.audio_queue.get_nowait()
-        except queue.Empty:
-            return None
+    def is_active(self):
+        """Check if audio capture is active"""
+        return self.running and (
+            (self.mock_mode and self.mock_audio_thread and self.mock_audio_thread.is_alive()) or
+            (not self.mock_mode and self.stream and self.stream.is_active())
+        )
 
-    def has_new_audio(self):
-        """Check if new audio data is available"""
-        return not self.audio_queue.empty()
-
-    def get_audio_level(self):
-        """Get current audio level (for monitoring)"""
-        try:
-            if not self.audio_queue.empty():
-                audio_data = self.audio_queue.queue[0]
-                return np.abs(audio_data).mean()
-            return 0.0
-        except Exception as e:
-            logger.error(f"Error getting audio level: {e}")
-            return 0.0
-    
     def set_threshold(self, threshold):
         """Set the audio detection threshold"""
         self.threshold = max(0.0, float(threshold))
         logger.info(f"Audio detection threshold set to: {self.threshold}")
-
-    def is_active(self):
-        """Check if audio capture is active"""
-        return self.running
 
 # For backward compatibility
 SpeechRecorder = AudioCapture 
