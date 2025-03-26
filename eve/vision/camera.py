@@ -3,54 +3,112 @@ import cv2
 import time
 import logging
 import os
+import queue
 
 logger = logging.getLogger(__name__)
 
 class Camera:
     """Camera interface for accessing video frames"""
     
-    def __init__(self, camera_index=0):
-        self.camera_index = camera_index
+    def __init__(self, camera_index=0, resolution=(640, 480), mock_if_failed=True):
+        """Initialize camera with fallback to mock"""
+        self.logger = logging.getLogger(__name__)
+        self.resolution = resolution
+        self.mock_mode = False
         self.cap = None
-        self.is_mock = False
-        self.frame_count = 0
-        self.last_frame_time = time.time()
-        self.fps = 30  # Target FPS
+        self.running = False
+        self.frame_queue = queue.Queue(maxsize=2)  # Keep only latest frames
         
-        # Try to initialize the actual camera
         try:
             self.cap = cv2.VideoCapture(camera_index)
             if not self.cap.isOpened():
-                logger.warning(f"Failed to open camera {camera_index}, using mock camera")
-                self.is_mock = True
+                raise RuntimeError(f"Failed to open camera {camera_index}")
+                
+            # Set resolution
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, resolution[0])
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution[1])
+            
+            # Test capture
+            ret, _ = self.cap.read()
+            if not ret:
+                raise RuntimeError("Failed to capture test frame")
+                
+        except Exception as e:
+            self.logger.warning(f"Failed to open camera {camera_index}, using mock camera")
+            if mock_if_failed:
+                self.mock_mode = True
                 self._init_mock_camera()
             else:
-                logger.info(f"Camera {camera_index} initialized successfully")
-        except Exception as e:
-            logger.error(f"Error initializing camera: {e}")
-            self.is_mock = True
-            self._init_mock_camera()
-    
+                raise
+
     def _init_mock_camera(self):
-        """Initialize mock camera resources"""
-        # Try to load test images if available
-        self.test_images = []
-        test_dir = os.path.join("assets", "test_images")
+        """Initialize mock camera with generated patterns"""
+        self.mock_patterns = []
         
-        if os.path.exists(test_dir):
-            # Load all images from test directory
-            for file in os.listdir(test_dir):
-                if file.lower().endswith(('.png', '.jpg', '.jpeg')):
-                    try:
-                        img_path = os.path.join(test_dir, file)
-                        img = cv2.imread(img_path)
-                        if img is not None:
-                            self.test_images.append(img)
-                    except Exception as e:
-                        logger.error(f"Error loading test image {file}: {e}")
-        
-        logger.info(f"Mock camera initialized with {len(self.test_images)} test images")
+        # Generate some test patterns
+        for i in range(3):
+            frame = np.zeros((self.resolution[1], self.resolution[0], 3), dtype=np.uint8)
             
+            # Add some shapes
+            cv2.circle(frame, 
+                      (self.resolution[0]//2, self.resolution[1]//2),
+                      min(self.resolution)//4,
+                      (0, 255, 0),
+                      2)
+            
+            cv2.rectangle(frame,
+                         (self.resolution[0]//4, self.resolution[1]//4),
+                         (3*self.resolution[0]//4, 3*self.resolution[1]//4),
+                         (0, 0, 255),
+                         2)
+            
+            # Add some text
+            cv2.putText(frame,
+                       f"Mock Camera Frame {i+1}",
+                       (10, 30),
+                       cv2.FONT_HERSHEY_SIMPLEX,
+                       1,
+                       (255, 255, 255),
+                       2)
+            
+            self.mock_patterns.append(frame)
+        
+        self.current_pattern = 0
+        self.pattern_change_time = time.time()
+        self.logger.info(f"Mock camera initialized with {len(self.mock_patterns)} test patterns")
+
+    def _get_mock_frame(self):
+        """Generate mock frame with movement simulation"""
+        current_time = time.time()
+        
+        # Change pattern every 3 seconds
+        if current_time - self.pattern_change_time > 3.0:
+            self.current_pattern = (self.current_pattern + 1) % len(self.mock_patterns)
+            self.pattern_change_time = current_time
+        
+        # Get base pattern
+        frame = self.mock_patterns[self.current_pattern].copy()
+        
+        # Add some random noise to simulate movement
+        noise = np.random.normal(0, 5, frame.shape).astype(np.int8)
+        frame = cv2.add(frame, noise)
+        
+        return True, frame
+
+    def read(self):
+        """Read a frame from the camera"""
+        if self.mock_mode:
+            return self._get_mock_frame()
+        elif self.cap is not None:
+            return self.cap.read()
+        return False, None
+
+    def release(self):
+        """Release camera resources"""
+        self.running = False
+        if self.cap is not None:
+            self.cap.release()
+
     def get_frame(self):
         """Get a frame from the camera or generate a mock frame if camera not available"""
         # Limit frame rate
@@ -65,7 +123,7 @@ class Camera:
         self.frame_count += 1
         
         # Return real or mock frame
-        if self.is_mock:
+        if self.mock_mode:
             return self._get_mock_frame()
             
         if self.cap and self.cap.isOpened():
@@ -77,7 +135,7 @@ class Camera:
                 return self._get_mock_frame()
         else:
             return self._get_mock_frame()
-            
+        
     def _get_mock_frame(self):
         """Generate a mock frame for testing"""
         # If we have test images, cycle through them
@@ -119,5 +177,5 @@ class Camera:
         
     def release(self):
         """Release the camera resources"""
-        if self.cap and not self.is_mock:
+        if self.cap and not self.mock_mode:
             self.cap.release() 

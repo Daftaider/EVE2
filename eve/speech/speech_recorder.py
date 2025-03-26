@@ -3,41 +3,138 @@ import threading
 import time
 import numpy as np
 import queue
+import random
 
 logger = logging.getLogger(__name__)
 
 class AudioCapture:
     """Records audio from microphone for speech processing"""
     
-    def __init__(self, device_index=None, sample_rate=16000, channels=1, chunk_size=1024):
-        """Initialize audio capture system"""
-        logger.info("Initializing audio capture")
-        self.device_index = device_index
+    def __init__(self, device_index=None, sample_rate=16000, channels=1, chunk_size=1024, 
+                 threshold=0.01, mock_if_failed=True):
+        """Initialize audio capture with fallback to mock"""
+        self.logger = logging.getLogger(__name__)
         self.sample_rate = sample_rate
         self.channels = channels
         self.chunk_size = chunk_size
-        self.is_recording = False
-        self.audio_queue = queue.Queue()
-        self._recording_thread = None
-        self._stream = None
-        self._last_check_time = time.time()
-        self._audio_threshold = 0.01  # Threshold for detecting non-silent audio
+        self.threshold = threshold
+        self.running = False
+        self.stream = None
+        self.audio_queue = queue.Queue(maxsize=100)  # Limit queue size
         
-    def has_new_audio(self):
-        """Check if new audio data is available and above noise threshold"""
         try:
-            # Peek at the queue without removing the data
-            audio_data = self.audio_queue.queue[0] if not self.audio_queue.empty() else None
+            import pyaudio
+            self.pa = pyaudio.PyAudio()
             
-            if audio_data is not None:
-                # Check if audio is above threshold (not just silence)
-                audio_level = np.abs(audio_data).mean()
-                return audio_level > self._audio_threshold
-            return False
+            # Validate device_index
+            if device_index is not None:
+                try:
+                    device_index = int(device_index)
+                except (TypeError, ValueError):
+                    self.logger.warning(f"Invalid device_index: {device_index}, using default")
+                    device_index = None
+            
+            # Try to open the audio stream
+            self.stream = self.pa.open(
+                format=pyaudio.paFloat32,
+                channels=self.channels,
+                rate=self.sample_rate,
+                input=True,
+                input_device_index=device_index,
+                frames_per_buffer=self.chunk_size,
+                stream_callback=self._audio_callback
+            )
+            self.mock_mode = False
+            
         except Exception as e:
-            logger.error(f"Error checking for new audio: {e}")
-            return False
-    
+            self.logger.error(f"Failed to open audio stream: {e}")
+            if mock_if_failed:
+                self.logger.info("Using mock audio capture")
+                self.mock_mode = True
+                self.mock_audio_thread = None
+            else:
+                raise
+
+    def _audio_callback(self, in_data, frame_count, time_info, status):
+        """Callback for real audio capture"""
+        if status:
+            self.logger.warning(f"Audio callback status: {status}")
+        
+        try:
+            # Convert bytes to numpy array
+            audio_data = np.frombuffer(in_data, dtype=np.float32)
+            
+            # Check if audio level is above threshold
+            if np.abs(audio_data).mean() > self.threshold:
+                if not self.audio_queue.full():
+                    self.audio_queue.put_nowait(audio_data)
+                else:
+                    self.logger.warning("Audio queue full, dropping data")
+                    
+        except Exception as e:
+            self.logger.error(f"Error in audio callback: {e}")
+            
+        return (in_data, pyaudio.paContinue)
+
+    def _generate_mock_audio(self):
+        """Generate mock audio data"""
+        while self.running:
+            try:
+                # Generate silent audio most of the time
+                if random.random() < 0.1:  # 10% chance of "speech"
+                    # Generate mock speech-like audio
+                    duration = random.uniform(0.5, 2.0)  # Random duration between 0.5-2 seconds
+                    t = np.linspace(0, duration, int(self.sample_rate * duration))
+                    # Generate a mix of frequencies to simulate speech
+                    frequencies = [random.uniform(80, 255) for _ in range(3)]
+                    mock_audio = np.zeros_like(t)
+                    for freq in frequencies:
+                        mock_audio += np.sin(2 * np.pi * freq * t)
+                    mock_audio *= 0.3  # Reduce amplitude
+                    
+                    # Split into chunks and add to queue
+                    for i in range(0, len(mock_audio), self.chunk_size):
+                        chunk = mock_audio[i:i + self.chunk_size]
+                        if len(chunk) == self.chunk_size and not self.audio_queue.full():
+                            self.audio_queue.put_nowait(chunk.astype(np.float32))
+                
+                time.sleep(0.1)  # Prevent tight loop
+                
+            except Exception as e:
+                self.logger.error(f"Error generating mock audio: {e}")
+                time.sleep(1)
+
+    def start(self):
+        """Start audio capture"""
+        self.running = True
+        if self.mock_mode:
+            self.mock_audio_thread = threading.Thread(target=self._generate_mock_audio)
+            self.mock_audio_thread.daemon = True
+            self.mock_audio_thread.start()
+        elif self.stream:
+            self.stream.start_stream()
+
+    def stop(self):
+        """Stop audio capture"""
+        self.running = False
+        if self.mock_mode and self.mock_audio_thread:
+            self.mock_audio_thread.join(timeout=1.0)
+        elif self.stream:
+            self.stream.stop_stream()
+            self.stream.close()
+            self.pa.terminate()
+
+    def get_audio(self):
+        """Get captured audio data"""
+        try:
+            return self.audio_queue.get_nowait()
+        except queue.Empty:
+            return None
+
+    def has_new_audio(self):
+        """Check if new audio data is available"""
+        return not self.audio_queue.empty()
+
     def get_audio_level(self):
         """Get current audio level (for monitoring)"""
         try:
@@ -51,122 +148,12 @@ class AudioCapture:
     
     def set_threshold(self, threshold):
         """Set the audio detection threshold"""
-        self._audio_threshold = max(0.0, float(threshold))
-        logger.info(f"Audio detection threshold set to: {self._audio_threshold}")
+        self.threshold = max(0.0, float(threshold))
+        logger.info(f"Audio detection threshold set to: {self.threshold}")
 
-    def start(self):
-        """Start audio capture in a separate thread"""
-        if self.is_recording:
-            logger.warning("Audio capture already running")
-            return False
-            
-        self.is_recording = True
-        self._recording_thread = threading.Thread(target=self._capture_loop)
-        self._recording_thread.daemon = True
-        self._recording_thread.start()
-        logger.info("Started audio capture")
-        return True
-        
-    def stop(self):
-        """Stop audio capture"""
-        if not self.is_recording:
-            logger.warning("Audio capture not running")
-            return False
-            
-        self.is_recording = False
-        if self._recording_thread:
-            self._recording_thread.join(timeout=1.0)
-        if self._stream:
-            try:
-                self._stream.stop_stream()
-                self._stream.close()
-            except Exception as e:
-                logger.error(f"Error stopping audio stream: {e}")
-        self._stream = None
-        logger.info("Stopped audio capture")
-        return True
-        
-    def get_audio(self, timeout=0.1):
-        """Get captured audio data from the queue"""
-        try:
-            return self.audio_queue.get(timeout=timeout)
-        except queue.Empty:
-            return None
-            
-    def _capture_loop(self):
-        """Main audio capture loop"""
-        try:
-            import pyaudio
-            p = pyaudio.PyAudio()
-            
-            # Try to open the audio stream
-            try:
-                self._stream = p.open(
-                    format=pyaudio.paFloat32,
-                    channels=self.channels,
-                    rate=self.sample_rate,
-                    input=True,
-                    input_device_index=self.device_index,
-                    frames_per_buffer=self.chunk_size
-                )
-                logger.info("Opened audio stream successfully")
-            except Exception as e:
-                logger.error(f"Failed to open audio stream: {e}")
-                self._use_mock_audio()
-                return
-                
-            # Main capture loop
-            while self.is_recording:
-                try:
-                    data = self._stream.read(self.chunk_size, exception_on_overflow=False)
-                    audio_data = np.frombuffer(data, dtype=np.float32)
-                    
-                    # Keep queue from growing too large
-                    while self.audio_queue.qsize() > 10:
-                        try:
-                            self.audio_queue.get_nowait()
-                        except queue.Empty:
-                            break
-                            
-                    self.audio_queue.put(audio_data)
-                except Exception as e:
-                    logger.error(f"Error capturing audio: {e}")
-                    time.sleep(0.1)
-                    
-        except ImportError:
-            logger.warning("PyAudio not available, using mock audio capture")
-            self._use_mock_audio()
-        except Exception as e:
-            logger.error(f"Error in audio capture loop: {e}")
-            self._use_mock_audio()
-        finally:
-            if self._stream:
-                try:
-                    self._stream.stop_stream()
-                    self._stream.close()
-                except:
-                    pass
-            self._stream = None
-            
-    def _use_mock_audio(self):
-        """Generate mock audio data when real capture fails"""
-        logger.info("Using mock audio capture")
-        while self.is_recording:
-            # Generate mock audio data with occasional "speech-like" patterns
-            t = time.time()
-            if int(t) % 10 < 3:  # Simulate speech every 10 seconds for 3 seconds
-                # Generate "speech-like" audio
-                mock_data = np.random.normal(0, 0.1, self.chunk_size).astype(np.float32)
-            else:
-                # Generate silence with very low noise
-                mock_data = np.random.normal(0, 0.001, self.chunk_size).astype(np.float32)
-                
-            self.audio_queue.put(mock_data)
-            time.sleep(self.chunk_size / self.sample_rate)  # Simulate real-time capture
-            
     def is_active(self):
         """Check if audio capture is active"""
-        return self.is_recording
+        return self.running
 
 # For backward compatibility
 SpeechRecorder = AudioCapture 
