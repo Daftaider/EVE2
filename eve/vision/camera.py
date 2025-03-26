@@ -1,7 +1,7 @@
-import numpy as np
 import cv2
 import time
 import logging
+import numpy as np
 import os
 import queue
 

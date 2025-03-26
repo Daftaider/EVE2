@@ -16,6 +16,8 @@ import face_recognition
 import numpy as np
 
 from eve import config
+from eve.config.communication import TOPICS
+from eve.vision.camera import Camera
 
 logger = logging.getLogger(__name__)
 
