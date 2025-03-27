@@ -4,6 +4,7 @@ import os
 import cv2
 import numpy as np
 import time
+from typing import Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,90 @@ def check_camera_hardware():
     except Exception as e:
         logger.error(f"Error checking camera hardware: {e}")
         return 'unknown'
+
+class Camera:
+    def __init__(self, device_id: int = 0):
+        self.device_id = device_id
+        self.cap = None
+        self.mock_mode = False
+        self._init_camera()
+
+    def _init_camera(self) -> None:
+        """Initialize camera with tested working configuration."""
+        try:
+            self.cap = cv2.VideoCapture(self.device_id)
+            
+            if not self.cap.isOpened():
+                raise RuntimeError("Failed to open camera")
+
+            # Set tested working configuration
+            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M','J','P','G'))
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.cap.set(cv2.CAP_PROP_FPS, 30)
+
+            # Verify settings
+            ret, test_frame = self.cap.read()
+            if not ret or test_frame is None:
+                raise RuntimeError("Failed to capture test frame")
+
+            logger.info("Camera initialized successfully")
+            logger.info(f"Resolution: {int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x"
+                       f"{int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}")
+            logger.info(f"FPS: {int(self.cap.get(cv2.CAP_PROP_FPS))}")
+            self.mock_mode = False
+
+        except Exception as e:
+            logger.warning(f"Failed to initialize camera: {e}, using mock camera")
+            self.mock_mode = True
+            if self.cap is not None:
+                self.cap.release()
+                self.cap = None
+
+    def read(self) -> Tuple[bool, Optional[np.ndarray]]:
+        """Read a frame from the camera."""
+        if self.mock_mode:
+            return self._get_mock_frame()
+        
+        if self.cap is None or not self.cap.isOpened():
+            logger.warning("Camera disconnected, attempting to reinitialize...")
+            self._init_camera()
+            if self.mock_mode:
+                return self._get_mock_frame()
+
+        ret, frame = self.cap.read()
+        if not ret:
+            logger.warning("Failed to read frame, switching to mock mode")
+            self.mock_mode = True
+            return self._get_mock_frame()
+
+        return True, frame
+
+    def _get_mock_frame(self) -> Tuple[bool, np.ndarray]:
+        """Generate a mock frame for testing."""
+        # Create a 640x480 frame with a moving pattern
+        t = time.time()
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        # Add a moving circle
+        cx = int(320 + 200 * np.cos(t))
+        cy = int(240 + 200 * np.sin(t))
+        cv2.circle(frame, (cx, cy), 30, (0, 255, 0), -1)
+        # Add text
+        cv2.putText(frame, "Mock Camera", (20, 40),
+                   cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        return True, frame
+
+    def release(self) -> None:
+        """Release the camera resources."""
+        if self.cap is not None:
+            self.cap.release()
+            self.cap = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
 
 class CameraManager:
     def __init__(self, width=640, height=480, fps=30):
