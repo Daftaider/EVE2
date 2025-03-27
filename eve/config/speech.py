@@ -93,11 +93,9 @@ MIN_CONFIDENCE = 0.6
 
 # Speech recognition settings
 SPEECH_RECOGNITION = {
-    'model_type': 'google',  # or 'sphinx' for offline recognition
-    'model_path': None,
-    'language': 'en-US',
     'WAKE_WORD': 'eve',
     'CONVERSATION_TIMEOUT': 10.0,  # seconds
+    'language': 'en-US'
 }
 
 # Audio capture settings
