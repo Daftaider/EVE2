@@ -10,6 +10,7 @@ import sys
 import os
 import time
 import signal
+import pygame
 from pathlib import Path
 
 # Add the project root to the Python path
@@ -200,7 +201,7 @@ def main():
         'display': {
             'WINDOW_SIZE': (800, 480),
             'FPS': 30,
-            'DEFAULT_EMOTION': Emotion.NEUTRAL,  # Use enum directly
+            'DEFAULT_EMOTION': Emotion.NEUTRAL,
             'DEFAULT_BACKGROUND_COLOR': (0, 0, 0),
             'DEFAULT_EYE_COLOR': (255, 255, 255)
         },
@@ -221,6 +222,12 @@ def main():
             # Main loop
             while running:
                 try:
+                    # Handle pygame events in the main loop
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
+                            running = False
+                            break
+                    
                     # Update display
                     eve.update()
                     
@@ -231,19 +238,13 @@ def main():
                     logger.error(f"Error in main loop: {e}")
                     if not running:
                         break
-                    # Continue running unless shutdown was requested
                     continue
 
     except Exception as e:
         logger.error(f"Error starting EVE2: {e}")
     finally:
+        pygame.quit()
         logger.info("EVE2 shutdown complete")
 
 if __name__ == "__main__":
-    main()
-    # Ensure pygame is properly quit
-    try:
-        import pygame
-        pygame.quit()
-    except:
-        pass 
+    main() 

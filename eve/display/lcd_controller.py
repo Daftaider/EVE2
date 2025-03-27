@@ -47,6 +47,9 @@ class LCDController:
             background_color: Optional background color as RGB tuple or string (default: black)
             eye_color: Optional eye color as RGB tuple or string (default: white)
         """
+        # Set environment variables for display
+        os.environ['SDL_VIDEODRIVER'] = 'x11'
+        
         self.config = config or DisplayConfig
         
         # Override config values if parameters are provided
@@ -57,7 +60,7 @@ class LCDController:
             
         self.fps = fps if fps is not None else self.config.FPS
         
-        # Convert and validate emotion using the new from_value method
+        # Convert and validate emotion using the from_value method
         self._current_emotion = Emotion.from_value(default_emotion)
         
         # Handle colors
@@ -92,15 +95,31 @@ class LCDController:
         """Initialize the display with current settings."""
         try:
             pygame.init()
+            
+            # Set window position (centered)
+            os.environ['SDL_VIDEO_CENTERED'] = '1'
+            
+            # Create the window with a title
+            pygame.display.set_caption("EVE2 Display")
+            
+            # Initialize the display
             self.screen = pygame.display.set_mode(
                 self.window_size,
-                pygame.FULLSCREEN if getattr(self.config, 'FULLSCREEN', False) else 0
+                pygame.SHOWN | (pygame.FULLSCREEN if getattr(self.config, 'FULLSCREEN', False) else 0)
             )
+            
+            # Initialize clock
             self.clock = pygame.time.Clock()
+            
+            # Load images
             self._load_emotion_images()
+            
+            # Initial display update
             self.screen.fill(self.background_color)
             pygame.display.flip()
-            logging.info(f"Display initialized successfully")
+            
+            logging.info("Display initialized successfully")
+            
         except Exception as e:
             logging.error(f"Failed to initialize display: {e}")
             self._init_fallback_mode()
@@ -110,7 +129,6 @@ class LCDController:
         logging.info("Initializing display in fallback mode")
         pygame.init()
         self.screen = pygame.Surface(self.window_size)
-        self.screen.fill(self.background_color)
         self.clock = pygame.time.Clock()
         self._load_emotion_images()
 
@@ -172,10 +190,25 @@ class LCDController:
             self._current_emotion = emotion
 
         try:
+            # Handle pygame events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.cleanup()
+                    return
+                
+            # Clear screen with background color
             self.screen.fill(self.background_color)
-            self.screen.blit(self.emotion_images[self._current_emotion], (0, 0))
+            
+            # Draw current emotion
+            if self._current_emotion in self.emotion_images:
+                self.screen.blit(self.emotion_images[self._current_emotion], (0, 0))
+            
+            # Update display
             pygame.display.flip()
+            
+            # Maintain frame rate
             self.clock.tick(self.fps)
+            
         except Exception as e:
             logging.error(f"Error updating display: {e}")
 
