@@ -77,25 +77,43 @@ class SpeechRecognizer:
         self.logger = logging.getLogger(__name__)
         self.config = config
         
-        model_type = config.SPEECH_RECOGNITION.get('model_type', 'google')
-        model_path = config.SPEECH_RECOGNITION.get('model_path')
+        # Get speech recognition settings
+        speech_config = getattr(config, 'SPEECH_RECOGNITION', {})
+        self.model_type = speech_config.get('model_type', 'google')
+        self.model_path = speech_config.get('model_path')
+        self.language = speech_config.get('language', 'en-US')
         
-        if model_type == 'google':
+        # Get audio settings
+        audio_config = getattr(config, 'AUDIO_CAPTURE', {})
+        self.sample_rate = audio_config.get('sample_rate', 16000)
+        self.channels = audio_config.get('channels', 1)
+        self.chunk_size = audio_config.get('chunk_size', 1024)
+        
+        # Buffer settings
+        self.buffer_duration_sec = 0.5  # Default buffer duration in seconds
+        self.buffer_size = int(self.sample_rate * self.buffer_duration_sec)
+        
+        # Initialize recognizer based on model type
+        if self.model_type == 'google':
             self.recognizer = sr.Recognizer()
-        elif model_type == 'coqui':
-            if not model_path or not os.path.exists(model_path):
-                self.logger.warning(f"Model path not found: {model_path}, falling back to google")
-                model_type = 'google'
+            self.recognizer.energy_threshold = 300  # Adjust based on your needs
+            self.recognizer.dynamic_energy_threshold = True
+            self.recognizer.pause_threshold = 0.8
+        elif self.model_type == 'coqui':
+            if not self.model_path or not os.path.exists(self.model_path):
+                self.logger.warning(f"Model path not found: {self.model_path}, falling back to google")
+                self.model_type = 'google'
                 self.recognizer = sr.Recognizer()
             else:
-                # Initialize your Coqui model here
+                # Initialize Coqui model here if you're using it
                 pass
         else:
-            self.logger.warning(f"Unknown model type: {model_type}, falling back to google")
-            model_type = 'google'
+            self.logger.warning(f"Unknown model type: {self.model_type}, falling back to google")
+            self.model_type = 'google'
             self.recognizer = sr.Recognizer()
         
-        self.logger.info(f"Speech recognizer initialized using {model_type}")
+        self.logger.info(f"Speech recognizer initialized using {self.model_type} "
+                        f"(sample rate: {self.sample_rate}Hz, channels: {self.channels})")
         
         # Initialize mock responses
         self.mock_responses = [
@@ -110,9 +128,7 @@ class SpeechRecognizer:
         
         # Configuration
         self.threshold = config.speech.recognition_threshold if hasattr(config, 'recognition_threshold') else 0.5
-        self.language = config.speech.language if hasattr(config, 'language') else "en"
         self.device_index = config.hardware.audio_input_device if hasattr(config, 'hardware') and hasattr(config.hardware, 'audio_input_device') else None
-        self.buffer_duration_sec = config.speech.buffer_duration_sec if hasattr(config, 'speech') and hasattr(config.speech, 'buffer_duration_sec') else 2.0
         self.max_recording_sec = config.speech.max_recording_sec if hasattr(config, 'speech') and hasattr(config.speech, 'max_recording_sec') else 30.0
         self.silence_duration_sec = config.speech.silence_duration_sec if hasattr(config, 'speech') and hasattr(config.speech, 'silence_duration_sec') else 1.5
         self.vad_threshold = config.speech.vad_threshold if hasattr(config, 'speech') and hasattr(config.speech, 'vad_threshold') else 0.3
@@ -124,7 +140,6 @@ class SpeechRecognizer:
         self.is_running = False
         self.is_listening = False
         self.audio_queue = queue.Queue()
-        self.buffer_size = int(self.sample_rate * self.buffer_duration_sec)
         self.recording_buffer = []
         self.silence_samples = int(self.sample_rate * self.silence_duration_sec)
         self.max_samples = int(self.sample_rate * self.max_recording_sec)
@@ -419,25 +434,27 @@ class SpeechRecognizer:
             raise
 
     def process_audio(self, audio_data):
-        """Process audio data and generate mock recognition results"""
-        if not isinstance(audio_data, np.ndarray):
-            self.logger.error("Invalid audio data format")
-            return
-            
+        """Process audio data and return recognized text"""
         try:
-            if random.random() < 0.3:  # 30% chance of speech detection
-                text = random.choice(self.mock_responses)
-                confidence = random.uniform(0.7, 1.0)
-                self.logger.info(f"Recognized: '{text}' (confidence: {confidence:.2f})")
-                
-                if self.post_event:
-                    self.post_event(TOPICS['SPEECH_RECOGNIZED'], {
-                        'text': text,
-                        'confidence': confidence,
-                        'timestamp': time.time()
-                    })
+            if self.model_type == 'google':
+                # Convert audio data to AudioData object
+                audio = sr.AudioData(audio_data, self.sample_rate, self.channels)
+                # Perform recognition
+                text = self.recognizer.recognize_google(audio, language=self.language)
+                return text
+            elif self.model_type == 'coqui':
+                # Add Coqui-specific processing here if you're using it
+                pass
+            return ""
+        except sr.UnknownValueError:
+            self.logger.debug("Speech not recognized")
+            return ""
+        except sr.RequestError as e:
+            self.logger.error(f"Could not request results: {e}")
+            return ""
         except Exception as e:
             self.logger.error(f"Error processing audio: {e}")
+            return ""
 
     def is_running(self):
         """Check if the recognizer is running"""
@@ -590,3 +607,8 @@ class SpeechRecognizer:
             # Whisper models are downloaded on first use
             return True
         return False
+
+    def reset(self):
+        """Reset the recognizer state"""
+        if hasattr(self, 'recognizer'):
+            self.recognizer = sr.Recognizer()

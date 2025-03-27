@@ -87,11 +87,9 @@ MIN_CONFIDENCE = 0.6
 
 # Speech recognition settings
 SPEECH_RECOGNITION = {
-    'model_type': 'google',  # or 'coqui' if using local model
-    'model_path': 'models/speech/vosk-model-small-en-us-0.15',  # Path to your speech model
-    'language': 'en-US',
-    'sample_rate': 16000,
-    'channels': 1
+    'model_type': 'google',
+    'model_path': None,  # Path to your speech model if using local model
+    'language': 'en-US'
 }
 
 # Audio capture settings
@@ -104,13 +102,13 @@ AUDIO_CAPTURE = {
 
 # Text to speech settings
 TEXT_TO_SPEECH = {
-    'engine': 'pyttsx3',  # or 'espeak' for Raspberry Pi
+    'engine': 'pyttsx3',
     'voice': 'english',
     'rate': 150,
     'volume': 1.0
 }
 
-# Speech processing
-NOISE_THRESHOLD = 300  # Minimum audio level to trigger recording
-MAX_SILENCE_TIME = 2.0  # Maximum silence duration before stopping recording
-MIN_PHRASE_TIME = 0.5  # Minimum duration for a valid phrase 
+# Speech processing parameters
+NOISE_THRESHOLD = 300
+MAX_SILENCE_TIME = 2.0
+MIN_PHRASE_TIME = 0.5 
