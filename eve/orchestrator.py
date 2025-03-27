@@ -408,6 +408,29 @@ class EVEOrchestrator:
         except Exception as e:
             self.logger.error(f"Error posting event: {e}")
 
+    def _process_speech(self, text):
+        """Process recognized speech"""
+        try:
+            if text:
+                # Process the command through LLM
+                response = self.llm_processor.process_text(text)
+                
+                # Speak the response
+                if response:
+                    self.text_to_speech.speak(response)
+                    
+                    # Update display based on response sentiment
+                    # This is a simple example - you might want more sophisticated emotion detection
+                    if any(word in response.lower() for word in ['sorry', 'error', 'cannot']):
+                        self.lcd_controller.set_emotion('sad')
+                    elif any(word in response.lower() for word in ['hello', 'hi', 'hey']):
+                        self.lcd_controller.set_emotion('happy')
+                    else:
+                        self.lcd_controller.set_emotion('neutral')
+                        
+        except Exception as e:
+            self.logger.error(f"Error processing speech: {e}")
+
 class Event:
     """Event class for internal communication"""
     def __init__(self, topic, data):

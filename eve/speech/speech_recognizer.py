@@ -77,10 +77,10 @@ class SpeechRecognizer:
         self.logger = logging.getLogger(__name__)
         self.config = config
         
-        # Get speech recognition settings
+        # Get configuration settings
         speech_config = getattr(config, 'SPEECH_RECOGNITION', {})
-        self.model_type = speech_config.get('model_type', 'google')
-        self.model_path = speech_config.get('model_path')
+        self.wake_word = speech_config.get('WAKE_WORD', 'eve').lower()
+        self.conversation_timeout = speech_config.get('CONVERSATION_TIMEOUT', 10.0)  # seconds
         self.language = speech_config.get('language', 'en-US')
         
         # Get audio settings
@@ -112,8 +112,7 @@ class SpeechRecognizer:
             self.model_type = 'google'
             self.recognizer = sr.Recognizer()
         
-        self.logger.info(f"Speech recognizer initialized using {self.model_type} "
-                        f"(sample rate: {self.sample_rate}Hz, channels: {self.channels})")
+        self.logger.info(f"Speech recognizer initialized with wake word: {self.wake_word}")
         
         # Initialize mock responses
         self.mock_responses = [
@@ -434,27 +433,89 @@ class SpeechRecognizer:
             raise
 
     def process_audio(self, audio_data):
-        """Process audio data and return recognized text"""
+        """Process audio data and check for wake word or conversation"""
         try:
-            if self.model_type == 'google':
-                # Convert audio data to AudioData object
-                audio = sr.AudioData(audio_data, self.sample_rate, self.channels)
-                # Perform recognition
-                text = self.recognizer.recognize_google(audio, language=self.language)
-                return text
-            elif self.model_type == 'coqui':
-                # Add Coqui-specific processing here if you're using it
-                pass
-            return ""
+            # Convert audio data to AudioData object
+            audio = sr.AudioData(audio_data, 
+                               self.config.AUDIO_CAPTURE['sample_rate'],
+                               self.config.AUDIO_CAPTURE['channels'])
+            
+            # Try to recognize the speech
+            text = self.recognizer.recognize_google(audio, language=self.language).lower()
+            
+            # Check if we're in a conversation or heard the wake word
+            if self.in_conversation:
+                if time.time() - self.last_interaction > self.conversation_timeout:
+                    self.logger.info("Conversation timed out")
+                    self.in_conversation = False
+                else:
+                    self.last_interaction = time.time()
+                    return text
+            
+            # Check for wake word
+            if self.wake_word in text:
+                self.logger.info("Wake word detected!")
+                self.in_conversation = True
+                self.last_interaction = time.time()
+                # Remove wake word from response
+                return text.replace(self.wake_word, '').strip()
+            
+            return None
+            
         except sr.UnknownValueError:
-            self.logger.debug("Speech not recognized")
-            return ""
+            # Speech was unintelligible
+            return None
         except sr.RequestError as e:
             self.logger.error(f"Could not request results: {e}")
-            return ""
+            return None
         except Exception as e:
             self.logger.error(f"Error processing audio: {e}")
-            return ""
+            return None
+
+    def start_listening(self):
+        """Start the listening thread"""
+        if not self.is_listening:
+            self.is_listening = True
+            self.conversation_thread = threading.Thread(target=self._listen_loop)
+            self.conversation_thread.daemon = True
+            self.conversation_thread.start()
+            self.logger.info("Started listening for wake word and conversations")
+
+    def stop_listening(self):
+        """Stop the listening thread"""
+        self.is_listening = False
+        if self.conversation_thread:
+            self.conversation_thread.join(timeout=1.0)
+        self.in_conversation = False
+        self.logger.info("Stopped listening")
+
+    def _listen_loop(self):
+        """Main listening loop"""
+        while self.is_listening:
+            try:
+                # Get audio from queue if available
+                try:
+                    audio_data = self.audio_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                
+                # Process the audio
+                text = self.process_audio(audio_data)
+                
+                if text:
+                    self.logger.info(f"Recognized: {text}")
+                    # Here you would typically send the text to your processing pipeline
+                    
+            except Exception as e:
+                self.logger.error(f"Error in listening loop: {e}")
+                time.sleep(0.1)
+
+    def add_audio(self, audio_data):
+        """Add audio data to the processing queue"""
+        try:
+            self.audio_queue.put(audio_data)
+        except Exception as e:
+            self.logger.error(f"Error adding audio to queue: {e}")
 
     def is_running(self):
         """Check if the recognizer is running"""

@@ -11,6 +11,7 @@ import time
 import threading
 import queue
 import json
+import traceback
 from typing import Dict, List, Optional, Tuple, Union, Any, Callable
 from pathlib import Path
 
@@ -31,22 +32,30 @@ class LLMProcessor:
         self.logger = logging.getLogger(__name__)
         self.config = config
         
-        # Get the project root directory (where eve package is located)
+        # Get the project root directory
         self.project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.logger.info(f"Project root: {self.project_root}")
         
         # Get model configuration with defaults
         default_model_path = os.path.join(self.project_root, 'models', 'llm', 'simple_model.json')
         self.model_path = getattr(config, 'LLM_MODEL_PATH', default_model_path)
         
-        # If path is relative, make it absolute from project root
+        # If path is relative, make it absolute
         if not os.path.isabs(self.model_path):
             self.model_path = os.path.join(self.project_root, self.model_path)
-            
+        
+        self.logger.info(f"Using model path: {self.model_path}")
         self.context_length = getattr(config, 'LLM_CONTEXT_LENGTH', 512)
         
         # Initialize model
-        self._ensure_model_directory()
-        self._init_model()
+        try:
+            self._ensure_model_directory()
+            self._init_model()
+        except Exception as e:
+            self.logger.error(f"Initialization failed: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            self.model_data = None
+            self.mock_mode = True
         
         # State
         self.is_running = False
@@ -72,12 +81,14 @@ class LLMProcessor:
     def _ensure_model_directory(self):
         """Ensure model directory exists and create simple model if needed"""
         try:
-            # Create directories if they don't exist
-            os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
+            model_dir = os.path.dirname(self.model_path)
+            self.logger.info(f"Creating directory if needed: {model_dir}")
             
-            # If model file doesn't exist, create a simple one
+            # Create directory with full permissions
+            os.makedirs(model_dir, mode=0o777, exist_ok=True)
+            
             if not os.path.exists(self.model_path):
-                self.logger.info(f"Creating new model file at: {self.model_path}")
+                self.logger.info("Model file doesn't exist, creating new one")
                 
                 simple_model = {
                     "responses": {
@@ -99,35 +110,51 @@ class LLMProcessor:
                     }
                 }
                 
-                # Save the simple model
-                with open(self.model_path, 'w') as f:
-                    json.dump(simple_model, f, indent=2)
+                # Write with explicit encoding
+                try:
+                    with open(self.model_path, 'w', encoding='utf-8') as f:
+                        json.dump(simple_model, f, indent=2, ensure_ascii=False)
+                    self.logger.info("Successfully created model file")
+                    
+                    # Set file permissions
+                    os.chmod(self.model_path, 0o666)
+                    self.logger.info("Set file permissions")
+                except Exception as write_error:
+                    self.logger.error(f"Error writing model file: {write_error}")
+                    self.logger.error(traceback.format_exc())
+                    raise
                 
-                self.logger.info(f"Created simple model file at: {self.model_path}")
-        
         except Exception as e:
-            self.logger.error(f"Error creating model directory/file: {e}")
-            self.logger.error(f"Attempted path: {self.model_path}")
+            self.logger.error(f"Error in _ensure_model_directory: {e}")
+            self.logger.error(traceback.format_exc())
             raise
 
     def _init_model(self):
         """Initialize the LLM model"""
         try:
+            self.logger.info(f"Checking if model file exists at: {self.model_path}")
             if os.path.exists(self.model_path):
-                with open(self.model_path, 'r') as f:
-                    self.model_data = json.load(f)
-                self.logger.info(f"Successfully loaded model from: {self.model_path}")
-                self.mock_mode = False
+                self.logger.info("Model file exists, attempting to load")
+                try:
+                    with open(self.model_path, 'r', encoding='utf-8') as f:
+                        self.model_data = json.load(f)
+                    self.logger.info("Successfully loaded model data")
+                    self.mock_mode = False
+                except json.JSONDecodeError as je:
+                    self.logger.error(f"JSON decode error: {je}")
+                    raise
+                except Exception as read_error:
+                    self.logger.error(f"Error reading model file: {read_error}")
+                    raise
             else:
-                self.logger.error(f"Model file not found at: {self.model_path}")
+                self.logger.error("Model file does not exist")
                 self.model_data = None
                 self.mock_mode = True
                 
         except Exception as e:
-            self.logger.error(f"Failed to load model from file: {self.model_path}")
-            self.logger.error(f"Error details: {str(e)}")
-            self.model_data = None
-            self.mock_mode = True
+            self.logger.error(f"Error in _init_model: {e}")
+            self.logger.error(traceback.format_exc())
+            raise
 
     def _load_model(self):
         """Load the language model."""
