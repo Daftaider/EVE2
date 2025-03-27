@@ -93,6 +93,8 @@ class EVEOrchestrator:
         self.config = config or {}
         self._init_configs()
         self._init_subsystems()
+        self._last_update = time.time()
+        self._current_emotion = Emotion.NEUTRAL
 
     def _init_configs(self):
         """Initialize configuration objects for each subsystem."""
@@ -212,6 +214,35 @@ class EVEOrchestrator:
             self.cleanup()
             self.logger.info("EVE orchestrator stopped")
 
+    def update(self):
+        """Update all subsystems."""
+        try:
+            current_time = time.time()
+            
+            # Update display
+            if hasattr(self, 'lcd_controller'):
+                self.lcd_controller.update(self._current_emotion)
+            
+            # Update other subsystems as needed
+            # Add your update logic here
+            
+            # Example: cycle through emotions every 5 seconds
+            if current_time - self._last_update > 5:
+                self._cycle_emotion()
+                self._last_update = current_time
+                
+        except Exception as e:
+            logging.error(f"Error in update loop: {e}")
+            raise
+
+    def _cycle_emotion(self):
+        """Cycle through emotions for testing."""
+        emotions = list(Emotion)
+        current_index = emotions.index(self._current_emotion)
+        next_index = (current_index + 1) % len(emotions)
+        self._current_emotion = emotions[next_index]
+        logging.info(f"Switching to emotion: {self._current_emotion.name}")
+
     def cleanup(self):
         """Cleanup all subsystems."""
         try:
@@ -219,7 +250,7 @@ class EVEOrchestrator:
                 self.lcd_controller.cleanup()
             # Add cleanup for other subsystems
         except Exception as e:
-            self.logger.error(f"Error during cleanup: {e}")
+            logging.error(f"Error during cleanup: {e}")
 
     def __enter__(self):
         return self

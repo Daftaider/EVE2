@@ -9,6 +9,7 @@ import logging
 import sys
 import os
 import time
+import signal
 from pathlib import Path
 
 # Add the project root to the Python path
@@ -26,6 +27,15 @@ os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Global flag for graceful shutdown
+running = True
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully."""
+    global running
+    logger.info("Shutdown signal received, cleaning up...")
+    running = False
 
 def setup_argparse() -> argparse.ArgumentParser:
     """
@@ -180,6 +190,10 @@ def apply_cli_options(args: argparse.Namespace) -> None:
         config.hardware.AUDIO_OUTPUT_DEVICE = args.audio_output_device
 
 def main():
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
     # Example configuration
     config = {
         'display': {
@@ -201,24 +215,34 @@ def main():
 
     try:
         with EVEOrchestrator(config) as eve:
-            # Your main loop here
-            pass
+            logger.info("EVE2 system started, press Ctrl+C to exit")
+            
+            # Main loop
+            while running:
+                try:
+                    # Update display
+                    eve.update()
+                    
+                    # Add a small delay to prevent high CPU usage
+                    time.sleep(0.1)
+                    
+                except Exception as e:
+                    logger.error(f"Error in main loop: {e}")
+                    if not running:
+                        break
+                    # Continue running unless shutdown was requested
+                    continue
+
     except Exception as e:
         logger.error(f"Error starting EVE2: {e}")
     finally:
         logger.info("EVE2 shutdown complete")
 
 if __name__ == "__main__":
+    main()
+    # Ensure pygame is properly quit
     try:
-        main()
-    except KeyboardInterrupt:
-        logger.info("Received keyboard interrupt")
-    except Exception as e:
-        logger.error(f"Unhandled exception: {e}")
-    finally:
-        # Ensure pygame is properly quit
-        try:
-            import pygame
-            pygame.quit()
-        except:
-            pass 
+        import pygame
+        pygame.quit()
+    except:
+        pass 
