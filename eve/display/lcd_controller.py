@@ -31,7 +31,8 @@ class LCDController:
                  config: Optional[DisplayConfig] = None, 
                  width: Optional[int] = None,
                  height: Optional[int] = None,
-                 fps: Optional[int] = None):
+                 fps: Optional[int] = None,
+                 default_emotion: Optional[Emotion] = None):
         """
         Initialize the LCD Controller.
         
@@ -40,6 +41,7 @@ class LCDController:
             width: Optional window width (overrides config)
             height: Optional window height (overrides config)
             fps: Optional frames per second (overrides config)
+            default_emotion: Optional starting emotion (overrides config)
         """
         self.config = config or DisplayConfig
         
@@ -50,8 +52,14 @@ class LCDController:
             self.window_size = self.config.WINDOW_SIZE
             
         self.fps = fps if fps is not None else self.config.FPS
-        self._current_emotion = self.config.DEFAULT_EMOTION
+        self._current_emotion = default_emotion if default_emotion is not None else self.config.DEFAULT_EMOTION
+        
+        # Initialize display system
         self._init_display()
+        
+        # Log initialization parameters
+        logging.info(f"LCD Controller initialized with: size={self.window_size}, "
+                    f"fps={self.fps}, default_emotion={self._current_emotion}")
 
     def _init_display(self):
         """Initialize the display with current settings."""
@@ -63,7 +71,7 @@ class LCDController:
             )
             self.clock = pygame.time.Clock()
             self._load_emotion_images()
-            logging.info(f"Display initialized: {self.window_size[0]}x{self.window_size[1]} @ {self.fps}fps")
+            logging.info(f"Display initialized successfully")
         except Exception as e:
             logging.error(f"Failed to initialize display: {e}")
             self._init_fallback_mode()
@@ -87,6 +95,7 @@ class LCDController:
                 if image.get_size() != self.window_size:
                     image = pygame.transform.scale(image, self.window_size)
                 self.emotion_images[emotion] = image
+                logging.debug(f"Loaded emotion image for {emotion}")
             except Exception as e:
                 logging.warning(f"Failed to load emotion image for {emotion}: {e}")
                 # Create a colored rectangle as fallback
@@ -121,6 +130,13 @@ class LCDController:
     def get_current_emotion(self) -> Emotion:
         """Get the current emotion being displayed."""
         return self._current_emotion
+
+    def set_emotion(self, emotion: Emotion) -> None:
+        """Set the current emotion."""
+        if not isinstance(emotion, Emotion):
+            raise ValueError(f"Expected Emotion enum, got {type(emotion)}")
+        self._current_emotion = emotion
+        self.update()
 
     def cleanup(self) -> None:
         """Clean up pygame resources."""
@@ -196,15 +212,6 @@ class LCDController:
             self.logger.error(f"Error during pygame cleanup: {e}")
         
         self.logger.info("Display controller stopped")
-
-    def set_emotion(self, emotion):
-        """Set the current emotion"""
-        if emotion not in self.emotion_images:
-            self.logger.warning(f"Unknown emotion: {emotion}, falling back to neutral")
-            emotion = Emotion.NEUTRAL
-        
-        self._current_emotion = emotion
-        return True
 
     def blink(self):
         """Perform a single blink animation"""
