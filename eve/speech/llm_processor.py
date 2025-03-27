@@ -10,6 +10,7 @@ import logging
 import time
 import threading
 import queue
+import json
 from typing import Dict, List, Optional, Tuple, Union, Any, Callable
 from pathlib import Path
 
@@ -30,9 +31,13 @@ class LLMProcessor:
         self.logger = logging.getLogger(__name__)
         self.config = config
         
-        # Get model configuration
-        self.model_path = getattr(config, 'LLM_MODEL_PATH', None)
+        # Get model configuration with defaults
+        default_model_path = os.path.join('models', 'llm', 'simple_model.json')
+        self.model_path = getattr(config, 'LLM_MODEL_PATH', default_model_path)
         self.context_length = getattr(config, 'LLM_CONTEXT_LENGTH', 512)
+        
+        # Create model directory if it doesn't exist
+        self._ensure_model_directory()
         
         # Initialize model
         self._init_model()
@@ -58,19 +63,61 @@ class LLMProcessor:
         else:
             logger.error(f"Model file not found: {self.model_path}")
             
-    def _init_model(self):
-        """Initialize the LLM model with fallback to mock"""
+    def _ensure_model_directory(self):
+        """Ensure model directory exists and create simple model if needed"""
         try:
-            if self.model_path and os.path.exists(self.model_path):
-                # Here you would normally load your actual LLM model
-                self.logger.info(f"Loaded LLM model from: {self.model_path}")
+            # Create directories if they don't exist
+            model_dir = os.path.dirname(self.model_path)
+            os.makedirs(model_dir, exist_ok=True)
+            
+            # If model file doesn't exist, create a simple one
+            if not os.path.exists(self.model_path):
+                simple_model = {
+                    "responses": {
+                        "greeting": ["Hello!", "Hi there!", "Greetings!"],
+                        "farewell": ["Goodbye!", "Bye!", "See you later!"],
+                        "thanks": ["You're welcome!", "My pleasure!", "Glad to help!"],
+                        "unknown": ["I'm not sure about that.", "Could you rephrase that?", "I don't understand."],
+                        "status": ["I'm functioning normally.", "All systems operational.", "I'm doing well!"]
+                    },
+                    "keywords": {
+                        "hello": "greeting",
+                        "hi": "greeting",
+                        "hey": "greeting",
+                        "bye": "farewell",
+                        "goodbye": "farewell",
+                        "thanks": "thanks",
+                        "thank you": "thanks",
+                        "how are you": "status"
+                    }
+                }
+                
+                # Save the simple model
+                with open(self.model_path, 'w') as f:
+                    json.dump(simple_model, f, indent=2)
+                
+                self.logger.info(f"Created simple model file at: {self.model_path}")
+        
+        except Exception as e:
+            self.logger.error(f"Error creating model directory/file: {e}")
+            raise
+
+    def _init_model(self):
+        """Initialize the LLM model"""
+        try:
+            if os.path.exists(self.model_path):
+                with open(self.model_path, 'r') as f:
+                    self.model_data = json.load(f)
+                self.logger.info(f"Loaded model from: {self.model_path}")
                 self.mock_mode = False
             else:
-                self.logger.warning("No valid model path provided, using mock LLM processor")
+                self.logger.warning(f"Model file not found: {self.model_path}")
+                self.model_data = None
                 self.mock_mode = True
                 
         except Exception as e:
-            self.logger.error(f"Failed to load LLM model: {e}")
+            self.logger.error(f"Failed to load model from file: {self.model_path}")
+            self.model_data = None
             self.mock_mode = True
 
     def _load_model(self):
@@ -338,37 +385,46 @@ class LLMProcessor:
         
         logger.info(f"Max history turns set to {self.max_history_turns}")
 
-    def process(self, text):
-        """Process text with LLM and return response"""
-        logger.info(f"Processing text with LLM: {text[:50]}...")
-        
-        # Simple fallback implementation
-        if self.mock_mode:
+    def process_text(self, text):
+        """Process input text and return a response"""
+        try:
+            if not text:
+                return "I didn't catch that."
+            
+            text = text.lower()
+            
+            if self.model_data:
+                # Look for keywords in the text
+                for keyword, response_type in self.model_data["keywords"].items():
+                    if keyword in text:
+                        responses = self.model_data["responses"][response_type]
+                        # Simple rotation through responses
+                        response_index = hash(text) % len(responses)
+                        return responses[response_index]
+                
+                # If no keyword matched, return unknown response
+                responses = self.model_data["responses"]["unknown"]
+                return responses[hash(text) % len(responses)]
+            
+            # Fallback to basic responses if model data isn't available
             return self._mock_response(text)
-        
-        # If we have a real model, we would use it here
-        # This is just a placeholder for now
-        time.sleep(0.5)  # Simulate processing time
-        return f"LLM response to: {text}"
+            
+        except Exception as e:
+            self.logger.error(f"Error processing text: {e}")
+            return "I'm sorry, I couldn't process that."
 
     def _mock_response(self, text):
-        """Generate a mock response based on input text"""
-        if not text:
-            return "I didn't catch that."
+        """Generate a mock response when model isn't available"""
+        basic_responses = {
+            "hello": "Hello! How can I help you today?",
+            "hi": "Hi there!",
+            "bye": "Goodbye!",
+            "thanks": "You're welcome!",
+            "how are you": "I'm functioning normally, thank you for asking.",
+        }
         
-        # Simple keyword-based responses
-        text = text.lower()
-        if 'hello' in text or 'hi' in text:
-            return "Hello! How can I help you today?"
-        elif 'how are you' in text:
-            return "I'm functioning normally, thank you for asking."
-        elif 'bye' in text or 'goodbye' in text:
-            return "Goodbye! Have a great day!"
-        elif 'name' in text:
-            return "My name is EVE, nice to meet you!"
-        elif 'weather' in text:
-            return "I'm sorry, I don't have access to weather information."
-        elif 'thank' in text:
-            return "You're welcome!"
-        else:
-            return "I understand you're saying something about " + text.split()[0] + ", but I'm in mock mode right now." 
+        for key, response in basic_responses.items():
+            if key in text:
+                return response
+        
+        return "I understand you're saying something, but I'm in basic mock mode right now." 
