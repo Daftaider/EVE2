@@ -82,26 +82,30 @@ class EVEOrchestrator:
     """
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
-        """
-        Initialize the EVE orchestrator.
-        
-        Args:
-            config: Optional configuration dictionary with subsystem configs
-        """
-        self.logger = logging.getLogger(__name__)
-        
+        """Initialize the EVE orchestrator."""
         self.config = config or {}
+        # Initialize basic attributes first
+        self._current_emotion = Emotion.NEUTRAL
+        self._last_update = time.time()
+        
+        # Then initialize configs and subsystems
         self._init_configs()
         self._init_subsystems()
-        self._last_update = time.time()
-        self._current_emotion = Emotion.NEUTRAL
+        
+        logging.info(f"EVEOrchestrator initialized with emotion: {self._current_emotion.name}")
 
     def _init_configs(self):
-        """Initialize configuration objects for each subsystem."""
+        """Initialize configuration objects."""
         try:
             # Initialize display config
             display_dict = self.config.get('display', {})
             self.display_config = DisplayConfig()
+            
+            # Handle emotion from config
+            if 'DEFAULT_EMOTION' in display_dict:
+                self._current_emotion = Emotion.from_value(display_dict['DEFAULT_EMOTION'])
+            
+            # Set other display config attributes
             for key, value in display_dict.items():
                 if hasattr(self.display_config, key):
                     setattr(self.display_config, key, value)
@@ -110,13 +114,17 @@ class EVEOrchestrator:
             speech_dict = self.config.get('speech', {})
             self.speech_config = SpeechConfig.from_dict(speech_dict)
 
+            logging.info("Configurations initialized successfully")
+
         except Exception as e:
-            self.logger.error(f"Error initializing configs: {e}")
+            logging.error(f"Error initializing configs: {e}")
             raise
 
     def _init_subsystems(self):
-        """Initialize all subsystems with their respective configs."""
+        """Initialize all subsystems."""
         try:
+            from eve.display.lcd_controller import LCDController
+            
             # Initialize display subsystem
             self.lcd_controller = LCDController(
                 config=self.display_config,
@@ -127,24 +135,11 @@ class EVEOrchestrator:
                 background_color=getattr(self.display_config, 'DEFAULT_BACKGROUND_COLOR', (0, 0, 0)),
                 eye_color=getattr(self.display_config, 'DEFAULT_EYE_COLOR', (255, 255, 255))
             )
-
-            # Initialize speech subsystem (if you have one)
-            self.speech_system = self._init_speech_system()
-
+            
             logging.info("All subsystems initialized successfully")
-
+            
         except Exception as e:
             logging.error(f"Failed to initialize subsystems: {e}")
-            raise
-
-    def _init_speech_system(self):
-        """Initialize the speech subsystem."""
-        try:
-            # Your speech system initialization code here
-            # Use self.speech_config for configuration
-            pass
-        except Exception as e:
-            logging.error(f"Failed to initialize speech system: {e}")
             raise
 
     def start(self):
@@ -156,10 +151,6 @@ class EVEOrchestrator:
             if self.lcd_controller:
                 self.lcd_controller.start()
                 self.logger.info("Display started")
-            
-            if self.speech_system:
-                self.speech_system.start()
-                self.logger.info("Speech system started")
             
             # Perform initialization sequence
             self._perform_init_sequence()
@@ -182,8 +173,7 @@ class EVEOrchestrator:
                 self.lcd_controller.blink()
             
             # Play startup sound
-            if self.speech_system:
-                self.speech_system.play_startup_sound()
+            self.speech_system.play_startup_sound()
             
             self.logger.info("Initialization sequence completed")
         except Exception as e:
@@ -203,10 +193,6 @@ class EVEOrchestrator:
                 self.lcd_controller.stop()
                 self.logger.info("Display stopped")
             
-            if hasattr(self, 'speech_system') and self.speech_system:
-                self.speech_system.stop()
-                self.logger.info("Speech system stopped")
-
         except Exception as e:
             self.logger.error(f"Error during shutdown: {e}")
         finally:
@@ -223,10 +209,7 @@ class EVEOrchestrator:
             if hasattr(self, 'lcd_controller'):
                 self.lcd_controller.update(self._current_emotion)
             
-            # Update other subsystems as needed
-            # Add your update logic here
-            
-            # Example: cycle through emotions every 5 seconds
+            # Cycle emotions every 5 seconds (for testing)
             if current_time - self._last_update > 5:
                 self._cycle_emotion()
                 self._last_update = current_time
@@ -243,12 +226,21 @@ class EVEOrchestrator:
         self._current_emotion = emotions[next_index]
         logging.info(f"Switching to emotion: {self._current_emotion.name}")
 
+    def set_emotion(self, emotion: Emotion):
+        """Set the current emotion."""
+        self._current_emotion = Emotion.from_value(emotion)
+        if hasattr(self, 'lcd_controller'):
+            self.lcd_controller.update(self._current_emotion)
+
+    def get_current_emotion(self) -> Emotion:
+        """Get the current emotion."""
+        return self._current_emotion
+
     def cleanup(self):
-        """Cleanup all subsystems."""
+        """Clean up all subsystems."""
         try:
             if hasattr(self, 'lcd_controller'):
                 self.lcd_controller.cleanup()
-            # Add cleanup for other subsystems
         except Exception as e:
             logging.error(f"Error during cleanup: {e}")
 
