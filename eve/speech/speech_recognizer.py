@@ -18,6 +18,7 @@ from faster_whisper import WhisperModel
 import eve.config as config
 import random
 from eve.config.communication import TOPICS
+import speech_recognition as sr
 
 logger = logging.getLogger(__name__)
 
@@ -72,34 +73,29 @@ class SpeechRecognizer:
     it to text using the Whisper speech recognition model.
     """
     
-    def __init__(self, config=None, post_event_callback=None, model_type=None, **kwargs):
-        """Initialize the speech recognizer
-        
-        Args:
-            config: Configuration object or module
-            post_event_callback: Callback for posting events
-            model_type: Type of speech recognition model to use (google, coqui, etc.)
-            **kwargs: Additional configuration parameters
-        """
+    def __init__(self, config):
         self.logger = logging.getLogger(__name__)
-        self.post_event = post_event_callback
-        self.running = False
+        self.config = config
         
-        # Initialize with default values
-        self.model_type = model_type or "google"
-        self.min_confidence = 0.6
-        self.sample_rate = 16000
-        self.model_path = None
+        model_type = config.SPEECH_RECOGNITION.get('model_type', 'google')
+        model_path = config.SPEECH_RECOGNITION.get('model_path')
         
-        # Update from config if provided
-        if config is not None:
-            # Handle both module and object configurations
-            self.model_type = getattr(config, 'MODEL_TYPE', self.model_type)
-            self.min_confidence = getattr(config, 'MIN_CONFIDENCE', self.min_confidence)
-            self.sample_rate = getattr(config, 'SAMPLE_RATE', self.sample_rate)
-            self.model_path = getattr(config, 'RECOGNITION_MODEL_PATH', self.model_path)
+        if model_type == 'google':
+            self.recognizer = sr.Recognizer()
+        elif model_type == 'coqui':
+            if not model_path or not os.path.exists(model_path):
+                self.logger.warning(f"Model path not found: {model_path}, falling back to google")
+                model_type = 'google'
+                self.recognizer = sr.Recognizer()
+            else:
+                # Initialize your Coqui model here
+                pass
+        else:
+            self.logger.warning(f"Unknown model type: {model_type}, falling back to google")
+            model_type = 'google'
+            self.recognizer = sr.Recognizer()
         
-        self.logger.info(f"Initializing speech recognizer with model type: {self.model_type}")
+        self.logger.info(f"Speech recognizer initialized using {model_type}")
         
         # Initialize mock responses
         self.mock_responses = [
@@ -123,7 +119,6 @@ class SpeechRecognizer:
         self.callback = config.speech.callback if hasattr(config, 'speech') and hasattr(config.speech, 'callback') else None
         self.vosk_model_path = config.speech.vosk_model_path if hasattr(config, 'speech') and hasattr(config.speech, 'vosk_model_path') else None
         self.whisper_model_name = config.speech.whisper_model_name if hasattr(config, 'speech') and hasattr(config.speech, 'whisper_model_name') else None
-        self.config = config
         
         # Internal state
         self.is_running = False

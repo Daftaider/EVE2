@@ -102,21 +102,7 @@ class EVEOrchestrator:
         """Initialize all subsystems with proper error handling"""
         # Initialize speech subsystem
         try:
-            # Initialize audio capture with direct parameters
-            self.audio_capture = AudioCapture(
-                sample_rate=getattr(speech_config, 'SAMPLE_RATE', 16000),
-                channels=getattr(speech_config, 'CHANNELS', 1),
-                chunk_size=getattr(speech_config, 'CHUNK_SIZE', 1024),
-                threshold=getattr(speech_config, 'THRESHOLD', 0.01)
-            )
-            
-            # Initialize speech recognizer with direct module
-            self.speech_recognizer = SpeechRecognizer(
-                config=speech_config,  # Pass the module directly
-                post_event_callback=self.post_event,
-                model_type=getattr(speech_config, 'MODEL_TYPE', 'google')
-            )
-            
+            self.speech_recognizer = SpeechRecognizer(speech_config)
             self.logger.info("Speech subsystem initialized successfully")
         except Exception as e:
             self.logger.error(f"Failed to initialize speech subsystem: {e}")

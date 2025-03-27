@@ -28,7 +28,7 @@ class LCDController:
     
     def __init__(self, width=800, height=480, fps=30, default_emotion="neutral",
                  background_color=(0, 0, 0), eye_color=(0, 191, 255), **kwargs):
-        """Initialize the LCD Controller with immediate fallback mode"""
+        """Initialize the LCD Controller"""
         self.logger = logging.getLogger(__name__)
         self.width = width
         self.height = height
@@ -40,39 +40,23 @@ class LCDController:
         
         self.running = False
         self.render_thread = None
-        # Force fallback mode immediately - don't try hardware display
-        self.use_fallback = True
+        self.use_fallback = False
         self.emotion_images = {}
         
-        # Initialize pygame in headless mode
-        self._init_headless_mode()
+        # Force software rendering
+        os.environ['SDL_VIDEODRIVER'] = 'x11'
+        os.environ['SDL_RENDERER_DRIVER'] = 'software'
+        
+        # Initialize pygame
+        pygame.init()
+        pygame.display.init()
+        self.screen = pygame.display.set_mode((self.width, self.height))
+        self.clock = pygame.time.Clock()
         
         # Load emotions
         self._load_assets()
         
-        self.logger.info("Display controller initialized in headless mode")
-
-    def _init_headless_mode(self):
-        """Initialize pygame in headless/dummy mode"""
-        try:
-            # Force dummy driver
-            os.environ['SDL_VIDEODRIVER'] = 'dummy'
-            
-            # Initialize pygame
-            pygame.init()
-            if hasattr(pygame, 'display'):
-                pygame.display.init()
-            
-            # Create surface for drawing
-            self.screen = pygame.Surface((self.width, self.height))
-            self.clock = pygame.time.Clock()
-            
-            self.logger.info("Headless display mode initialized")
-        except Exception as e:
-            self.logger.error(f"Error initializing headless mode: {e}")
-            # Create a minimal surface as fallback
-            self.screen = pygame.Surface((self.width, self.height))
-            self.clock = pygame.time.Clock() if pygame.time else None
+        self.logger.info("Display controller initialized in software rendering mode")
 
     def _generate_default_emotion(self):
         """Generate a default emotion face"""
