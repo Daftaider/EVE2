@@ -7,8 +7,8 @@ with open("requirements.txt", "r", encoding="utf-8") as f:
     requirements = f.read().splitlines()
 
 setup(
-    name="eve2",
-    version="0.1.0",
+    name="eve",
+    version="0.1",
     author="EVE2 Team",
     author_email="your.email@example.com",
     description="Interactive robotic system inspired by EVE from Wall-E",
@@ -24,7 +24,11 @@ setup(
         "Operating System :: OS Independent",
     ],
     python_requires=">=3.9",
-    install_requires=requirements,
+    install_requires=[
+        'opencv-python',
+        'numpy',
+        'face_recognition',
+    ],
     entry_points={
         "console_scripts": [
             "eve2=scripts.start_eve:main",

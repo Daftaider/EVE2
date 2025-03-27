@@ -3,6 +3,7 @@ import subprocess
 import os
 import cv2
 import numpy as np
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +14,22 @@ try:
 except ImportError:
     HAVE_PICAMERA = False
     logger.warning("picamera2 not available, will try other camera options")
+
+def check_camera_permissions():
+    """Check if we have permission to access the camera"""
+    try:
+        for i in range(10):
+            device = f"/dev/video{i}"
+            if os.path.exists(device):
+                stats = os.stat(device)
+                readable = os.access(device, os.R_OK)
+                writable = os.access(device, os.W_OK)
+                logger.info(f"Camera device {device}:")
+                logger.info(f"  Permissions: {oct(stats.st_mode)[-3:]}")
+                logger.info(f"  Readable: {readable}")
+                logger.info(f"  Writable: {writable}")
+    except Exception as e:
+        logger.error(f"Error checking camera permissions: {e}")
 
 def check_camera_hardware():
     """Check what camera hardware is available"""
@@ -48,11 +65,69 @@ class CameraManager:
         self.fps = fps
         self.camera = None
         self.camera_type = None
+        
+        # Add debug info
+        self.logger.info(f"OpenCV version: {cv2.__version__}")
+        self.logger.info(f"Available backends: {[x.name for x in cv2.videoio_registry.getBackends()]}")
+        
+        # Check camera permissions
+        check_camera_permissions()
+
+    def _try_usb_camera(self):
+        """Try to initialize USB camera with different settings"""
+        backends = [
+            (cv2.CAP_V4L2, "V4L2"),
+            (cv2.CAP_ANY, "Auto")
+        ]
+        
+        for backend, name in backends:
+            self.logger.info(f"Trying {name} backend...")
+            try:
+                # Try direct device access first
+                for device_index in range(10):
+                    if not os.path.exists(f"/dev/video{device_index}"):
+                        continue
+                        
+                    self.logger.info(f"Trying device: /dev/video{device_index}")
+                    cap = cv2.VideoCapture(device_index)
+                    
+                    if not cap.isOpened():
+                        self.logger.warning(f"Could not open device {device_index}")
+                        cap.release()
+                        continue
+                    
+                    # Try to set properties
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                    cap.set(cv2.CAP_PROP_FPS, self.fps)
+                    
+                    # Try to read a frame
+                    for _ in range(5):  # Multiple attempts
+                        ret, frame = cap.read()
+                        if ret and frame is not None:
+                            self.logger.info(f"Successfully initialized camera {device_index}")
+                            self.logger.info(f"Frame size: {frame.shape}")
+                            return cap
+                        time.sleep(0.1)
+                    
+                    cap.release()
+                    
+            except Exception as e:
+                self.logger.error(f"Error with {name} backend: {e}")
+                
+        return None
 
     def initialize(self):
         """Initialize camera with available hardware"""
         try:
-            # First try Raspberry Pi camera if available
+            # Try USB camera first since we detected one
+            self.camera = self._try_usb_camera()
+            if self.camera is not None:
+                self.camera_type = 'usb'
+                self.logger.info("USB camera initialized successfully")
+                return True
+
+            # Try Raspberry Pi camera if available
             if HAVE_PICAMERA:
                 try:
                     self.camera = Picamera2()
@@ -71,32 +146,6 @@ class CameraManager:
                         self.camera.stop()
                         self.camera = None
 
-            # Try USB camera with different backends
-            backends = [
-                cv2.CAP_V4L2,
-                cv2.CAP_GSTREAMER,
-                cv2.CAP_ANY
-            ]
-            
-            for backend in backends:
-                try:
-                    self.camera = cv2.VideoCapture(0 + backend)
-                    if self.camera.isOpened():
-                        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-                        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-                        self.camera.set(cv2.CAP_PROP_FPS, self.fps)
-                        ret, frame = self.camera.read()
-                        if ret and frame is not None:
-                            self.camera_type = 'usb'
-                            self.logger.info(f"Initialized USB camera with backend {backend}")
-                            return True
-                        self.camera.release()
-                except Exception as e:
-                    self.logger.warning(f"Failed to initialize USB camera with backend {backend}: {e}")
-                    if self.camera:
-                        self.camera.release()
-                        self.camera = None
-
             # If no camera available, use mock camera
             self.camera_type = 'mock'
             self.logger.warning("No camera available, using mock camera")
@@ -113,7 +162,12 @@ class CameraManager:
                 frame = self.camera.capture_array()
                 return True, frame
             elif self.camera_type == 'usb':
-                return self.camera.read()
+                for _ in range(3):  # Multiple attempts
+                    ret, frame = self.camera.read()
+                    if ret and frame is not None:
+                        return True, frame
+                    time.sleep(0.1)
+                return False, self._create_mock_frame()
             else:
                 # Return mock frame
                 frame = self._create_mock_frame()
