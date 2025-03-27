@@ -32,7 +32,7 @@ FACE_RECOGNITION_MODEL = "facenet"
 FACE_RECOGNITION_THRESHOLD = 0.6
 FACE_RECOGNITION_TOLERANCE = 0.6  # Tolerance for face matching
 FACE_DATABASE_PATH = "data/faces"
-KNOWN_FACES_DIR = "data/faces/known"
+KNOWN_FACES_DIR = "data/known_faces"
 FACE_ENCODING_MODEL = "hog"  # Options: "hog", "cnn"
 FACE_RECOGNITION_INTERVAL = 1.0  # Seconds
 
@@ -53,6 +53,16 @@ OBJECT_CLASSES_FILE = "models/object_detection/coco.names"
 # Tracking settings
 TRACKING_ENABLED = False
 TRACKING_ALGORITHM = "CSRT"  # Options: "BOOSTING", "MIL", "KCF", "TLD", "MEDIANFLOW", "GOTURN", "MOSSE", "CSRT"
+
+VISION = {
+    'KNOWN_FACES_DIR': 'data/known_faces',
+    'CAMERA_INDEX': 0,
+    'FRAME_WIDTH': 640,
+    'FRAME_HEIGHT': 480,
+    'FPS': 30,
+    'MIN_FACE_IMAGES': 5,
+    'RECOGNITION_THRESHOLD': 0.6
+}
 
 class VisionConfig:
     # Camera settings

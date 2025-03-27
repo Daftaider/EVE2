@@ -32,6 +32,7 @@ from eve.speech.llm_processor import LLMProcessor
 from eve.display.lcd_controller import LCDController
 from eve.vision.face_detector import FaceDetector
 from eve.vision.emotion_analyzer import EmotionAnalyzer
+from eve.vision.display_window import VisionDisplay
 
 # Import config modules directly
 try:
@@ -146,6 +147,10 @@ class EVEOrchestrator:
             self.face_detector = FaceDetector()
             self.emotion_analyzer = EmotionAnalyzer()
             self.logger.info("Vision subsystems initialized successfully")
+
+            # Initialize vision display
+            self.vision_display = VisionDisplay(self.config)
+            self.vision_display.start()
 
         except Exception as e:
             self.logger.error(f"Failed to initialize subsystems: {e}")
@@ -430,6 +435,39 @@ class EVEOrchestrator:
                         
         except Exception as e:
             self.logger.error(f"Error processing speech: {e}")
+
+    def _process_frame(self, frame):
+        """Process a camera frame"""
+        try:
+            action, data = self.vision_display.process_frame(frame)
+            
+            if action == "unknown_face":
+                # Ask for person's name
+                self.text_to_speech.speak("Hello! I don't recognize you. What's your name?")
+                self.lcd_controller.set_emotion("surprised")
+                
+                # Wait for name input (you'll need to implement this based on your speech recognition)
+                # For now, we'll simulate it
+                # name = self._get_name_from_speech()
+                # self.vision_display.start_learning_face(name)
+                # self.text_to_speech.speak(f"Nice to meet you {name}! Please show me different angles of your face.")
+                
+            elif action == "continue_learning":
+                if self.vision_display.learning_faces_count == 1:
+                    self.text_to_speech.speak("Great! Now please turn your head slightly to the left.")
+                elif self.vision_display.learning_faces_count == 2:
+                    self.text_to_speech.speak("Perfect! Now slightly to the right.")
+                elif self.vision_display.learning_faces_count == 3:
+                    self.text_to_speech.speak("Almost done! Look up a bit.")
+                elif self.vision_display.learning_faces_count == 4:
+                    self.text_to_speech.speak("Last one! Look down slightly.")
+                
+            elif action == "learning_complete":
+                self.text_to_speech.speak("Thank you! I've learned your face and will remember you next time!")
+                self.lcd_controller.set_emotion("happy")
+                
+        except Exception as e:
+            self.logger.error(f"Error processing frame: {e}")
 
 class Event:
     """Event class for internal communication"""
