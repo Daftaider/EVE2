@@ -14,12 +14,18 @@ class VisionDisplay:
         self.logger = logging.getLogger(__name__)
         self.config = config
         
+        # Force X11 backend and disable Qt
+        os.environ['QT_QPA_PLATFORM'] = 'xcb'
+        os.environ['OPENCV_VIDEOIO_PRIORITY_MSMF'] = '0'
+        os.environ['OPENCV_VIDEOIO_PRIORITY_INTEL_MFX'] = '0'
+        os.environ['OPENCV_VIDEOIO_PRIORITY_GSTREAMER'] = '1'  # Prefer GStreamer
+        
         # Initialize flags
         self.running = False
         self.initialized = False
         self.camera = None
         
-        # Initialize queues with timeout
+        # Initialize queues
         self.frame_queue = queue.Queue(maxsize=10)
         self.display_thread = None
         self.capture_thread = None
@@ -30,6 +36,9 @@ class VisionDisplay:
         self.frame_width = getattr(vision_config, 'FRAME_WIDTH', 640)
         self.frame_height = getattr(vision_config, 'FRAME_HEIGHT', 480)
         self.fps = getattr(vision_config, 'FPS', 30)
+        
+        # Try to initialize camera with different backends
+        self._init_camera()
         
         # Face recognition settings
         default_faces_dir = os.path.join('data', 'known_faces')
@@ -56,24 +65,38 @@ class VisionDisplay:
         self.stop()
 
     def _init_camera(self):
-        """Initialize the camera capture"""
+        """Initialize camera with fallback options"""
         try:
-            self.camera = cv2.VideoCapture(self.camera_index)
-            if not self.camera.isOpened():
-                raise Exception("Could not open camera")
+            # Try different camera backends
+            camera_options = [
+                (cv2.CAP_V4L2, "V4L2"),  # Try V4L2 first
+                (cv2.CAP_GSTREAMER, "GStreamer"),
+                (cv2.CAP_ANY, "Auto")
+            ]
             
-            # Set camera properties
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
-            self.camera.set(cv2.CAP_PROP_FPS, self.fps)
+            for backend, name in camera_options:
+                self.logger.info(f"Trying camera backend: {name}")
+                try:
+                    self.camera = cv2.VideoCapture(self.camera_index + backend)
+                    if self.camera.isOpened():
+                        # Configure camera
+                        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
+                        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
+                        self.camera.set(cv2.CAP_PROP_FPS, self.fps)
+                        
+                        # Test read
+                        ret, frame = self.camera.read()
+                        if ret and frame is not None:
+                            self.logger.info(f"Successfully initialized camera with {name} backend")
+                            return True
+                        
+                    self.camera.release()
+                    self.camera = None
+                except Exception as e:
+                    self.logger.warning(f"Failed to initialize camera with {name}: {e}")
             
-            # Read test frame
-            ret, frame = self.camera.read()
-            if not ret or frame is None:
-                raise Exception("Could not read from camera")
-            
-            self.logger.info("Camera initialized successfully")
-            return True
+            # If we get here, no backend worked
+            raise Exception("Could not initialize camera with any backend")
             
         except Exception as e:
             self.logger.error(f"Camera initialization failed: {e}")
@@ -82,27 +105,33 @@ class VisionDisplay:
                 self.camera = None
             return False
 
+    def _create_mock_frame(self):
+        """Create a mock frame when camera is not available"""
+        frame = np.zeros((self.frame_height, self.frame_width, 3), dtype=np.uint8)
+        cv2.putText(frame, "Camera Not Available", (50, self.frame_height//2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        return frame
+
     def _capture_loop(self):
-        """Camera capture loop"""
+        """Camera capture loop with mock support"""
         while self.running:
             try:
-                if self.camera is None:
-                    if not self._init_camera():
-                        time.sleep(1)
-                        continue
+                if self.camera is None or not self.camera.isOpened():
+                    # Use mock frame if camera is not available
+                    frame = self._create_mock_frame()
+                else:
+                    ret, frame = self.camera.read()
+                    if not ret or frame is None:
+                        frame = self._create_mock_frame()
                 
-                ret, frame = self.camera.read()
-                if not ret or frame is None:
-                    self.logger.error("Failed to capture frame")
-                    time.sleep(0.1)
-                    continue
-                
-                # Process frame for face detection
+                # Process frame
                 processed_frame = self.process_frame(frame)
                 
                 # Update display queue
                 if not self.frame_queue.full():
                     self.frame_queue.put(processed_frame, timeout=0.1)
+                
+                time.sleep(1.0 / self.fps)  # Control frame rate
                 
             except Exception as e:
                 self.logger.error(f"Error in capture loop: {e}")
