@@ -1,7 +1,16 @@
 import os
 import pygame
 import logging
-from eve.config.display import Emotion
+from enum import Enum
+
+# Define emotions locally for this script
+class Emotion(Enum):
+    NEUTRAL = "neutral"
+    HAPPY = "happy"
+    SAD = "sad"
+    ANGRY = "angry"
+    SURPRISED = "surprised"
+    CONFUSED = "confused"
 
 def generate_emotion_images(size=(800, 480)):
     """Generate basic emotion images using pygame shapes."""
@@ -96,13 +105,24 @@ def generate_emotion_images(size=(800, 480)):
                              pupil_pos, pupil_size)
         
         # Save the image
-        filename = os.path.join(assets_dir, f"{emotion.name.lower()}.png")
+        filename = os.path.join(assets_dir, f"{emotion.value}.png")
         pygame.image.save(surface, filename)
         logging.info(f"Generated {filename}")
     
     pygame.quit()
 
 if __name__ == "__main__":
+    # Set up logging
     logging.basicConfig(level=logging.INFO)
+    
+    # Generate images
+    logging.info("Starting emotion asset generation...")
     generate_emotion_images()
-    logging.info("All emotion assets generated successfully") 
+    logging.info("All emotion assets generated successfully")
+    
+    # List generated files
+    assets_dir = "assets/emotions"
+    files = os.listdir(assets_dir)
+    logging.info(f"Generated files in {assets_dir}:")
+    for file in files:
+        logging.info(f"  - {file}") 
