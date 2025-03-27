@@ -3,19 +3,30 @@ import subprocess
 import os
 import cv2
 import numpy as np
-from picamera2 import Picamera2
 
 logger = logging.getLogger(__name__)
+
+# Try to import picamera2, but don't fail if it's not available
+try:
+    from picamera2 import Picamera2
+    HAVE_PICAMERA = True
+except ImportError:
+    HAVE_PICAMERA = False
+    logger.warning("picamera2 not available, will try other camera options")
 
 def check_camera_hardware():
     """Check what camera hardware is available"""
     try:
         # Check for Raspberry Pi camera module
-        result = subprocess.run(['vcgencmd', 'get_camera'], 
-                              capture_output=True, text=True)
-        if 'detected=1' in result.stdout:
-            logger.info("Raspberry Pi camera module detected")
-            return 'picamera'
+        if HAVE_PICAMERA:
+            try:
+                result = subprocess.run(['vcgencmd', 'get_camera'], 
+                                    capture_output=True, text=True)
+                if 'detected=1' in result.stdout:
+                    logger.info("Raspberry Pi camera module detected")
+                    return 'picamera'
+            except Exception as e:
+                logger.warning(f"Error checking Pi camera: {e}")
         
         # Check for USB cameras
         for i in range(10):  # Check first 10 possible camera indices
@@ -41,23 +52,24 @@ class CameraManager:
     def initialize(self):
         """Initialize camera with available hardware"""
         try:
-            # First try Raspberry Pi camera
-            try:
-                self.camera = Picamera2()
-                config = self.camera.create_preview_configuration(
-                    main={"size": (self.width, self.height),
-                          "format": "RGB888"}
-                )
-                self.camera.configure(config)
-                self.camera.start()
-                self.camera_type = 'picamera'
-                self.logger.info("Initialized Raspberry Pi camera")
-                return True
-            except Exception as e:
-                self.logger.warning(f"Failed to initialize Pi camera: {e}")
-                if self.camera:
-                    self.camera.stop()
-                    self.camera = None
+            # First try Raspberry Pi camera if available
+            if HAVE_PICAMERA:
+                try:
+                    self.camera = Picamera2()
+                    config = self.camera.create_preview_configuration(
+                        main={"size": (self.width, self.height),
+                              "format": "RGB888"}
+                    )
+                    self.camera.configure(config)
+                    self.camera.start()
+                    self.camera_type = 'picamera'
+                    self.logger.info("Initialized Raspberry Pi camera")
+                    return True
+                except Exception as e:
+                    self.logger.warning(f"Failed to initialize Pi camera: {e}")
+                    if self.camera:
+                        self.camera.stop()
+                        self.camera = None
 
             # Try USB camera with different backends
             backends = [
