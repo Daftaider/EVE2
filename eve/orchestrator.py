@@ -87,8 +87,8 @@ class EVEOrchestrator:
         self.text_to_speech = None
         self.llm_processor = None
         self.lcd_controller = None
-            self.face_detector = None
-            self.emotion_analyzer = None
+        self.face_detector = None
+        self.emotion_analyzer = None
         self.running = False
         self.stopped = False
         
@@ -219,7 +219,7 @@ class EVEOrchestrator:
 
             # Stop vision subsystems
             if hasattr(self, 'face_detector') and self.face_detector:
-            self.face_detector.stop()
+                self.face_detector.stop()
                 self.logger.info("Face detector stopped")
 
             # Stop any other active components
@@ -299,7 +299,7 @@ class EVEOrchestrator:
                     # Update display emotion based on response
                     emotion = self._determine_emotion_from_response(response)
                     if emotion:
-                    self.lcd_controller.set_emotion(emotion)
+                        self.lcd_controller.set_emotion(emotion)
                 
         except Exception as e:
             self.logger.error(f"Error handling speech recognition: {e}")
