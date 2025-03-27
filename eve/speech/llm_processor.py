@@ -35,16 +35,16 @@ class LLMProcessor:
         self.project_root = Path(__file__).parent.parent.parent
         
         # Get model configuration with defaults
-        default_model_path = os.path.join(self.project_root, 'models', 'llm', 'simple_model.json')
-        self.model_path = getattr(config, 'LLM_MODEL_PATH', default_model_path)
+        default_model_path = self.project_root / 'models' / 'llm' / 'simple_model.json'
         
-        # Convert string path to Path object for better handling
-        if isinstance(self.model_path, str):
-            self.model_path = Path(self.model_path)
-            
-        # If path is relative, make it absolute from project root
-        if not self.model_path.is_absolute():
-            self.model_path = self.project_root / self.model_path
+        # Get the model path from config or use default
+        config_path = getattr(config, 'LLM_MODEL_PATH', None)
+        if config_path:
+            self.model_path = Path(config_path)
+            if not self.model_path.is_absolute():
+                self.model_path = self.project_root / self.model_path
+        else:
+            self.model_path = default_model_path
             
         self.context_length = getattr(config, 'LLM_CONTEXT_LENGTH', 512)
         
@@ -83,7 +83,7 @@ class LLMProcessor:
             
             # If model file doesn't exist, create a simple one
             if not self.model_path.exists():
-                self.logger.info(f"Creating new model file at: {self.model_path}")
+                self.logger.info(f"Creating new model file at: {str(self.model_path)}")
                 
                 simple_model = {
                     "responses": {
@@ -106,31 +106,31 @@ class LLMProcessor:
                 }
                 
                 # Save the simple model
-                with open(self.model_path, 'w') as f:
+                with open(str(self.model_path), 'w') as f:
                     json.dump(simple_model, f, indent=2)
                 
-                self.logger.info(f"Created simple model file at: {self.model_path}")
+                self.logger.info(f"Created simple model file at: {str(self.model_path)}")
         
         except Exception as e:
             self.logger.error(f"Error creating model directory/file: {e}")
-            self.logger.error(f"Attempted path: {self.model_path}")
+            self.logger.error(f"Attempted path: {str(self.model_path)}")
             raise
 
     def _init_model(self):
         """Initialize the LLM model"""
         try:
             if self.model_path.exists():
-                with open(self.model_path, 'r') as f:
+                with open(str(self.model_path), 'r') as f:
                     self.model_data = json.load(f)
-                self.logger.info(f"Successfully loaded model from: {self.model_path}")
+                self.logger.info(f"Successfully loaded model from: {str(self.model_path)}")
                 self.mock_mode = False
             else:
-                self.logger.error(f"Model file not found at: {self.model_path}")
+                self.logger.error(f"Model file not found at: {str(self.model_path)}")
                 self.model_data = None
                 self.mock_mode = True
                 
         except Exception as e:
-            self.logger.error(f"Failed to load model from file: {self.model_path}")
+            self.logger.error(f"Failed to load model from file: {str(self.model_path)}")
             self.logger.error(f"Error details: {str(e)}")
             self.model_data = None
             self.mock_mode = True
