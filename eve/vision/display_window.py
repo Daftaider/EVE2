@@ -7,182 +7,227 @@ import os
 from pathlib import Path
 import time
 import face_recognition
+import signal
 
 class VisionDisplay:
     def __init__(self, config):
         self.logger = logging.getLogger(__name__)
         self.config = config
         
-        # Force X11 display backend
-        os.environ['QT_QPA_PLATFORM'] = 'xcb'
-        # Disable Qt logging
-        os.environ['QT_LOGGING_RULES'] = '*=false'
-        
-        # Initialize display settings
-        self.window_name = "EVE Vision"
-        self.frame_queue = queue.Queue(maxsize=10)
+        # Initialize flags
         self.running = False
-        self.display_thread = None
+        self.initialized = False
+        self.camera = None
         
-        # Get vision settings from config with defaults
+        # Initialize queues with timeout
+        self.frame_queue = queue.Queue(maxsize=10)
+        self.display_thread = None
+        self.capture_thread = None
+        
+        # Get vision settings
         vision_config = getattr(config.VISION, 'VISION', {})
+        self.camera_index = getattr(vision_config, 'CAMERA_INDEX', 0)
+        self.frame_width = getattr(vision_config, 'FRAME_WIDTH', 640)
+        self.frame_height = getattr(vision_config, 'FRAME_HEIGHT', 480)
+        self.fps = getattr(vision_config, 'FPS', 30)
         
         # Face recognition settings
         default_faces_dir = os.path.join('data', 'known_faces')
         self.known_faces_dir = Path(getattr(vision_config, 'KNOWN_FACES_DIR', default_faces_dir))
         self.known_faces_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Recognition state
         self.known_face_encodings = []
         self.known_face_names = []
-        
-        # Recognition parameters
-        self.min_face_images = getattr(vision_config, 'MIN_FACE_IMAGES', 5)
-        self.recognition_threshold = getattr(vision_config, 'RECOGNITION_THRESHOLD', 0.6)
-        
-        # State tracking
         self.learning_face = False
         self.current_learning_name = None
         self.learning_faces_count = 0
         self.temp_face_encodings = []
         
-        # Load known faces
-        self.load_known_faces()
+        # Set up signal handler
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
         
         self.logger.info("Vision display initialized")
 
-    def load_known_faces(self):
-        """Load known face encodings from storage"""
+    def _signal_handler(self, signum, frame):
+        """Handle shutdown signals"""
+        self.logger.info(f"Received signal {signum}, shutting down...")
+        self.stop()
+
+    def _init_camera(self):
+        """Initialize the camera capture"""
         try:
-            for person_dir in self.known_faces_dir.iterdir():
-                if person_dir.is_dir():
-                    name = person_dir.name
-                    encodings_file = person_dir / "encodings.npy"
-                    if encodings_file.exists():
-                        encodings = np.load(str(encodings_file))
-                        self.known_face_encodings.extend(encodings)
-                        self.known_face_names.extend([name] * len(encodings))
-                        self.logger.info(f"Loaded {len(encodings)} encodings for {name}")
+            self.camera = cv2.VideoCapture(self.camera_index)
+            if not self.camera.isOpened():
+                raise Exception("Could not open camera")
+            
+            # Set camera properties
+            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
+            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
+            self.camera.set(cv2.CAP_PROP_FPS, self.fps)
+            
+            # Read test frame
+            ret, frame = self.camera.read()
+            if not ret or frame is None:
+                raise Exception("Could not read from camera")
+            
+            self.logger.info("Camera initialized successfully")
+            return True
+            
         except Exception as e:
-            self.logger.error(f"Error loading known faces: {e}")
+            self.logger.error(f"Camera initialization failed: {e}")
+            if self.camera is not None:
+                self.camera.release()
+                self.camera = None
+            return False
 
-    def start(self):
-        """Start the display window"""
-        if not self.running:
-            try:
-                # Create window with specific flags for better compatibility
-                cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_NORMAL)
-                # Set window properties
-                cv2.setWindowProperty(self.window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
-                
-                self.running = True
-                self.display_thread = threading.Thread(target=self._display_loop)
-                self.display_thread.daemon = True
-                self.display_thread.start()
-                self.logger.info("Vision display started")
-            except Exception as e:
-                self.logger.error(f"Error starting vision display: {e}")
-                self.running = False
-                raise
-
-    def stop(self):
-        """Stop the display window"""
-        self.running = False
-        if self.display_thread:
-            self.display_thread.join(timeout=1.0)
-        try:
-            cv2.destroyWindow(self.window_name)
-        except:
-            pass
-        self.logger.info("Vision display stopped")
-
-    def _display_loop(self):
-        """Main display loop"""
+    def _capture_loop(self):
+        """Camera capture loop"""
         while self.running:
             try:
-                frame = self.frame_queue.get(timeout=0.1)
+                if self.camera is None:
+                    if not self._init_camera():
+                        time.sleep(1)
+                        continue
+                
+                ret, frame = self.camera.read()
+                if not ret or frame is None:
+                    self.logger.error("Failed to capture frame")
+                    time.sleep(0.1)
+                    continue
+                
+                # Process frame for face detection
+                processed_frame = self.process_frame(frame)
+                
+                # Update display queue
+                if not self.frame_queue.full():
+                    self.frame_queue.put(processed_frame, timeout=0.1)
+                
+            except Exception as e:
+                self.logger.error(f"Error in capture loop: {e}")
+                time.sleep(0.1)
+
+    def start(self):
+        """Start the vision system"""
+        if self.running:
+            return
+        
+        self.running = True
+        
+        # Start capture thread
+        self.capture_thread = threading.Thread(target=self._capture_loop)
+        self.capture_thread.daemon = True
+        self.capture_thread.start()
+        
+        # Start display thread
+        self.display_thread = threading.Thread(target=self._display_loop)
+        self.display_thread.daemon = True
+        self.display_thread.start()
+        
+        self.logger.info("Vision system started")
+
+    def stop(self):
+        """Stop the vision system"""
+        self.running = False
+        
+        # Stop threads
+        if self.capture_thread:
+            self.capture_thread.join(timeout=1.0)
+        if self.display_thread:
+            self.display_thread.join(timeout=1.0)
+        
+        # Release camera
+        if self.camera is not None:
+            self.camera.release()
+            self.camera = None
+        
+        # Close windows
+        cv2.destroyAllWindows()
+        
+        self.logger.info("Vision system stopped")
+
+    def _display_loop(self):
+        """Display loop"""
+        window_created = False
+        
+        while self.running:
+            try:
+                if not window_created:
+                    cv2.namedWindow('EVE Vision', cv2.WINDOW_NORMAL)
+                    window_created = True
+                
+                try:
+                    frame = self.frame_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                
                 if frame is not None:
-                    # Ensure frame is in BGR format
-                    if len(frame.shape) == 2:  # If grayscale
-                        frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+                    cv2.imshow('EVE Vision', frame)
                     
-                    try:
-                        cv2.imshow(self.window_name, frame)
-                        key = cv2.waitKey(1) & 0xFF
-                        if key == 27:  # ESC key
-                            self.running = False
-                    except Exception as e:
-                        self.logger.error(f"Error displaying frame: {e}")
-                        time.sleep(0.1)
-                        
-            except queue.Empty:
-                continue
+                    # Process key events
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == 27:  # ESC
+                        self.running = False
+                        break
+                    
             except Exception as e:
                 self.logger.error(f"Error in display loop: {e}")
                 time.sleep(0.1)
 
     def process_frame(self, frame):
-        """Process a frame for face detection and recognition"""
+        """Process frame for face detection and recognition"""
         try:
-            # Resize frame for faster face detection
-            small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-            rgb_small_frame = small_frame[:, :, ::-1]  # BGR to RGB
-
-            # Find faces in frame
-            face_locations = face_recognition.face_locations(rgb_small_frame)
-            face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
-
+            # Create a copy of the frame
+            display_frame = frame.copy()
+            
+            # Convert to RGB for face_recognition library
+            rgb_frame = frame[:, :, ::-1]
+            
+            # Detect faces
+            face_locations = face_recognition.face_locations(rgb_frame)
+            face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+            
             # Process each face
             for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-                # Scale back up face locations
-                top *= 4
-                right *= 4
-                bottom *= 4
-                left *= 4
-
-                # Check if face is known
-                matches = face_recognition.compare_faces(
-                    self.known_face_encodings, 
-                    face_encoding,
-                    tolerance=self.recognition_threshold
-                )
+                # Draw box around face
+                cv2.rectangle(display_frame, (left, top), (right, bottom), (0, 255, 0), 2)
+                
+                # Try to recognize face
                 name = "Unknown"
-
-                if True in matches:
-                    first_match_index = matches.index(True)
-                    name = self.known_face_names[first_match_index]
-                    # Draw box and name
-                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-                    cv2.putText(frame, name, (left, top - 10), 
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
-                else:
-                    # Unknown face
-                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
-                    cv2.putText(frame, "Unknown", (left, top - 10),
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 2)
-                    
-                    if not self.learning_face:
-                        # Trigger the learning process
-                        return "unknown_face", face_encoding
-
-                # If we're learning a face, save the encoding
-                if self.learning_face and self.current_learning_name:
-                    self.temp_face_encodings.append(face_encoding)
-                    self.learning_faces_count += 1
-                    
-                    if self.learning_faces_count >= self.min_face_images:
-                        self._save_learned_face()
-                        return "learning_complete", None
-                    else:
-                        return "continue_learning", None
-
-            # Add the processed frame to the display queue
-            if self.frame_queue.qsize() < 10:
-                self.frame_queue.put(frame)
-
-            return None, None
-
+                if len(self.known_face_encodings) > 0:
+                    matches = face_recognition.compare_faces(
+                        self.known_face_encodings, 
+                        face_encoding
+                    )
+                    if True in matches:
+                        name = self.known_face_names[matches.index(True)]
+                
+                # Draw name
+                cv2.putText(display_frame, name, (left, top - 10),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
+            
+            return display_frame
+            
         except Exception as e:
             self.logger.error(f"Error processing frame: {e}")
-            return None, None
+            return frame
+
+    def load_known_faces(self):
+        """Load known face encodings"""
+        try:
+            for person_dir in self.known_faces_dir.iterdir():
+                if person_dir.is_dir():
+                    encodings_file = person_dir / "encodings.npy"
+                    if encodings_file.exists():
+                        encodings = np.load(str(encodings_file))
+                        self.known_face_encodings.extend(encodings)
+                        self.known_face_names.extend([person_dir.name] * len(encodings))
+            
+            self.logger.info(f"Loaded {len(self.known_face_encodings)} face encodings")
+            
+        except Exception as e:
+            self.logger.error(f"Error loading known faces: {e}")
 
     def start_learning_face(self, name):
         """Start the face learning process"""

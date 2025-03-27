@@ -62,9 +62,7 @@ VISION = SimpleNamespace(**{
     'CAMERA_INDEX': 0,
     'FRAME_WIDTH': 640,
     'FRAME_HEIGHT': 480,
-    'FPS': 30,
-    'MIN_FACE_IMAGES': 5,
-    'RECOGNITION_THRESHOLD': 0.6
+    'FPS': 30
 })
 
 # Camera settings
