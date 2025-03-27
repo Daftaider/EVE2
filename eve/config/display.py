@@ -58,4 +58,7 @@ STATUS_BAR_HEIGHT = 30
 
 # Transitions
 ENABLE_TRANSITIONS = True
-TRANSITION_DURATION = 0.3  # seconds 
+TRANSITION_DURATION = 0.3  # seconds
+
+# Add to your display configuration
+HEADLESS_MODE = True  # Set to True to skip display initialization 

@@ -27,7 +27,7 @@ class LCDController:
     """
     
     def __init__(self, width=800, height=480, fps=30, default_emotion="neutral",
-                 background_color=(0, 0, 0), eye_color=(0, 191, 255)):
+                 background_color=(0, 0, 0), eye_color=(0, 191, 255), headless_mode=False):
         """Initialize the LCD Controller with display parameters"""
         self.logger = logging.getLogger(__name__)
         self.width = width
@@ -40,14 +40,23 @@ class LCDController:
         
         self.running = False
         self.render_thread = None
-        self.use_fallback = False
+        self.use_fallback = headless_mode
         self.emotion_images = {}
         self.screen = None
         self.clock = None
         self.gl_error_count = 0
         
-        # Initial setup
-        self._init_display()
+        # Skip display initialization if headless mode is requested
+        if not self.use_fallback:
+            self._init_display()
+        else:
+            # Initialize minimal pygame and surface
+            pygame.init()
+            self.screen = pygame.Surface((self.width, self.height))
+            self.clock = pygame.time.Clock()
+            self.logger.info("Display initialized in headless mode")
+        
+        # Load assets
         self._load_assets()
         
         # Log the mode we're in
