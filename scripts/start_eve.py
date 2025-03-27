@@ -59,9 +59,15 @@ class EVEApplication:
                 'SPEECH_RECOGNITION_MODEL': 'google',
                 'TTS_ENGINE': 'pyttsx3',
                 'AUDIO_SAMPLE_RATE': 16000,
+                'AUDIO_CHANNELS': 1,
+                'NOISE_THRESHOLD': 0.1,
                 'LLM_MODEL_PATH': 'models/llm/simple_model',
                 'LLM_CONTEXT_LENGTH': 1024,
                 'COQUI_MODEL_PATH': 'models/tts/coqui'
+            },
+            'wake_word': {
+                'PHRASE': 'hey eve',
+                'THRESHOLD': 0.5
             }
         }
 

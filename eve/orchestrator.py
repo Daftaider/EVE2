@@ -84,15 +84,21 @@ class EVEOrchestrator:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize the EVE orchestrator."""
         self.config = config or {}
-        # Initialize basic attributes first
         self._current_emotion = Emotion.NEUTRAL
         self._last_update = time.time()
+        self._is_listening = False
+        self._wake_word_detected = False
         
-        # Then initialize configs and subsystems
+        # Initialize configs and subsystems
         self._init_configs()
         self._init_subsystems()
         
-        logging.info(f"EVEOrchestrator initialized with emotion: {self._current_emotion.name}")
+        # Start audio processing thread
+        self._running = True
+        self._audio_thread = threading.Thread(target=self._process_audio, daemon=True)
+        self._audio_thread.start()
+        
+        logging.info("EVEOrchestrator initialized and listening for wake word")
 
     def _init_configs(self):
         """Initialize configuration objects."""
@@ -113,6 +119,10 @@ class EVEOrchestrator:
             # Initialize speech config
             speech_dict = self.config.get('speech', {})
             self.speech_config = SpeechConfig.from_dict(speech_dict)
+
+            # Add wake word settings
+            self.wake_word = self.config.get('wake_word', {}).get('PHRASE', 'hey eve')
+            self.wake_word_threshold = self.config.get('wake_word', {}).get('THRESHOLD', 0.5)
 
             logging.info("Configurations initialized successfully")
 
@@ -136,11 +146,95 @@ class EVEOrchestrator:
                 eye_color=getattr(self.display_config, 'DEFAULT_EYE_COLOR', (255, 255, 255))
             )
             
+            # Initialize audio capture
+            from eve.speech.audio_capture import AudioCapture
+            self.audio_capture = AudioCapture(self.speech_config)
+
+            # Initialize speech recognition
+            from eve.speech.speech_recognizer import SpeechRecognizer
+            self.speech_recognizer = SpeechRecognizer(self.speech_config)
+
+            # Initialize text-to-speech
+            from eve.speech.text_to_speech import TextToSpeech
+            self.tts = TextToSpeech(self.speech_config)
+
+            # Play startup sound
+            self._play_startup_sound()
+            
             logging.info("All subsystems initialized successfully")
             
         except Exception as e:
             logging.error(f"Failed to initialize subsystems: {e}")
             raise
+
+    def _play_startup_sound(self):
+        """Play startup sound and greeting."""
+        try:
+            self.tts.speak("EVE system online")
+        except Exception as e:
+            logging.error(f"Failed to play startup sound: {e}")
+
+    def _process_audio(self):
+        """Process audio input in a separate thread."""
+        while self._running:
+            try:
+                if self.audio_capture.has_new_audio():
+                    audio_data = self.audio_capture.get_audio()
+                    
+                    # Check for wake word if not already listening
+                    if not self._is_listening:
+                        if self.speech_recognizer.detect_wake_word(audio_data, self.wake_word):
+                            self._wake_word_detected = True
+                            self._is_listening = True
+                            self._handle_wake_word()
+                    else:
+                        # Process speech if already listening
+                        text = self.speech_recognizer.recognize(audio_data)
+                        if text:
+                            self._handle_speech(text)
+                
+                time.sleep(0.1)  # Prevent tight loop
+                
+            except Exception as e:
+                logging.error(f"Error processing audio: {e}")
+                time.sleep(1)  # Wait before retrying
+
+    def _handle_wake_word(self):
+        """Handle wake word detection."""
+        try:
+            logging.info("Wake word detected!")
+            self.set_emotion(Emotion.SURPRISED)  # Show surprise when activated
+            self.tts.speak("Yes?")
+            time.sleep(0.5)  # Brief pause
+            self.set_emotion(Emotion.NEUTRAL)  # Return to neutral
+        except Exception as e:
+            logging.error(f"Error handling wake word: {e}")
+
+    def _handle_speech(self, text: str):
+        """Handle recognized speech."""
+        try:
+            logging.info(f"Recognized speech: {text}")
+            
+            # Reset listening state after processing
+            self._is_listening = False
+            
+            # Simple responses for testing
+            if "hello" in text.lower():
+                self.set_emotion(Emotion.HAPPY)
+                self.tts.speak("Hello! Nice to meet you!")
+            elif "goodbye" in text.lower():
+                self.set_emotion(Emotion.SAD)
+                self.tts.speak("Goodbye! Have a nice day!")
+            else:
+                self.set_emotion(Emotion.CONFUSED)
+                self.tts.speak("I heard you, but I'm not sure how to respond.")
+            
+            # Return to neutral after response
+            time.sleep(1)
+            self.set_emotion(Emotion.NEUTRAL)
+            
+        except Exception as e:
+            logging.error(f"Error handling speech: {e}")
 
     def start(self):
         """Start all subsystems and perform initialization sequence"""
@@ -173,7 +267,7 @@ class EVEOrchestrator:
                 self.lcd_controller.blink()
             
             # Play startup sound
-            self.speech_system.play_startup_sound()
+            self._play_startup_sound()
             
             self.logger.info("Initialization sequence completed")
         except Exception as e:
@@ -209,6 +303,10 @@ class EVEOrchestrator:
             if hasattr(self, 'lcd_controller'):
                 self.lcd_controller.update(self._current_emotion)
             
+            # Process any pending audio
+            if hasattr(self, 'audio_capture'):
+                self.audio_capture.update()
+            
             # Cycle emotions every 5 seconds (for testing)
             if current_time - self._last_update > 5:
                 self._cycle_emotion()
@@ -239,8 +337,18 @@ class EVEOrchestrator:
     def cleanup(self):
         """Clean up all subsystems."""
         try:
+            self._running = False
+            if hasattr(self, '_audio_thread'):
+                self._audio_thread.join(timeout=1.0)
+            
             if hasattr(self, 'lcd_controller'):
                 self.lcd_controller.cleanup()
+            
+            if hasattr(self, 'audio_capture'):
+                self.audio_capture.cleanup()
+            
+            if hasattr(self, 'tts'):
+                self.tts.cleanup()
         except Exception as e:
             logging.error(f"Error during cleanup: {e}")
 
