@@ -12,6 +12,7 @@ import time
 from typing import Dict, List, Optional, Union, Any
 import queue
 import importlib
+from types import SimpleNamespace
 
 from eve import config
 from eve.utils import logging_utils
@@ -82,12 +83,11 @@ class EVEOrchestrator:
         """Initialize the EVE orchestrator"""
         self.logger = logging.getLogger(__name__)
         
-        # Initialize configuration
-        self.config = type('Config', (), {
-            'SPEECH': speech_config,
-            'VISION': vision_config,
-            'DISPLAY': display_config,
-        })
+        # Initialize configuration as SimpleNamespace
+        self.config = SimpleNamespace()
+        self.config.SPEECH = speech_config
+        self.config.VISION = vision_config
+        self.config.DISPLAY = display_config
         
         # Initialize all attributes to None first
         self.audio_capture = None
@@ -114,10 +114,10 @@ class EVEOrchestrator:
             # Initialize audio capture first
             audio_config = getattr(self.config.SPEECH, 'AUDIO_CAPTURE', {})
             self.audio_capture = AudioCapture(
-                sample_rate=audio_config.get('sample_rate', 16000),
-                channels=audio_config.get('channels', 1),
-                chunk_size=audio_config.get('chunk_size', 1024),
-                format=audio_config.get('format', 'int16')
+                sample_rate=getattr(audio_config, 'sample_rate', 16000),
+                channels=getattr(audio_config, 'channels', 1),
+                chunk_size=getattr(audio_config, 'chunk_size', 1024),
+                format=getattr(audio_config, 'format', 'int16')
             )
             self.logger.info("Audio capture initialized successfully")
 
@@ -126,11 +126,12 @@ class EVEOrchestrator:
             self.logger.info("Speech recognition initialized successfully")
 
             # Initialize text to speech
+            tts_config = getattr(self.config.SPEECH, 'TEXT_TO_SPEECH', {})
             self.text_to_speech = TextToSpeech(
-                engine=getattr(self.config.SPEECH.TEXT_TO_SPEECH, 'engine', 'pyttsx3'),
-                voice=getattr(self.config.SPEECH.TEXT_TO_SPEECH, 'voice', 'english'),
-                rate=getattr(self.config.SPEECH.TEXT_TO_SPEECH, 'rate', 150),
-                volume=getattr(self.config.SPEECH.TEXT_TO_SPEECH, 'volume', 1.0)
+                engine=getattr(tts_config, 'engine', 'pyttsx3'),
+                voice=getattr(tts_config, 'voice', 'english'),
+                rate=getattr(tts_config, 'rate', 150),
+                volume=getattr(tts_config, 'volume', 1.0)
             )
             self.logger.info("Text to speech initialized successfully")
             

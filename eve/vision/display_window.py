@@ -13,6 +13,9 @@ class VisionDisplay:
         self.logger = logging.getLogger(__name__)
         self.config = config
         
+        # Get vision settings from config with defaults
+        vision_config = getattr(config.VISION, 'VISION', {})
+        
         # Initialize display settings
         self.window_name = "EVE Vision"
         self.frame_queue = queue.Queue(maxsize=10)
@@ -20,21 +23,26 @@ class VisionDisplay:
         self.display_thread = None
         
         # Face recognition settings
-        self.known_faces_dir = Path(self.config.VISION.get('KNOWN_FACES_DIR', 'data/known_faces'))
+        default_faces_dir = os.path.join('data', 'known_faces')
+        self.known_faces_dir = Path(getattr(vision_config, 'KNOWN_FACES_DIR', default_faces_dir))
         self.known_faces_dir.mkdir(parents=True, exist_ok=True)
         self.known_face_encodings = []
         self.known_face_names = []
-        self.load_known_faces()
         
         # Recognition parameters
-        self.min_face_images = 5  # Minimum number of face images needed for reliable recognition
-        self.recognition_threshold = 0.6  # Lower is more strict
+        self.min_face_images = getattr(vision_config, 'MIN_FACE_IMAGES', 5)
+        self.recognition_threshold = getattr(vision_config, 'RECOGNITION_THRESHOLD', 0.6)
         
         # State tracking
         self.learning_face = False
         self.current_learning_name = None
         self.learning_faces_count = 0
         self.temp_face_encodings = []
+        
+        # Load known faces
+        self.load_known_faces()
+        
+        self.logger.info("Vision display initialized")
 
     def load_known_faces(self):
         """Load known face encodings from storage"""
