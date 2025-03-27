@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 
 from eve import config
+from eve.config.display import Emotion
 
 import sys
 import types
@@ -280,6 +281,24 @@ class EmotionAnalyzer:
         except Exception as e:
             logger.error(f"Error getting emotion confidence: {e}")
             return {}
+
+    def analyze_frame(self, frame) -> Optional[Emotion]:
+        """
+        Analyze a frame and return the detected emotion.
+        In mock mode, just return the current emotion.
+        """
+        # Mock implementation - in real implementation this would analyze the frame
+        return self._current_emotion
+
+    def get_current_emotion(self) -> Emotion:
+        """Get the current emotion state."""
+        return self._current_emotion
+
+    def set_emotion(self, emotion: Emotion) -> None:
+        """Set the current emotion state."""
+        if not isinstance(emotion, Emotion):
+            raise ValueError(f"Expected Emotion enum, got {type(emotion)}")
+        self._current_emotion = emotion
 
 if 'eve.communication' in sys.modules:
     importlib.reload(sys.modules['eve.communication']) 

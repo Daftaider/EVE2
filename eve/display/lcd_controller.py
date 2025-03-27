@@ -15,6 +15,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from eve import config
+from eve.config.display import Emotion, DisplayConfig
 
 logger = logging.getLogger(__name__)
 
@@ -26,113 +27,61 @@ class LCDController:
     manages the rendering of emotive eye animations.
     """
     
-    def __init__(self, width=800, height=480, fps=30, default_emotion="neutral",
-                 background_color=(0, 0, 0), eye_color=(0, 191, 255), **kwargs):
-        """Initialize the LCD Controller"""
-        self.logger = logging.getLogger(__name__)
-        
-        # Force pure software mode before pygame init
-        os.environ['SDL_VIDEODRIVER'] = 'dummy'  # Start with dummy driver
-        os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
-        
-        self.width = width
-        self.height = height
-        self.fps = fps
-        self.background_color = background_color
-        self.eye_color = eye_color
-        self.default_emotion = default_emotion
-        self.current_emotion = default_emotion
-        
-        self.running = False
-        self.render_thread = None
-        self.is_blinking = False
-        self.blink_duration = 0.15
-        self.emotion_images = {}
-        
-        # Initialize pygame in software-only mode
+    def __init__(self, config=None):
+        self.config = config or DisplayConfig
+        self._current_emotion = self.config.DEFAULT_EMOTION
         self._init_display()
 
     def _init_display(self):
-        """Initialize display in software mode"""
-        try:
-            # Initialize pygame
-            if not pygame.get_init():
-                pygame.init()
-            
-            # Create a software surface only
-            self.screen = pygame.Surface((self.width, self.height))
-            self.clock = pygame.time.Clock()
-            
-            # Load or generate assets
-            self._load_assets()
-            
-            self.logger.info("Display controller initialized in software mode")
-            
-        except Exception as e:
-            self.logger.error(f"Error initializing display: {e}")
-            raise
+        pygame.init()
+        self.screen = pygame.display.set_mode(
+            self.config.WINDOW_SIZE,
+            pygame.FULLSCREEN if self.config.FULLSCREEN else 0
+        )
+        self.clock = pygame.time.Clock()
+        self._load_emotion_images()
 
-    def _load_assets(self):
-        """Load or generate emotion assets"""
-        try:
-            # Generate basic emotions using shapes
-            self._generate_basic_emotions()
-            self.logger.info("Generated basic emotion assets")
-        except Exception as e:
-            self.logger.error(f"Error loading assets: {e}")
-            raise
+    def _load_emotion_images(self):
+        """Load all emotion images into memory."""
+        self.emotion_images = {}
+        for emotion in Emotion:
+            try:
+                image_path = self.config.get_emotion_path(emotion)
+                self.emotion_images[emotion] = pygame.image.load(image_path)
+            except Exception as e:
+                logging.error(f"Failed to load emotion image for {emotion}: {e}")
+                # Create a colored rectangle as fallback
+                surface = pygame.Surface(self.config.WINDOW_SIZE)
+                surface.fill(self._get_fallback_color(emotion))
+                self.emotion_images[emotion] = surface
 
-    def _generate_basic_emotions(self):
-        """Generate basic emotion patterns using pygame shapes"""
-        emotions = ['neutral', 'happy', 'sad', 'angry', 'surprised', 'blink']
-        
-        for emotion in emotions:
-            surface = pygame.Surface((self.width, self.height))
-            surface.fill(self.background_color)
-            
-            # Eye positions
-            left_eye_x = self.width // 3
-            right_eye_x = (self.width * 2) // 3
-            eye_y = self.height // 2
-            eye_size = 30
-            
-            if emotion == 'neutral':
-                pygame.draw.circle(surface, self.eye_color, (left_eye_x, eye_y), eye_size)
-                pygame.draw.circle(surface, self.eye_color, (right_eye_x, eye_y), eye_size)
-            
-            elif emotion == 'happy':
-                pygame.draw.circle(surface, self.eye_color, (left_eye_x, eye_y - 10), eye_size)
-                pygame.draw.circle(surface, self.eye_color, (right_eye_x, eye_y - 10), eye_size)
-            
-            elif emotion == 'sad':
-                pygame.draw.circle(surface, self.eye_color, (left_eye_x, eye_y + 10), eye_size)
-                pygame.draw.circle(surface, self.eye_color, (right_eye_x, eye_y + 10), eye_size)
-            
-            elif emotion == 'angry':
-                pygame.draw.circle(surface, self.eye_color, (left_eye_x, eye_y), eye_size)
-                pygame.draw.circle(surface, self.eye_color, (right_eye_x, eye_y), eye_size)
-                # Add angry eyebrows
-                pygame.draw.line(surface, self.eye_color, 
-                               (left_eye_x - 30, eye_y - 30),
-                               (left_eye_x + 30, eye_y - 10), 5)
-                pygame.draw.line(surface, self.eye_color,
-                               (right_eye_x - 30, eye_y - 10),
-                               (right_eye_x + 30, eye_y - 30), 5)
-            
-            elif emotion == 'surprised':
-                pygame.draw.circle(surface, self.eye_color, (left_eye_x, eye_y), eye_size + 10)
-                pygame.draw.circle(surface, self.eye_color, (right_eye_x, eye_y), eye_size + 10)
-            
-            elif emotion == 'blink':
-                # Draw simple lines for closed eyes
-                pygame.draw.line(surface, self.eye_color,
-                               (left_eye_x - 30, eye_y),
-                               (left_eye_x + 30, eye_y), 5)
-                pygame.draw.line(surface, self.eye_color,
-                               (right_eye_x - 30, eye_y),
-                               (right_eye_x + 30, eye_y), 5)
-            
-            self.emotion_images[emotion] = surface
+    def _get_fallback_color(self, emotion: Emotion):
+        """Get a fallback color for an emotion."""
+        colors = {
+            Emotion.NEUTRAL: (128, 128, 128),    # Gray
+            Emotion.HAPPY: (255, 255, 0),        # Yellow
+            Emotion.SAD: (0, 0, 255),            # Blue
+            Emotion.ANGRY: (255, 0, 0),          # Red
+            Emotion.SURPRISED: (255, 165, 0),    # Orange
+            Emotion.CONFUSED: (128, 0, 128),     # Purple
+        }
+        return colors.get(emotion, (0, 0, 0))    # Default to black
+
+    def update(self, emotion: Emotion = None):
+        """Update the display with the given emotion."""
+        if emotion is not None and isinstance(emotion, Emotion):
+            self._current_emotion = emotion
+
+        try:
+            self.screen.blit(self.emotion_images[self._current_emotion], (0, 0))
+            pygame.display.flip()
+            self.clock.tick(self.config.FPS)
+        except Exception as e:
+            logging.error(f"Error updating display: {e}")
+
+    def cleanup(self):
+        """Clean up pygame resources."""
+        pygame.quit()
 
     def _render_loop(self):
         """Main rendering loop"""
@@ -158,8 +107,8 @@ class LCDController:
             
             # Get current emotion surface
             emotion_surface = self.emotion_images.get(
-                'blink' if self.is_blinking else self.current_emotion,
-                self.emotion_images['neutral']
+                'blink' if self.is_blinking else self._current_emotion,
+                self.emotion_images[Emotion.NEUTRAL]
             )
             
             # Blit emotion onto screen
@@ -200,9 +149,9 @@ class LCDController:
         """Set the current emotion"""
         if emotion not in self.emotion_images:
             self.logger.warning(f"Unknown emotion: {emotion}, falling back to neutral")
-            emotion = 'neutral'
+            emotion = Emotion.NEUTRAL
         
-        self.current_emotion = emotion
+        self._current_emotion = emotion
         return True
 
     def blink(self):

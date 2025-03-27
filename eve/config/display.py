@@ -2,6 +2,44 @@
 Display configuration settings for EVE2
 """
 
+from enum import Enum, auto
+
+class Emotion(Enum):
+    NEUTRAL = auto()
+    HAPPY = auto()
+    SAD = auto()
+    ANGRY = auto()
+    SURPRISED = auto()
+    CONFUSED = auto()
+
+class DisplayConfig:
+    # Display settings
+    WINDOW_SIZE = (800, 480)
+    FPS = 30
+    FULLSCREEN = False
+    
+    # Emotion settings
+    DEFAULT_EMOTION = Emotion.NEUTRAL
+    EMOTIONS = {
+        Emotion.NEUTRAL: "neutral",
+        Emotion.HAPPY: "happy",
+        Emotion.SAD: "sad",
+        Emotion.ANGRY: "angry",
+        Emotion.SURPRISED: "surprised",
+        Emotion.CONFUSED: "confused"
+    }
+    
+    # Asset paths
+    ASSET_DIR = "assets/emotions"
+    
+    # Animation settings
+    TRANSITION_SPEED = 0.5  # seconds
+    
+    @classmethod
+    def get_emotion_path(cls, emotion: Emotion) -> str:
+        """Get the file path for an emotion's image."""
+        return f"{cls.ASSET_DIR}/{cls.EMOTIONS[emotion]}.png"
+
 # General display settings
 DISPLAY_ENABLED = True
 DISPLAY_WIDTH = 800
