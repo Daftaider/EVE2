@@ -27,8 +27,11 @@ api.initialize = lambda: None
 from eve.config.communication import TOPICS
 from eve.speech.speech_recorder import AudioCapture
 from eve.speech.speech_recognizer import SpeechRecognizer
-from eve.vision.face_detector import FaceDetector
+from eve.speech.text_to_speech import TextToSpeech
+from eve.speech.llm_processor import LLMProcessor
 from eve.display.lcd_controller import LCDController
+from eve.vision.face_detector import FaceDetector
+from eve.vision.emotion_analyzer import EmotionAnalyzer
 
 # Import config modules directly
 try:
@@ -77,129 +80,128 @@ class EVEOrchestrator:
     def __init__(self):
         """Initialize the EVE orchestrator"""
         self.logger = logging.getLogger(__name__)
-        self.running = False
-        self.event_queue = queue.Queue()
         
-        # Initialize state
-        self.current_emotion = "neutral"
-        self.last_face_detected = 0
-        self.last_speech_detected = 0
+        # Initialize all attributes to None first
+        self.audio_capture = None
+        self.speech_recognizer = None
+        self.text_to_speech = None
+        self.llm_processor = None
+        self.lcd_controller = None
+        self.face_detector = None
+        self.emotion_analyzer = None
+        self.running = False
         
         # Initialize subsystems
-        self._init_subsystems()
-        
-        # Define event handlers
-        self.event_handlers = {
-            config.communication.TOPICS['SPEECH_RECOGNIZED']: self._handle_speech_recognition,
-            config.communication.TOPICS['FACE_DETECTED']: self._handle_face_detection,
-            config.communication.TOPICS['FACE_LOST']: self._handle_face_lost,
-            config.communication.TOPICS['EMOTION_DETECTED']: self._handle_emotion_detection,
-            config.communication.TOPICS['AUDIO_LEVEL']: self._handle_audio_level,
-            config.communication.TOPICS['ERROR']: self._handle_error,
-        }
-
-    def _init_subsystems(self) -> None:
-        """Initialize all subsystems with proper error handling"""
-        # Initialize speech subsystem
         try:
-            self.speech_recognizer = SpeechRecognizer(speech_config)
-            self.logger.info("Speech subsystem initialized successfully")
+            self._init_subsystems()
         except Exception as e:
-            self.logger.error(f"Failed to initialize speech subsystem: {e}")
+            self.logger.error(f"Error creating orchestrator: {e}")
             raise
 
-        # Initialize display subsystem
+    def _init_subsystems(self):
+        """Initialize all subsystems"""
         try:
-            # Create display configuration dictionary with headless mode
+            # Initialize audio capture first
+            audio_config = getattr(speech_config, 'AUDIO_CAPTURE', {})
+            self.audio_capture = AudioCapture(
+                sample_rate=audio_config.get('sample_rate', 16000),
+                channels=audio_config.get('channels', 1),
+                chunk_size=audio_config.get('chunk_size', 1024),
+                format=audio_config.get('format', 'int16')
+            )
+            self.logger.info("Audio capture initialized successfully")
+
+            # Initialize speech recognition
+            self.speech_recognizer = SpeechRecognizer(speech_config)
+            self.logger.info("Speech recognition initialized successfully")
+
+            # Initialize text to speech
+            tts_config = getattr(speech_config, 'TEXT_TO_SPEECH', {})
+            self.text_to_speech = TextToSpeech(
+                engine=tts_config.get('engine', 'pyttsx3'),
+                voice=tts_config.get('voice', 'english'),
+                rate=tts_config.get('rate', 150),
+                volume=tts_config.get('volume', 1.0)
+            )
+            self.logger.info("Text to speech initialized successfully")
+
+            # Initialize LLM processor
+            self.llm_processor = LLMProcessor(speech_config)
+            self.logger.info("LLM processor initialized successfully")
+
+            # Initialize display
             display_params = {
                 'width': getattr(display_config, 'WIDTH', 800),
                 'height': getattr(display_config, 'HEIGHT', 480),
                 'fps': getattr(display_config, 'FPS', 30),
                 'default_emotion': getattr(display_config, 'DEFAULT_EMOTION', 'neutral'),
                 'background_color': getattr(display_config, 'BACKGROUND_COLOR', (0, 0, 0)),
-                'eye_color': getattr(display_config, 'EYE_COLOR', (0, 191, 255)),
-                'headless_mode': True  # Force headless mode
+                'eye_color': getattr(display_config, 'EYE_COLOR', (0, 191, 255))
             }
-            
-            # Initialize LCD controller
             self.lcd_controller = LCDController(**display_params)
-            
-            self.logger.info("Display subsystem initialized successfully in headless mode")
+            self.logger.info("Display subsystem initialized successfully")
+
+            # Initialize vision subsystems
+            self.face_detector = FaceDetector()
+            self.emotion_analyzer = EmotionAnalyzer()
+            self.logger.info("Vision subsystems initialized successfully")
+
         except Exception as e:
-            self.logger.error(f"Failed to initialize display subsystem: {e}")
+            self.logger.error(f"Failed to initialize subsystems: {e}")
+            self.cleanup()
             raise
 
-        # Initialize vision subsystem
+    def start(self):
+        """Start all subsystems"""
         try:
-            # Create vision configuration dictionary
-            vision_params = {
-                'camera_index': getattr(vision_config, 'CAMERA_INDEX', 0),
-                'resolution': getattr(vision_config, 'RESOLUTION', (640, 480)),
-                'fps': getattr(vision_config, 'FPS', 30)
-            }
+            self.running = True
             
-            # Initialize face detector
-            self.face_detector = FaceDetector(
-                config=vision_params,
-                post_event_callback=self.post_event
-            )
+            # Start audio capture
+            if self.audio_capture:
+                self.audio_capture.start()
+                self.logger.info("Audio capture started")
             
-            self.logger.info("Vision subsystem initialized successfully")
+            # Start display
+            if self.lcd_controller:
+                self.lcd_controller.start()
+                self.logger.info("Display started")
+            
+            # Start face detection
+            if self.face_detector:
+                self.face_detector.start()
+                self.logger.info("Face detection started")
+            
+            self.logger.info("All subsystems started successfully")
+            
         except Exception as e:
-            self.logger.error(f"Failed to initialize vision subsystem: {e}")
+            self.logger.error(f"Error starting subsystems: {e}")
+            self.cleanup()
             raise
-    
-    def start(self) -> None:
-        """Start all subsystems and the main event loop."""
-        if self.running:
-            logger.warning("EVE2 system is already running")
-            return
-        
-        logger.info("Starting EVE2 system")
-        self.running = True
-        
-        # Start face detector if enabled
-        if self.face_detector:
-            threading.Thread(target=self.face_detector.start, daemon=True).start()
-        
-        # Start audio capture if enabled
-        if self.audio_capture:
-            threading.Thread(target=self.audio_capture.start, daemon=True).start()
-        
-        # Start LCD controller if enabled
-        if self.lcd_controller:
-            threading.Thread(target=self.lcd_controller.start, daemon=True).start()
-            # Set initial emotion
-            self.lcd_controller.set_emotion(self.current_emotion)
-        
-        # Start the main event processing loop
-        threading.Thread(target=self._process_events, daemon=True).start()
-        
-        logger.info("EVE2 system started successfully")
-    
-    def stop(self) -> None:
-        """Stop all subsystems and the main event loop."""
-        if not self.running:
-            logger.warning("EVE2 system is not running")
-            return
-        
-        logger.info("Stopping EVE2 system")
+
+    def cleanup(self):
+        """Clean up all subsystems"""
         self.running = False
         
-        # Stop face detector if enabled
-        if self.face_detector:
-            self.face_detector.stop()
-        
-        # Stop audio capture if enabled
-        if self.audio_capture:
-            self.audio_capture.stop()
-        
-        # Stop LCD controller if enabled
-        if self.lcd_controller:
-            self.lcd_controller.stop()
-        
-        logger.info("EVE2 system stopped successfully")
-    
+        if hasattr(self, 'audio_capture') and self.audio_capture:
+            try:
+                self.audio_capture.stop()
+            except:
+                pass
+
+        if hasattr(self, 'lcd_controller') and self.lcd_controller:
+            try:
+                self.lcd_controller.stop()
+            except:
+                pass
+
+        if hasattr(self, 'face_detector') and self.face_detector:
+            try:
+                self.face_detector.stop()
+            except:
+                pass
+
+        self.logger.info("All subsystems stopped")
+
     def _process_events(self) -> None:
         """Process events from the event queue"""
         while self.running:
@@ -381,4 +383,4 @@ if __name__ == "__main__":
             time.sleep(1)
     except KeyboardInterrupt:
         # Handle keyboard interrupt
-        orchestrator.stop() 
+        orchestrator.cleanup() 
