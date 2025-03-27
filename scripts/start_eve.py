@@ -175,40 +175,47 @@ def apply_cli_options(args: argparse.Namespace) -> None:
     if args.audio_output_device is not None:
         config.hardware.AUDIO_OUTPUT_DEVICE = args.audio_output_device
 
-def main() -> None:
-    """Main entry point for EVE2."""
-    # Parse command-line arguments
-    parser = setup_argparse()
-    args = parser.parse_args()
-    
-    # Apply command-line options to the configuration
-    apply_cli_options(args)
-    
-    # Set up logging
-    logging_utils.setup_logging()
-    logger = logging.getLogger(__name__)
-    
-    logger.info("Starting EVE2 system")
-    
+def main():
+    orchestrator = None
     try:
-        # Create and start the orchestrator
+        # Initialize and start the orchestrator
         orchestrator = create_orchestrator()
         orchestrator.start()
         
-        # Keep the main thread alive
+        # Main loop
         while True:
-            time.sleep(1)
-    
-    except KeyboardInterrupt:
-        logger.info("Keyboard interrupt received, shutting down")
-        if 'orchestrator' in locals():
-            orchestrator.stop()
-    
+            try:
+                time.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("Received shutdown signal")
+                break
+            except Exception as e:
+                logger.error(f"Error in main loop: {e}")
+                break
+                
     except Exception as e:
-        logger.error(f"Error starting EVE2: {e}", exc_info=True)
-        sys.exit(1)
-    
-    logger.info("EVE2 system stopped")
+        logger.error(f"Error starting EVE2: {e}")
+    finally:
+        # Ensure proper shutdown
+        if orchestrator is not None:
+            try:
+                orchestrator.stop()
+            except Exception as e:
+                logger.error(f"Error during shutdown: {e}")
+            
+        logger.info("EVE2 shutdown complete")
 
 if __name__ == "__main__":
-    main() 
+    try:
+        main()
+    except KeyboardInterrupt:
+        logger.info("Received keyboard interrupt")
+    except Exception as e:
+        logger.error(f"Unhandled exception: {e}")
+    finally:
+        # Ensure pygame is properly quit
+        try:
+            import pygame
+            pygame.quit()
+        except:
+            pass 

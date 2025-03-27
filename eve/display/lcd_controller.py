@@ -57,6 +57,8 @@ class LCDController:
         self._load_assets()
         
         self.logger.info("Display controller initialized in software rendering mode")
+        self.is_blinking = False
+        self.blink_duration = 0.15  # seconds for each blink phase
 
     def _generate_default_emotion(self):
         """Generate a default emotion face"""
@@ -112,42 +114,38 @@ class LCDController:
             return fallback
 
     def _load_assets(self):
-        """Load emotion assets or generate defaults"""
-        self.logger.info("Loading display assets")
-        
-        # List of basic emotions to ensure we have
-        basic_emotions = ['neutral', 'happy', 'sad', 'angry', 'surprised', 'confused']
-        assets_path = os.path.join(os.path.dirname(__file__), 'assets', 'emotions')
-        
+        """Load emotion assets"""
         try:
-            # Create assets directory if it doesn't exist
-            os.makedirs(assets_path, exist_ok=True)
-            
-            # Try to load each emotion, generate if missing
-            for emotion in basic_emotions:
-                image_path = os.path.join(assets_path, f"{emotion}.png")
-                
+            # Load standard emotions
+            emotions_path = os.path.join('assets', 'emotions')
+            for emotion in ['neutral', 'happy', 'sad', 'angry', 'surprised']:
+                image_path = os.path.join(emotions_path, f'{emotion}.png')
                 if os.path.exists(image_path):
-                    try:
-                        self.emotion_images[emotion] = pygame.image.load(image_path)
-                        self.logger.info(f"Loaded emotion image: {emotion}")
-                    except pygame.error:
-                        self.logger.warning(f"Failed to load image for {emotion}, generating default")
-                        self.emotion_images[emotion] = self._generate_emotion(emotion)
+                    self.emotion_images[emotion] = pygame.image.load(image_path)
                 else:
-                    self.logger.warning(f"No image found for {emotion}, generating default")
-                    self.emotion_images[emotion] = self._generate_emotion(emotion)
-                    
-                    # Try to save the generated emotion
-                    try:
-                        pygame.image.save(self.emotion_images[emotion], image_path)
-                        self.logger.info(f"Saved generated {emotion} image to {image_path}")
-                    except Exception as e:
-                        self.logger.warning(f"Could not save generated emotion: {e}")
-                        
+                    self.emotion_images[emotion] = self._generate_default_emotion()
+
+            # Create blink emotion (eyes closed)
+            blink_surface = pygame.Surface((self.width, self.height))
+            blink_surface.fill(self.background_color)
+            # Draw closed eyes (simple lines)
+            eye_width = 100
+            eye_height = 10
+            left_eye_pos = ((self.width // 2) - eye_width - 50, self.height // 2)
+            right_eye_pos = ((self.width // 2) + 50, self.height // 2)
+            
+            for pos in [left_eye_pos, right_eye_pos]:
+                pygame.draw.line(blink_surface, self.eye_color,
+                               (pos[0], pos[1]),
+                               (pos[0] + eye_width, pos[1]),
+                               eye_height)
+            
+            self.emotion_images['blink'] = blink_surface
+            
+            self.logger.info("Loaded all emotion assets")
         except Exception as e:
             self.logger.error(f"Error loading assets: {e}")
-            # Ensure we at least have a neutral emotion
+            # Create default emotion as fallback
             self.emotion_images['neutral'] = self._generate_default_emotion()
 
     def _generate_emotion(self, emotion):
@@ -345,77 +343,50 @@ class LCDController:
         return surface
 
     def _render_current_emotion(self):
-        """Render the current emotion to the screen"""
+        """Render the current emotion"""
         try:
-            # Clear the screen
+            if not pygame.display.get_init():
+                return
+
+            # Clear screen
             self.screen.fill(self.background_color)
             
-            # Get the current emotion image
-            emotion = self.current_emotion
-            if emotion not in self.emotion_images:
-                self.logger.warning(f"Unknown emotion: {emotion}, using neutral")
-                emotion = 'neutral'
-                if 'neutral' not in self.emotion_images:
-                    self.emotion_images['neutral'] = self._generate_default_emotion()
+            # If blinking, render closed eyes, otherwise render current emotion
+            emotion_surface = self.emotion_images.get(
+                'blink' if self.is_blinking else self.current_emotion,
+                self.emotion_images.get('neutral')
+            )
             
-            # Draw the emotion
-            image = self.emotion_images[emotion]
-            if image.get_width() == self.width and image.get_height() == self.height:
-                # Full-screen image
-                self.screen.blit(image, (0, 0))
-            else:
-                # Centered image
-                x = (self.width - image.get_width()) // 2
-                y = (self.height - image.get_height()) // 2
-                self.screen.blit(image, (x, y))
-                
-            # Add status text at bottom
-            try:
-                font = pygame.font.SysFont(None, 24)
-                status = f"EVE2 Display - Current Emotion: {emotion}"
-                text = font.render(status, True, (200, 200, 200))
-                self.screen.blit(text, (10, self.height - 30))
-            except:
-                pass  # Ignore text rendering errors
-                
+            if emotion_surface:
+                # Center the emotion on screen
+                pos_x = (self.width - emotion_surface.get_width()) // 2
+                pos_y = (self.height - emotion_surface.get_height()) // 2
+                self.screen.blit(emotion_surface, (pos_x, pos_y))
+            
+            pygame.display.flip()
+            
         except Exception as e:
             self.logger.error(f"Error rendering emotion: {e}")
-            # Try to show an error message
-            try:
-                self.screen.fill((64, 0, 0))  # Dark red background
-                font = pygame.font.SysFont(None, 36)
-                text = font.render("ERROR RENDERING EMOTION", True, (255, 255, 255))
-                self.screen.blit(text, (self.width//2 - text.get_width()//2, self.height//2))
-            except:
-                pass  # Last resort, just ignore if even this fails
 
     def _render_loop(self):
-        """Main rendering loop for headless mode"""
-        self.logger.info("Render loop started in headless mode")
-        
-        last_log_time = 0
-        status_interval = 60.0  # Log status once per minute
-        
+        """Main rendering loop"""
         while self.running:
             try:
-                # Still render to keep state consistent
+                if not pygame.display.get_init():
+                    self.logger.error("Display surface not initialized")
+                    break
+                
                 self._render_current_emotion()
+                self.clock.tick(self.fps)
                 
-                # Periodically log status
-                current_time = time.time()
-                if current_time - last_log_time > status_interval:
-                    self.logger.info(f"Display running in headless mode - current emotion: {self.current_emotion}")
-                    last_log_time = current_time
-                
-                # Control frame rate if clock is available
-                if self.clock:
-                    self.clock.tick(self.fps)
-                else:
-                    time.sleep(1.0 / self.fps)
-                    
+            except pygame.error as e:
+                self.logger.error(f"Pygame error: {e}")
+                break
             except Exception as e:
-                self.logger.error(f"Error in render loop: {e}")
-                time.sleep(1.0)  # Prevent tight error loop
+                self.logger.error(f"Error rendering emotion: {e}")
+                time.sleep(0.1)  # Prevent tight error loop
+        
+        self.logger.info("Render loop ended")
 
     def start(self):
         """Start the display controller in headless mode"""
@@ -427,20 +398,26 @@ class LCDController:
             self.logger.info("Display controller started in headless mode")
 
     def stop(self):
-        """Stop the display controller"""
+        """Stop the display controller gracefully"""
+        if not self.running:
+            return
+        
         self.running = False
+        
+        # Stop render thread
         if self.render_thread:
             try:
-                self.render_thread.join(timeout=1.0)
-            except:
-                pass
+                self.render_thread.join(timeout=2.0)
+            except Exception as e:
+                self.logger.error(f"Error stopping render thread: {e}")
         
         # Clean up pygame
         try:
+            pygame.display.quit()
             pygame.quit()
-        except:
-            pass
-            
+        except Exception as e:
+            self.logger.error(f"Error during pygame cleanup: {e}")
+        
         self.logger.info("Display controller stopped")
 
     def set_emotion(self, emotion):
@@ -492,3 +469,24 @@ class LCDController:
         text = font.render("EVE2 Default Display", True, (255, 255, 255))
         self.background.blit(text, (400 - text.get_width() // 2, 50)) 
         self.background.blit(text, (400 - text.get_width() // 2, 50)) 
+
+    def blink(self):
+        """Perform a single blink animation"""
+        try:
+            self.is_blinking = True
+            # Store current emotion
+            current = self.current_emotion
+            
+            # Close eyes
+            self.set_emotion('blink')
+            time.sleep(self.blink_duration)
+            
+            # Open eyes
+            self.set_emotion(current)
+            time.sleep(self.blink_duration)
+            
+            self.is_blinking = False
+            self.logger.debug("Completed blink animation")
+        except Exception as e:
+            self.logger.error(f"Error during blink animation: {e}")
+            self.is_blinking = False 

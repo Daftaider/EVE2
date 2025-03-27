@@ -87,9 +87,10 @@ class EVEOrchestrator:
         self.text_to_speech = None
         self.llm_processor = None
         self.lcd_controller = None
-        self.face_detector = None
-        self.emotion_analyzer = None
+            self.face_detector = None
+            self.emotion_analyzer = None
         self.running = False
+        self.stopped = False
         
         # Initialize subsystems
         try:
@@ -124,7 +125,7 @@ class EVEOrchestrator:
                 volume=tts_config.get('volume', 1.0)
             )
             self.logger.info("Text to speech initialized successfully")
-
+            
             # Initialize LLM processor
             self.llm_processor = LLMProcessor(speech_config)
             self.logger.info("LLM processor initialized successfully")
@@ -152,24 +153,25 @@ class EVEOrchestrator:
             raise
 
     def start(self):
-        """Start all subsystems"""
+        """Start all subsystems and perform initialization sequence"""
         try:
             self.running = True
             
-            # Start audio capture
+            # Start subsystems
             if self.audio_capture:
                 self.audio_capture.start()
                 self.logger.info("Audio capture started")
             
-            # Start display
             if self.lcd_controller:
                 self.lcd_controller.start()
                 self.logger.info("Display started")
             
-            # Start face detection
             if self.face_detector:
                 self.face_detector.start()
                 self.logger.info("Face detection started")
+            
+            # Perform initialization sequence
+            self._perform_init_sequence()
             
             self.logger.info("All subsystems started successfully")
             
@@ -178,30 +180,82 @@ class EVEOrchestrator:
             self.cleanup()
             raise
 
-    def cleanup(self):
-        """Clean up all subsystems"""
+    def _perform_init_sequence(self):
+        """Perform initialization sequence with visual and audio feedback"""
+        try:
+            # Short delay to ensure all systems are ready
+            time.sleep(0.5)
+            
+            # Perform blink animation
+            if self.lcd_controller:
+                self.lcd_controller.blink()
+            
+            # Play startup sound
+            if self.text_to_speech:
+                self.text_to_speech.play_startup_sound()
+            
+            self.logger.info("Initialization sequence completed")
+        except Exception as e:
+            self.logger.error(f"Error during initialization sequence: {e}")
+
+    def stop(self):
+        """Stop all subsystems gracefully"""
+        if self.stopped:
+            return
+        
+        self.logger.info("Stopping EVE orchestrator...")
         self.running = False
         
-        if hasattr(self, 'audio_capture') and self.audio_capture:
-            try:
+        try:
+            # Stop audio subsystems
+            if hasattr(self, 'audio_capture') and self.audio_capture:
                 self.audio_capture.stop()
-            except:
-                pass
+                self.logger.info("Audio capture stopped")
 
-        if hasattr(self, 'lcd_controller') and self.lcd_controller:
-            try:
+            # Stop display
+            if hasattr(self, 'lcd_controller') and self.lcd_controller:
                 self.lcd_controller.stop()
-            except:
-                pass
+                self.logger.info("Display stopped")
 
-        if hasattr(self, 'face_detector') and self.face_detector:
+            # Stop vision subsystems
+            if hasattr(self, 'face_detector') and self.face_detector:
+            self.face_detector.stop()
+                self.logger.info("Face detector stopped")
+
+            # Stop any other active components
+            if hasattr(self, 'text_to_speech') and self.text_to_speech:
+                self.text_to_speech.stop()
+                self.logger.info("Text to speech stopped")
+
+        except Exception as e:
+            self.logger.error(f"Error during shutdown: {e}")
+        finally:
+            self.stopped = True
+            self.cleanup()
+            self.logger.info("EVE orchestrator stopped")
+
+    def cleanup(self):
+        """Clean up resources and perform final shutdown tasks"""
+        try:
+            # Release any remaining resources
+            self.audio_capture = None
+            self.speech_recognizer = None
+            self.text_to_speech = None
+            self.llm_processor = None
+            self.lcd_controller = None
+            self.face_detector = None
+            self.emotion_analyzer = None
+            
+            # Clean up pygame
             try:
-                self.face_detector.stop()
+                import pygame
+                pygame.quit()
             except:
                 pass
 
-        self.logger.info("All subsystems stopped")
-
+        except Exception as e:
+            self.logger.error(f"Error during cleanup: {e}")
+    
     def _process_events(self) -> None:
         """Process events from the event queue"""
         while self.running:
@@ -220,7 +274,7 @@ class EVEOrchestrator:
                         self.logger.error(f"Error handling event {event.topic}: {e}")
                 else:
                     self.logger.warning(f"No handler for event topic: {event.topic}")
-
+                
             except Exception as e:
                 self.logger.error(f"Error in event processing loop: {e}")
                 time.sleep(0.1)  # Prevent tight error loop
@@ -245,8 +299,8 @@ class EVEOrchestrator:
                     # Update display emotion based on response
                     emotion = self._determine_emotion_from_response(response)
                     if emotion:
-                        self.lcd_controller.set_emotion(emotion)
-            
+                    self.lcd_controller.set_emotion(emotion)
+                
         except Exception as e:
             self.logger.error(f"Error handling speech recognition: {e}")
 
@@ -313,7 +367,7 @@ class EVEOrchestrator:
             if confidence >= self.config.vision.EMOTION_CONFIDENCE_THRESHOLD:
                 if self.lcd_controller:
                     self.lcd_controller.set_emotion(emotion)
-                    
+                
         except Exception as e:
             self.logger.error(f"Error handling emotion detection: {e}")
 

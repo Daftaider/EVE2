@@ -441,4 +441,13 @@ class TextToSpeech:
     def speak(self, text):
         """Convert text to speech and play it"""
         logger.info(f"Speaking: {text}")
-        return True 
+        return True
+
+    def play_startup_sound(self):
+        """Play a short startup sound"""
+        try:
+            startup_message = "System initialized and ready"
+            self.speak(startup_message)
+            logger.info("Played startup sound")
+        except Exception as e:
+            logger.error(f"Failed to play startup sound: {e}") 
