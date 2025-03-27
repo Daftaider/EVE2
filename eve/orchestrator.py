@@ -82,6 +82,13 @@ class EVEOrchestrator:
         """Initialize the EVE orchestrator"""
         self.logger = logging.getLogger(__name__)
         
+        # Initialize configuration
+        self.config = type('Config', (), {
+            'SPEECH': speech_config,
+            'VISION': vision_config,
+            'DISPLAY': display_config,
+        })
+        
         # Initialize all attributes to None first
         self.audio_capture = None
         self.speech_recognizer = None
@@ -90,6 +97,7 @@ class EVEOrchestrator:
         self.lcd_controller = None
         self.face_detector = None
         self.emotion_analyzer = None
+        self.vision_display = None
         self.running = False
         self.stopped = False
         
@@ -104,7 +112,7 @@ class EVEOrchestrator:
         """Initialize all subsystems"""
         try:
             # Initialize audio capture first
-            audio_config = getattr(speech_config, 'AUDIO_CAPTURE', {})
+            audio_config = getattr(self.config.SPEECH, 'AUDIO_CAPTURE', {})
             self.audio_capture = AudioCapture(
                 sample_rate=audio_config.get('sample_rate', 16000),
                 channels=audio_config.get('channels', 1),
@@ -114,31 +122,30 @@ class EVEOrchestrator:
             self.logger.info("Audio capture initialized successfully")
 
             # Initialize speech recognition
-            self.speech_recognizer = SpeechRecognizer(speech_config)
+            self.speech_recognizer = SpeechRecognizer(self.config.SPEECH)
             self.logger.info("Speech recognition initialized successfully")
 
             # Initialize text to speech
-            tts_config = getattr(speech_config, 'TEXT_TO_SPEECH', {})
             self.text_to_speech = TextToSpeech(
-                engine=tts_config.get('engine', 'pyttsx3'),
-                voice=tts_config.get('voice', 'english'),
-                rate=tts_config.get('rate', 150),
-                volume=tts_config.get('volume', 1.0)
+                engine=getattr(self.config.SPEECH.TEXT_TO_SPEECH, 'engine', 'pyttsx3'),
+                voice=getattr(self.config.SPEECH.TEXT_TO_SPEECH, 'voice', 'english'),
+                rate=getattr(self.config.SPEECH.TEXT_TO_SPEECH, 'rate', 150),
+                volume=getattr(self.config.SPEECH.TEXT_TO_SPEECH, 'volume', 1.0)
             )
             self.logger.info("Text to speech initialized successfully")
             
             # Initialize LLM processor
-            self.llm_processor = LLMProcessor(speech_config)
+            self.llm_processor = LLMProcessor(self.config.SPEECH)
             self.logger.info("LLM processor initialized successfully")
 
             # Initialize display
             display_params = {
-                'width': getattr(display_config, 'WIDTH', 800),
-                'height': getattr(display_config, 'HEIGHT', 480),
-                'fps': getattr(display_config, 'FPS', 30),
-                'default_emotion': getattr(display_config, 'DEFAULT_EMOTION', 'neutral'),
-                'background_color': getattr(display_config, 'BACKGROUND_COLOR', (0, 0, 0)),
-                'eye_color': getattr(display_config, 'EYE_COLOR', (0, 191, 255))
+                'width': getattr(self.config.DISPLAY, 'WIDTH', 800),
+                'height': getattr(self.config.DISPLAY, 'HEIGHT', 480),
+                'fps': getattr(self.config.DISPLAY, 'FPS', 30),
+                'default_emotion': getattr(self.config.DISPLAY, 'DEFAULT_EMOTION', 'neutral'),
+                'background_color': getattr(self.config.DISPLAY, 'BACKGROUND_COLOR', (0, 0, 0)),
+                'eye_color': getattr(self.config.DISPLAY, 'EYE_COLOR', (0, 191, 255))
             }
             self.lcd_controller = LCDController(**display_params)
             self.logger.info("Display subsystem initialized successfully")
@@ -250,6 +257,7 @@ class EVEOrchestrator:
             self.lcd_controller = None
             self.face_detector = None
             self.emotion_analyzer = None
+            self.vision_display = None
             
             # Clean up pygame
             try:
@@ -439,33 +447,31 @@ class EVEOrchestrator:
     def _process_frame(self, frame):
         """Process a camera frame"""
         try:
-            action, data = self.vision_display.process_frame(frame)
-            
-            if action == "unknown_face":
-                # Ask for person's name
-                self.text_to_speech.speak("Hello! I don't recognize you. What's your name?")
-                self.lcd_controller.set_emotion("surprised")
+            if self.vision_display:
+                action, data = self.vision_display.process_frame(frame)
                 
-                # Wait for name input (you'll need to implement this based on your speech recognition)
-                # For now, we'll simulate it
-                # name = self._get_name_from_speech()
-                # self.vision_display.start_learning_face(name)
-                # self.text_to_speech.speak(f"Nice to meet you {name}! Please show me different angles of your face.")
-                
-            elif action == "continue_learning":
-                if self.vision_display.learning_faces_count == 1:
-                    self.text_to_speech.speak("Great! Now please turn your head slightly to the left.")
-                elif self.vision_display.learning_faces_count == 2:
-                    self.text_to_speech.speak("Perfect! Now slightly to the right.")
-                elif self.vision_display.learning_faces_count == 3:
-                    self.text_to_speech.speak("Almost done! Look up a bit.")
-                elif self.vision_display.learning_faces_count == 4:
-                    self.text_to_speech.speak("Last one! Look down slightly.")
-                
-            elif action == "learning_complete":
-                self.text_to_speech.speak("Thank you! I've learned your face and will remember you next time!")
-                self.lcd_controller.set_emotion("happy")
-                
+                if action == "unknown_face":
+                    # Ask for person's name
+                    self.text_to_speech.speak("Hello! I don't recognize you. What's your name?")
+                    self.lcd_controller.set_emotion("surprised")
+                    
+                elif action == "continue_learning":
+                    count = self.vision_display.learning_faces_count
+                    prompts = [
+                        "Great! Now please turn your head slightly to the left.",
+                        "Perfect! Now slightly to the right.",
+                        "Almost done! Look up a bit.",
+                        "Last one! Look down slightly."
+                    ]
+                    if count < len(prompts):
+                        self.text_to_speech.speak(prompts[count])
+                    
+                elif action == "learning_complete":
+                    self.text_to_speech.speak(
+                        "Thank you! I've learned your face and will remember you next time!"
+                    )
+                    self.lcd_controller.set_emotion("happy")
+                    
         except Exception as e:
             self.logger.error(f"Error processing frame: {e}")
 

@@ -54,6 +54,7 @@ OBJECT_CLASSES_FILE = "models/object_detection/coco.names"
 TRACKING_ENABLED = False
 TRACKING_ALGORITHM = "CSRT"  # Options: "BOOSTING", "MIL", "KCF", "TLD", "MEDIANFLOW", "GOTURN", "MOSSE", "CSRT"
 
+# Vision configuration
 VISION = {
     'KNOWN_FACES_DIR': 'data/known_faces',
     'CAMERA_INDEX': 0,
@@ -62,6 +63,20 @@ VISION = {
     'FPS': 30,
     'MIN_FACE_IMAGES': 5,
     'RECOGNITION_THRESHOLD': 0.6
+}
+
+# Camera settings
+CAMERA = {
+    'WIDTH': 640,
+    'HEIGHT': 480,
+    'FPS': 30
+}
+
+# Face detection settings
+FACE_DETECTION = {
+    'MIN_FACE_SIZE': 30,
+    'SCALE_FACTOR': 1.1,
+    'MIN_NEIGHBORS': 5
 }
 
 class VisionConfig:
