@@ -32,7 +32,8 @@ class LCDController:
                  width: Optional[int] = None,
                  height: Optional[int] = None,
                  fps: Optional[int] = None,
-                 default_emotion: Optional[Emotion] = None):
+                 default_emotion: Optional[Emotion] = None,
+                 background_color: Optional[Union[Tuple[int, int, int], str]] = None):
         """
         Initialize the LCD Controller.
         
@@ -42,6 +43,7 @@ class LCDController:
             height: Optional window height (overrides config)
             fps: Optional frames per second (overrides config)
             default_emotion: Optional starting emotion (overrides config)
+            background_color: Optional background color as RGB tuple or string (default: black)
         """
         self.config = config or DisplayConfig
         
@@ -54,12 +56,30 @@ class LCDController:
         self.fps = fps if fps is not None else self.config.FPS
         self._current_emotion = default_emotion if default_emotion is not None else self.config.DEFAULT_EMOTION
         
+        # Handle background color
+        self.background_color = self._parse_color(background_color) if background_color else (0, 0, 0)
+        
         # Initialize display system
         self._init_display()
         
         # Log initialization parameters
         logging.info(f"LCD Controller initialized with: size={self.window_size}, "
-                    f"fps={self.fps}, default_emotion={self._current_emotion}")
+                    f"fps={self.fps}, default_emotion={self._current_emotion}, "
+                    f"background_color={self.background_color}")
+
+    def _parse_color(self, color: Union[Tuple[int, int, int], str]) -> Tuple[int, int, int]:
+        """Convert color string or tuple to RGB tuple."""
+        if isinstance(color, tuple) and len(color) == 3:
+            return color
+        elif isinstance(color, str):
+            try:
+                return pygame.Color(color)[:3]
+            except ValueError:
+                logging.warning(f"Invalid color string: {color}, using black")
+                return (0, 0, 0)
+        else:
+            logging.warning(f"Invalid color format: {color}, using black")
+            return (0, 0, 0)
 
     def _init_display(self):
         """Initialize the display with current settings."""
@@ -70,6 +90,9 @@ class LCDController:
                 pygame.FULLSCREEN if self.config.FULLSCREEN else 0
             )
             self.clock = pygame.time.Clock()
+            # Fill background with specified color
+            self.screen.fill(self.background_color)
+            pygame.display.flip()
             self._load_emotion_images()
             logging.info(f"Display initialized successfully")
         except Exception as e:
@@ -81,6 +104,7 @@ class LCDController:
         logging.info("Initializing display in fallback mode")
         pygame.init()
         self.screen = pygame.Surface(self.window_size)
+        self.screen.fill(self.background_color)
         self.clock = pygame.time.Clock()
         self._load_emotion_images()
 
@@ -121,11 +145,19 @@ class LCDController:
             self._current_emotion = emotion
 
         try:
+            # Clear screen with background color
+            self.screen.fill(self.background_color)
+            # Draw emotion image
             self.screen.blit(self.emotion_images[self._current_emotion], (0, 0))
             pygame.display.flip()
             self.clock.tick(self.fps)
         except Exception as e:
             logging.error(f"Error updating display: {e}")
+
+    def set_background_color(self, color: Union[Tuple[int, int, int], str]) -> None:
+        """Set a new background color."""
+        self.background_color = self._parse_color(color)
+        self.update()
 
     def get_current_emotion(self) -> Emotion:
         """Get the current emotion being displayed."""
