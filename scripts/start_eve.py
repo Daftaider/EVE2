@@ -23,6 +23,13 @@ os.environ['SDL_VIDEODRIVER'] = 'dummy'
 os.environ['SDL_RENDERER_DRIVER'] = 'software'
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s:%(name)s:%(message)s'
+)
+logger = logging.getLogger(__name__)
+
 def setup_argparse() -> argparse.ArgumentParser:
     """
     Set up command-line argument parsing.

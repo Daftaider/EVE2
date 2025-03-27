@@ -54,6 +54,8 @@ class TextToSpeech:
         self.engine = engine or "pyttsx3"
         self.coqui_model_path = coqui_model_path
         self.tts_engine = None
+        self.logger = logging.getLogger(__name__)
+        self.is_running = True
         
         logger.info(f"Initializing text to speech with engine: {self.engine}")
         
@@ -192,6 +194,12 @@ class TextToSpeech:
             self.audio_thread.join(timeout=2.0)
         
         logger.info("TTS processor stopped")
+        
+        try:
+            if hasattr(self, 'engine'):
+                self.engine.stop()
+        except Exception as e:
+            self.logger.error(f"Error stopping text-to-speech: {e}")
     
     def say(self, text: str):
         """

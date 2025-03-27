@@ -30,6 +30,12 @@ class LCDController:
                  background_color=(0, 0, 0), eye_color=(0, 191, 255), **kwargs):
         """Initialize the LCD Controller"""
         self.logger = logging.getLogger(__name__)
+        
+        # Force software rendering
+        os.environ['SDL_VIDEODRIVER'] = 'x11'
+        os.environ['SDL_RENDERER_DRIVER'] = 'software'
+        os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+        
         self.width = width
         self.height = height
         self.fps = fps
@@ -43,22 +49,37 @@ class LCDController:
         self.use_fallback = False
         self.emotion_images = {}
         
-        # Force software rendering
-        os.environ['SDL_VIDEODRIVER'] = 'x11'
-        os.environ['SDL_RENDERER_DRIVER'] = 'software'
-        
-        # Initialize pygame
-        pygame.init()
-        pygame.display.init()
-        self.screen = pygame.display.set_mode((self.width, self.height))
-        self.clock = pygame.time.Clock()
-        
-        # Load emotions
-        self._load_assets()
-        
-        self.logger.info("Display controller initialized in software rendering mode")
-        self.is_blinking = False
-        self.blink_duration = 0.15  # seconds for each blink phase
+        # Initialize pygame in software mode
+        try:
+            pygame.init()
+            pygame.display.init()
+            
+            # Try to create the display with software rendering
+            self.screen = pygame.display.set_mode(
+                (self.width, self.height),
+                pygame.SWSURFACE | pygame.HWSURFACE
+            )
+            self.clock = pygame.time.Clock()
+            
+            # Load emotions
+            self._load_assets()
+            
+            self.logger.info("Display controller initialized in software mode")
+            self.is_blinking = False
+            self.blink_duration = 0.15  # seconds for each blink phase
+        except Exception as e:
+            self.logger.error(f"Error initializing display: {e}")
+            self._init_fallback()
+
+    def _init_fallback(self):
+        """Initialize fallback mode without display"""
+        try:
+            self.screen = pygame.Surface((self.width, self.height))
+            self.clock = pygame.time.Clock()
+            self._load_assets()
+            self.logger.info("Display controller initialized in fallback mode")
+        except Exception as e:
+            self.logger.error(f"Error initializing fallback mode: {e}")
 
     def _generate_default_emotion(self):
         """Generate a default emotion face"""
