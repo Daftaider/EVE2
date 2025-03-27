@@ -58,11 +58,11 @@ class LCDController:
         self.fps = fps if fps is not None else self.config.FPS
         
         # Convert and validate emotion
-        self._current_emotion = Emotion.from_value(default_emotion) if default_emotion is not None else self.config.DEFAULT_EMOTION
+        self._current_emotion = Emotion.NEUTRAL if default_emotion is None else Emotion(default_emotion)
         
         # Handle colors
-        self.background_color = self._parse_color(background_color) if background_color else self.config.DEFAULT_BACKGROUND_COLOR
-        self.eye_color = self._parse_color(eye_color) if eye_color else self.config.DEFAULT_EYE_COLOR
+        self.background_color = self._parse_color(background_color) if background_color else (0, 0, 0)
+        self.eye_color = self._parse_color(eye_color) if eye_color else (255, 255, 255)
         
         # Initialize display system
         self._init_display()
@@ -73,19 +73,20 @@ class LCDController:
                     f"background_color={self.background_color}, "
                     f"eye_color={self.eye_color}")
 
-    def _parse_color(self, color: Union[Tuple[int, int, int], str]) -> Tuple[int, int, int]:
-        """Convert color string or tuple to RGB tuple."""
+    def _parse_color(self, color: Union[Tuple[int, int, int], str, None]) -> Tuple[int, int, int]:
+        """Convert color to RGB tuple."""
+        if color is None:
+            return (255, 255, 255)
         if isinstance(color, tuple) and len(color) == 3:
             return color
-        elif isinstance(color, str):
+        if isinstance(color, str):
             try:
-                return pygame.Color(color)[:3]
+                rgb = pygame.Color(color)
+                return (rgb.r, rgb.g, rgb.b)
             except ValueError:
                 logging.warning(f"Invalid color string: {color}, using default")
-                return (255, 255, 255)  # Default to white
-        else:
-            logging.warning(f"Invalid color format: {color}, using default")
-            return (255, 255, 255)  # Default to white
+                return (255, 255, 255)
+        return (255, 255, 255)
 
     def _init_display(self):
         """Initialize the display with current settings."""
@@ -93,7 +94,7 @@ class LCDController:
             pygame.init()
             self.screen = pygame.display.set_mode(
                 self.window_size,
-                pygame.FULLSCREEN if self.config.FULLSCREEN else 0
+                pygame.FULLSCREEN if getattr(self.config, 'FULLSCREEN', False) else 0
             )
             self.clock = pygame.time.Clock()
             self._load_emotion_images()
@@ -113,6 +114,23 @@ class LCDController:
         self.clock = pygame.time.Clock()
         self._load_emotion_images()
 
+    def _apply_eye_color(self, surface: pygame.Surface, eye_color: Tuple[int, int, int]) -> pygame.Surface:
+        """Apply eye color to white pixels in the surface."""
+        # Create a copy of the surface
+        new_surface = surface.copy()
+        
+        # Get pixel array of the surface
+        pixels = pygame.PixelArray(new_surface)
+        
+        # Find white pixels (255, 255, 255) and replace with eye color
+        white = surface.map_rgb((255, 255, 255))
+        pixels.replace(white, surface.map_rgb(eye_color))
+        
+        # Free the pixel array
+        pixels.close()
+        
+        return new_surface
+
     def _load_emotion_images(self):
         """Load all emotion images into memory."""
         self.emotion_images = {}
@@ -121,28 +139,17 @@ class LCDController:
                 image_path = self.config.get_emotion_path(emotion)
                 original = pygame.image.load(image_path)
                 
-                # Create a new surface for the emotion
-                image = pygame.Surface(self.window_size)
-                image.fill(self.background_color)
+                # Scale image if needed
+                if original.get_size() != self.window_size:
+                    original = pygame.transform.scale(original, self.window_size)
                 
-                # Scale and center the emotion image
-                scaled = pygame.transform.scale(original, self.window_size)
-                
-                # Apply eye color if the image is not None
-                if scaled is not None:
-                    # Convert eye color pixels (assuming white pixels are eyes)
-                    pixels = pygame.PixelArray(scaled)
-                    white_pixels = pixels.compare(pygame.Color('white'))
-                    pixels[white_pixels] = self.eye_color
-                    pixels.close()
-                
-                image.blit(scaled, (0, 0))
-                self.emotion_images[emotion] = image
-                logging.debug(f"Loaded emotion image for {emotion}")
+                # Apply eye color
+                colored = self._apply_eye_color(original, self.eye_color)
+                self.emotion_images[emotion] = colored
                 
             except Exception as e:
                 logging.warning(f"Failed to load emotion image for {emotion}: {e}")
-                # Create a fallback colored rectangle
+                # Create a fallback surface
                 surface = pygame.Surface(self.window_size)
                 surface.fill(self._get_fallback_color(emotion))
                 self.emotion_images[emotion] = surface
@@ -161,7 +168,7 @@ class LCDController:
 
     def update(self, emotion: Optional[Emotion] = None) -> None:
         """Update the display with the given emotion."""
-        if emotion is not None and isinstance(emotion, Emotion):
+        if emotion is not None:
             self._current_emotion = emotion
 
         try:
