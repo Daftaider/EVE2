@@ -4,6 +4,8 @@ Speech system configuration for EVE2
 
 import os
 from pathlib import Path
+from dataclasses import dataclass
+from typing import Optional, Dict, Any
 
 # Get the project root directory
 PROJECT_ROOT = str(Path(__file__).parent.parent.parent)
@@ -117,4 +119,35 @@ TEXT_TO_SPEECH = {
 # Speech processing parameters
 NOISE_THRESHOLD = 300
 MAX_SILENCE_TIME = 2.0
-MIN_PHRASE_TIME = 0.5 
+MIN_PHRASE_TIME = 0.5
+
+@dataclass
+class SpeechConfig:
+    """Configuration for the speech subsystem."""
+    # Speech recognition settings
+    SPEECH_RECOGNITION_MODEL: str = "google"
+    SPEECH_RECOGNITION_LANGUAGE: str = "en-US"
+    
+    # Text-to-speech settings
+    TTS_ENGINE: str = "pyttsx3"
+    TTS_VOICE: str = "english"
+    TTS_RATE: int = 150
+    TTS_VOLUME: float = 1.0
+    
+    # Audio capture settings
+    AUDIO_DEVICE_INDEX: Optional[int] = None
+    AUDIO_SAMPLE_RATE: int = 16000
+    AUDIO_CHANNELS: int = 1
+    NOISE_THRESHOLD: float = 0.1
+    
+    # LLM settings
+    LLM_MODEL_PATH: str = "models/llm/simple_model"
+    LLM_CONTEXT_LENGTH: int = 1024
+    
+    # Coqui TTS settings
+    COQUI_MODEL_PATH: str = "models/tts/coqui"
+
+    @classmethod
+    def from_dict(cls, config_dict: Dict[str, Any]) -> 'SpeechConfig':
+        """Create a SpeechConfig from a dictionary."""
+        return cls(**{k: v for k, v in config_dict.items() if hasattr(cls, k)}) 

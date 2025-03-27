@@ -35,6 +35,7 @@ from eve.vision.face_detector import FaceDetector
 from eve.vision.emotion_analyzer import EmotionAnalyzer
 from eve.vision.display_window import VisionDisplay
 from eve.config.display import Emotion, DisplayConfig
+from eve.config.speech import SpeechConfig
 
 # Import config modules directly
 try:
@@ -81,112 +82,67 @@ class EVEOrchestrator:
     """
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
-        """Initialize the EVE orchestrator"""
+        """
+        Initialize the EVE orchestrator.
+        
+        Args:
+            config: Optional configuration dictionary with subsystem configs
+        """
         self.logger = logging.getLogger(__name__)
         
-        # Initialize configuration as SimpleNamespace
         self.config = config or {}
-        self.config.SPEECH = speech_config
-        self.config.VISION = vision_config
-        self.config.DISPLAY = display_config
-        
-        # Initialize all attributes to None first
-        self.audio_capture = None
-        self.speech_recognizer = None
-        self.text_to_speech = None
-        self.llm_processor = None
-        self.lcd_controller = None
-        self.face_detector = None
-        self.emotion_analyzer = None
-        self.vision_display = None
-        self.running = False
-        self.stopped = False
-        
-        # Initialize subsystems
+        self._init_configs()
+        self._init_subsystems()
+
+    def _init_configs(self):
+        """Initialize configuration objects for each subsystem."""
         try:
-            self._init_subsystems()
+            # Initialize display config
+            display_dict = self.config.get('display', {})
+            self.display_config = DisplayConfig()
+            for key, value in display_dict.items():
+                if hasattr(self.display_config, key):
+                    setattr(self.display_config, key, value)
+
+            # Initialize speech config
+            speech_dict = self.config.get('speech', {})
+            self.speech_config = SpeechConfig.from_dict(speech_dict)
+
         except Exception as e:
-            self.logger.error(f"Error creating orchestrator: {e}")
+            self.logger.error(f"Error initializing configs: {e}")
             raise
 
     def _init_subsystems(self):
-        """Initialize all subsystems"""
+        """Initialize all subsystems with their respective configs."""
         try:
-            # Initialize audio capture first
-            audio_config = getattr(self.config.SPEECH, 'AUDIO_CAPTURE', {})
-            self.audio_capture = AudioCapture(
-                sample_rate=getattr(audio_config, 'sample_rate', 16000),
-                channels=getattr(audio_config, 'channels', 1),
-                chunk_size=getattr(audio_config, 'chunk_size', 1024),
-                format=getattr(audio_config, 'format', 'int16')
-            )
-            self.logger.info("Audio capture initialized successfully")
-
-            # Initialize speech recognition
-            self.speech_recognizer = SpeechRecognizer(self.config.SPEECH)
-            self.logger.info("Speech recognition initialized successfully")
-
-            # Initialize text to speech
-            tts_config = getattr(self.config.SPEECH, 'TEXT_TO_SPEECH', {})
-            self.text_to_speech = TextToSpeech(
-                engine=getattr(tts_config, 'engine', 'pyttsx3'),
-                voice=getattr(tts_config, 'voice', 'english'),
-                rate=getattr(tts_config, 'rate', 150),
-                volume=getattr(tts_config, 'volume', 1.0)
-            )
-            self.logger.info("Text to speech initialized successfully")
-            
-            # Initialize LLM processor
-            self.llm_processor = LLMProcessor(self.config.SPEECH)
-            self.logger.info("LLM processor initialized successfully")
-
-            # Initialize display subsystem with proper emotion enum
-            display_config = self.config.get('display', {})
-            
-            # Convert emotion value to proper Enum if it's an integer
-            default_emotion = display_config.get('default_emotion')
-            if isinstance(default_emotion, int):
-                # Map integer to Emotion enum (adjust mapping as needed)
-                emotion_map = {
-                    0: Emotion.NEUTRAL,
-                    1: Emotion.HAPPY,
-                    2: Emotion.SAD,
-                    3: Emotion.ANGRY,
-                    4: Emotion.SURPRISED,
-                    5: Emotion.CONFUSED
-                }
-                default_emotion = emotion_map.get(default_emotion, Emotion.NEUTRAL)
-            elif isinstance(default_emotion, str):
-                # Convert string to Emotion enum
-                try:
-                    default_emotion = Emotion[default_emotion.upper()]
-                except (KeyError, AttributeError):
-                    default_emotion = Emotion.NEUTRAL
-            elif default_emotion is not None and not isinstance(default_emotion, Emotion):
-                default_emotion = Emotion.NEUTRAL
-
+            # Initialize display subsystem
             self.lcd_controller = LCDController(
-                width=display_config.get('width'),
-                height=display_config.get('height'),
-                fps=display_config.get('fps'),
-                default_emotion=default_emotion,
-                background_color=display_config.get('background_color'),
-                eye_color=display_config.get('eye_color')
+                config=self.display_config,
+                width=getattr(self.display_config, 'WINDOW_SIZE', (800, 480))[0],
+                height=getattr(self.display_config, 'WINDOW_SIZE', (800, 480))[1],
+                fps=getattr(self.display_config, 'FPS', 30),
+                default_emotion=getattr(self.display_config, 'DEFAULT_EMOTION', Emotion.NEUTRAL),
+                background_color=getattr(self.display_config, 'DEFAULT_BACKGROUND_COLOR', (0, 0, 0)),
+                eye_color=getattr(self.display_config, 'DEFAULT_EYE_COLOR', (255, 255, 255))
             )
-            self.logger.info("Display subsystem initialized successfully")
 
-            # Initialize vision subsystems
-            self.face_detector = FaceDetector()
-            self.emotion_analyzer = EmotionAnalyzer()
-            self.logger.info("Vision subsystems initialized successfully")
+            # Initialize speech subsystem (if you have one)
+            self.speech_system = self._init_speech_system()
 
-            # Initialize vision display
-            self.vision_display = VisionDisplay(self.config)
-            self.vision_display.start()
+            logging.info("All subsystems initialized successfully")
 
         except Exception as e:
-            self.logger.error(f"Failed to initialize subsystems: {e}")
-            self.cleanup()
+            logging.error(f"Failed to initialize subsystems: {e}")
+            raise
+
+    def _init_speech_system(self):
+        """Initialize the speech subsystem."""
+        try:
+            # Your speech system initialization code here
+            # Use self.speech_config for configuration
+            pass
+        except Exception as e:
+            logging.error(f"Failed to initialize speech system: {e}")
             raise
 
     def start(self):
@@ -195,17 +151,13 @@ class EVEOrchestrator:
             self.running = True
             
             # Start subsystems
-            if self.audio_capture:
-                self.audio_capture.start()
-                self.logger.info("Audio capture started")
-            
             if self.lcd_controller:
                 self.lcd_controller.start()
                 self.logger.info("Display started")
             
-            if self.face_detector:
-                self.face_detector.start()
-                self.logger.info("Face detection started")
+            if self.speech_system:
+                self.speech_system.start()
+                self.logger.info("Speech system started")
             
             # Perform initialization sequence
             self._perform_init_sequence()
@@ -228,8 +180,8 @@ class EVEOrchestrator:
                 self.lcd_controller.blink()
             
             # Play startup sound
-            if self.text_to_speech:
-                self.text_to_speech.play_startup_sound()
+            if self.speech_system:
+                self.speech_system.play_startup_sound()
             
             self.logger.info("Initialization sequence completed")
         except Exception as e:
@@ -244,25 +196,14 @@ class EVEOrchestrator:
         self.running = False
         
         try:
-            # Stop audio subsystems
-            if hasattr(self, 'audio_capture') and self.audio_capture:
-                self.audio_capture.stop()
-                self.logger.info("Audio capture stopped")
-
-            # Stop display
+            # Stop subsystems
             if hasattr(self, 'lcd_controller') and self.lcd_controller:
                 self.lcd_controller.stop()
                 self.logger.info("Display stopped")
-
-            # Stop vision subsystems
-            if hasattr(self, 'face_detector') and self.face_detector:
-                self.face_detector.stop()
-                self.logger.info("Face detector stopped")
-
-            # Stop any other active components
-            if hasattr(self, 'text_to_speech') and self.text_to_speech:
-                self.text_to_speech.stop()
-                self.logger.info("Text to speech stopped")
+            
+            if hasattr(self, 'speech_system') and self.speech_system:
+                self.speech_system.stop()
+                self.logger.info("Speech system stopped")
 
         except Exception as e:
             self.logger.error(f"Error during shutdown: {e}")
@@ -272,28 +213,20 @@ class EVEOrchestrator:
             self.logger.info("EVE orchestrator stopped")
 
     def cleanup(self):
-        """Clean up resources and perform final shutdown tasks"""
+        """Cleanup all subsystems."""
         try:
-            # Release any remaining resources
-            self.audio_capture = None
-            self.speech_recognizer = None
-            self.text_to_speech = None
-            self.llm_processor = None
-            self.lcd_controller = None
-            self.face_detector = None
-            self.emotion_analyzer = None
-            self.vision_display = None
-            
-            # Clean up pygame
-            try:
-                import pygame
-                pygame.quit()
-            except:
-                pass
-
+            if hasattr(self, 'lcd_controller'):
+                self.lcd_controller.cleanup()
+            # Add cleanup for other subsystems
         except Exception as e:
             self.logger.error(f"Error during cleanup: {e}")
-    
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.cleanup()
+
     def _process_events(self) -> None:
         """Process events from the event queue"""
         while self.running:
@@ -326,13 +259,13 @@ class EVEOrchestrator:
             self.logger.info(f"Speech recognized: '{text}' (confidence: {confidence:.2f})")
             
             # Process the recognized speech
-            if confidence >= self.config.speech.MIN_CONFIDENCE:
+            if confidence >= self.speech_config.MIN_CONFIDENCE:
                 # Generate response using LLM
-                response = self.llm_processor.process(text)
+                response = self.speech_system.process(text)
                 
                 # Speak the response
                 if response:
-                    self.text_to_speech.speak(response)
+                    self.speech_system.speak(response)
                     
                     # Update display emotion based on response
                     emotion = self._determine_emotion_from_response(response)
@@ -402,7 +335,7 @@ class EVEOrchestrator:
             self.logger.debug(f"Emotion detected: {emotion} ({confidence:.2f})")
             
             # Update display if confidence is high enough
-            if confidence >= self.config.vision.EMOTION_CONFIDENCE_THRESHOLD:
+            if confidence >= self.speech_config.EMOTION_CONFIDENCE_THRESHOLD:
                 if self.lcd_controller:
                     self.lcd_controller.set_emotion(emotion)
                 
@@ -416,7 +349,7 @@ class EVEOrchestrator:
             self.logger.debug(f"Audio level: {level:.2f}")
             
             # React to loud sounds
-            if level > self.config.audio.REACTION_THRESHOLD:
+            if level > self.speech_config.REACTION_THRESHOLD:
                 if self.lcd_controller:
                     self.lcd_controller.set_emotion('surprised')
                     
@@ -451,11 +384,11 @@ class EVEOrchestrator:
         try:
             if text:
                 # Process the command through LLM
-                response = self.llm_processor.process_text(text)
+                response = self.speech_system.process_text(text)
                 
                 # Speak the response
                 if response:
-                    self.text_to_speech.speak(response)
+                    self.speech_system.speak(response)
                     
                     # Update display based on response sentiment
                     # This is a simple example - you might want more sophisticated emotion detection
@@ -477,7 +410,7 @@ class EVEOrchestrator:
                 
                 if action == "unknown_face":
                     # Ask for person's name
-                    self.text_to_speech.speak("Hello! I don't recognize you. What's your name?")
+                    self.speech_system.speak("Hello! I don't recognize you. What's your name?")
                     self.lcd_controller.set_emotion("surprised")
                     
                 elif action == "continue_learning":
@@ -489,10 +422,10 @@ class EVEOrchestrator:
                         "Last one! Look down slightly."
                     ]
                     if count < len(prompts):
-                        self.text_to_speech.speak(prompts[count])
+                        self.speech_system.speak(prompts[count])
                     
                 elif action == "learning_complete":
-                    self.text_to_speech.speak(
+                    self.speech_system.speak(
                         "Thank you! I've learned your face and will remember you next time!"
                     )
                     self.lcd_controller.set_emotion("happy")

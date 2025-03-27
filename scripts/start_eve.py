@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from eve import config
-from eve.orchestrator import create_orchestrator
+from eve.orchestrator import EVEOrchestrator
 from eve.utils import logging_utils
 
 # Add at the top of the file, before importing pygame
@@ -24,10 +24,7 @@ os.environ['SDL_RENDERER_DRIVER'] = 'software'
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(levelname)s:%(name)s:%(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def setup_argparse() -> argparse.ArgumentParser:
@@ -183,33 +180,32 @@ def apply_cli_options(args: argparse.Namespace) -> None:
         config.hardware.AUDIO_OUTPUT_DEVICE = args.audio_output_device
 
 def main():
-    orchestrator = None
+    # Example configuration
+    config = {
+        'display': {
+            'WINDOW_SIZE': (800, 480),
+            'FPS': 30,
+            'DEFAULT_EMOTION': 'NEUTRAL',
+            'DEFAULT_BACKGROUND_COLOR': (0, 0, 0),
+            'DEFAULT_EYE_COLOR': (255, 255, 255)
+        },
+        'speech': {
+            'SPEECH_RECOGNITION_MODEL': 'google',
+            'TTS_ENGINE': 'pyttsx3',
+            'AUDIO_SAMPLE_RATE': 16000,
+            'LLM_MODEL_PATH': 'models/llm/simple_model',
+            'LLM_CONTEXT_LENGTH': 1024,
+            'COQUI_MODEL_PATH': 'models/tts/coqui'
+        }
+    }
+
     try:
-        # Initialize and start the orchestrator
-        orchestrator = create_orchestrator()
-        orchestrator.start()
-        
-        # Main loop
-        while True:
-            try:
-                time.sleep(1)
-            except KeyboardInterrupt:
-                logger.info("Received shutdown signal")
-                break
-            except Exception as e:
-                logger.error(f"Error in main loop: {e}")
-                break
-                
+        with EVEOrchestrator(config) as eve:
+            # Your main loop here
+            pass
     except Exception as e:
         logger.error(f"Error starting EVE2: {e}")
     finally:
-        # Ensure proper shutdown
-        if orchestrator is not None:
-            try:
-                orchestrator.stop()
-            except Exception as e:
-                logger.error(f"Error during shutdown: {e}")
-            
         logger.info("EVE2 shutdown complete")
 
 if __name__ == "__main__":
