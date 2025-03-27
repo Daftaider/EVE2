@@ -13,14 +13,19 @@ class VisionDisplay:
         self.logger = logging.getLogger(__name__)
         self.config = config
         
-        # Get vision settings from config with defaults
-        vision_config = getattr(config.VISION, 'VISION', {})
+        # Force X11 display backend
+        os.environ['QT_QPA_PLATFORM'] = 'xcb'
+        # Disable Qt logging
+        os.environ['QT_LOGGING_RULES'] = '*=false'
         
         # Initialize display settings
         self.window_name = "EVE Vision"
         self.frame_queue = queue.Queue(maxsize=10)
         self.running = False
         self.display_thread = None
+        
+        # Get vision settings from config with defaults
+        vision_config = getattr(config.VISION, 'VISION', {})
         
         # Face recognition settings
         default_faces_dir = os.path.join('data', 'known_faces')
@@ -62,19 +67,31 @@ class VisionDisplay:
     def start(self):
         """Start the display window"""
         if not self.running:
-            self.running = True
-            self.display_thread = threading.Thread(target=self._display_loop)
-            self.display_thread.daemon = True
-            self.display_thread.start()
-            cv2.namedWindow(self.window_name)
-            self.logger.info("Vision display started")
+            try:
+                # Create window with specific flags for better compatibility
+                cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_NORMAL)
+                # Set window properties
+                cv2.setWindowProperty(self.window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
+                
+                self.running = True
+                self.display_thread = threading.Thread(target=self._display_loop)
+                self.display_thread.daemon = True
+                self.display_thread.start()
+                self.logger.info("Vision display started")
+            except Exception as e:
+                self.logger.error(f"Error starting vision display: {e}")
+                self.running = False
+                raise
 
     def stop(self):
         """Stop the display window"""
         self.running = False
         if self.display_thread:
             self.display_thread.join(timeout=1.0)
-        cv2.destroyAllWindows()
+        try:
+            cv2.destroyWindow(self.window_name)
+        except:
+            pass
         self.logger.info("Vision display stopped")
 
     def _display_loop(self):
@@ -83,10 +100,19 @@ class VisionDisplay:
             try:
                 frame = self.frame_queue.get(timeout=0.1)
                 if frame is not None:
-                    cv2.imshow(self.window_name, frame)
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == 27:  # ESC key
-                        self.running = False
+                    # Ensure frame is in BGR format
+                    if len(frame.shape) == 2:  # If grayscale
+                        frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+                    
+                    try:
+                        cv2.imshow(self.window_name, frame)
+                        key = cv2.waitKey(1) & 0xFF
+                        if key == 27:  # ESC key
+                            self.running = False
+                    except Exception as e:
+                        self.logger.error(f"Error displaying frame: {e}")
+                        time.sleep(0.1)
+                        
             except queue.Empty:
                 continue
             except Exception as e:
@@ -188,4 +214,20 @@ class VisionDisplay:
             self.logger.info(f"Saved face encodings for: {self.current_learning_name}")
             
         except Exception as e:
-            self.logger.error(f"Error saving learned face: {e}") 
+            self.logger.error(f"Error saving learned face: {e}")
+
+    def _init_display_fallback(self):
+        """Initialize fallback display mode using basic window creation"""
+        try:
+            # Disable all GUI backends
+            os.environ['OPENCV_VIDEOIO_PRIORITY_MSMF'] = '0'
+            os.environ['OPENCV_VIDEOIO_PRIORITY_INTEL_MFX'] = '0'
+            os.environ['OPENCV_VIDEOIO_PRIORITY_GSTREAMER'] = '0'
+            
+            # Create a basic window
+            cv2.namedWindow(self.window_name, cv2.WINDOW_AUTOSIZE)
+            self.logger.info("Initialized fallback display mode")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to initialize fallback display: {e}")
+            return False 
