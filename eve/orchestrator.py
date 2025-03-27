@@ -34,6 +34,7 @@ from eve.display.lcd_controller import LCDController
 from eve.vision.face_detector import FaceDetector
 from eve.vision.emotion_analyzer import EmotionAnalyzer
 from eve.vision.display_window import VisionDisplay
+from eve.config.display import Emotion, DisplayConfig
 
 # Import config modules directly
 try:
@@ -79,12 +80,12 @@ class EVEOrchestrator:
     and coordinates the flow of data between modules.
     """
     
-    def __init__(self):
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize the EVE orchestrator"""
         self.logger = logging.getLogger(__name__)
         
         # Initialize configuration as SimpleNamespace
-        self.config = SimpleNamespace()
+        self.config = config or {}
         self.config.SPEECH = speech_config
         self.config.VISION = vision_config
         self.config.DISPLAY = display_config
@@ -139,16 +140,39 @@ class EVEOrchestrator:
             self.llm_processor = LLMProcessor(self.config.SPEECH)
             self.logger.info("LLM processor initialized successfully")
 
-            # Initialize display
-            display_params = {
-                'width': getattr(self.config.DISPLAY, 'WIDTH', 800),
-                'height': getattr(self.config.DISPLAY, 'HEIGHT', 480),
-                'fps': getattr(self.config.DISPLAY, 'FPS', 30),
-                'default_emotion': getattr(self.config.DISPLAY, 'DEFAULT_EMOTION', 'neutral'),
-                'background_color': getattr(self.config.DISPLAY, 'BACKGROUND_COLOR', (0, 0, 0)),
-                'eye_color': getattr(self.config.DISPLAY, 'EYE_COLOR', (0, 191, 255))
-            }
-            self.lcd_controller = LCDController(**display_params)
+            # Initialize display subsystem with proper emotion enum
+            display_config = self.config.get('display', {})
+            
+            # Convert emotion value to proper Enum if it's an integer
+            default_emotion = display_config.get('default_emotion')
+            if isinstance(default_emotion, int):
+                # Map integer to Emotion enum (adjust mapping as needed)
+                emotion_map = {
+                    0: Emotion.NEUTRAL,
+                    1: Emotion.HAPPY,
+                    2: Emotion.SAD,
+                    3: Emotion.ANGRY,
+                    4: Emotion.SURPRISED,
+                    5: Emotion.CONFUSED
+                }
+                default_emotion = emotion_map.get(default_emotion, Emotion.NEUTRAL)
+            elif isinstance(default_emotion, str):
+                # Convert string to Emotion enum
+                try:
+                    default_emotion = Emotion[default_emotion.upper()]
+                except (KeyError, AttributeError):
+                    default_emotion = Emotion.NEUTRAL
+            elif default_emotion is not None and not isinstance(default_emotion, Emotion):
+                default_emotion = Emotion.NEUTRAL
+
+            self.lcd_controller = LCDController(
+                width=display_config.get('width'),
+                height=display_config.get('height'),
+                fps=display_config.get('fps'),
+                default_emotion=default_emotion,
+                background_color=display_config.get('background_color'),
+                eye_color=display_config.get('eye_color')
+            )
             self.logger.info("Display subsystem initialized successfully")
 
             # Initialize vision subsystems

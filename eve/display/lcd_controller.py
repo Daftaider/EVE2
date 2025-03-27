@@ -32,7 +32,7 @@ class LCDController:
                  width: Optional[int] = None,
                  height: Optional[int] = None,
                  fps: Optional[int] = None,
-                 default_emotion: Optional[Emotion] = None,
+                 default_emotion: Optional[Union[int, str, Emotion]] = None,
                  background_color: Optional[Union[Tuple[int, int, int], str]] = None,
                  eye_color: Optional[Union[Tuple[int, int, int], str]] = None):
         """
@@ -57,11 +57,8 @@ class LCDController:
             
         self.fps = fps if fps is not None else self.config.FPS
         
-        # Ensure default_emotion is a valid Emotion enum
-        if default_emotion is not None and not isinstance(default_emotion, Emotion):
-            logging.warning(f"Invalid default_emotion type: {type(default_emotion)}, using DEFAULT_EMOTION")
-            default_emotion = None
-        self._current_emotion = default_emotion if default_emotion is not None else self.config.DEFAULT_EMOTION
+        # Convert and validate emotion
+        self._current_emotion = Emotion.from_value(default_emotion) if default_emotion is not None else self.config.DEFAULT_EMOTION
         
         # Handle colors
         self.background_color = self._parse_color(background_color) if background_color else self.config.DEFAULT_BACKGROUND_COLOR
