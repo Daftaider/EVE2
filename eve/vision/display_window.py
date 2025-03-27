@@ -8,6 +8,7 @@ from pathlib import Path
 import time
 import face_recognition
 import signal
+from eve.vision.camera_utils import CameraManager
 
 class VisionDisplay:
     def __init__(self, config):
@@ -23,7 +24,6 @@ class VisionDisplay:
         # Initialize flags
         self.running = False
         self.initialized = False
-        self.camera = None
         
         # Initialize queues
         self.frame_queue = queue.Queue(maxsize=10)
@@ -32,13 +32,17 @@ class VisionDisplay:
         
         # Get vision settings
         vision_config = getattr(config.VISION, 'VISION', {})
-        self.camera_index = getattr(vision_config, 'CAMERA_INDEX', 0)
         self.frame_width = getattr(vision_config, 'FRAME_WIDTH', 640)
         self.frame_height = getattr(vision_config, 'FRAME_HEIGHT', 480)
         self.fps = getattr(vision_config, 'FPS', 30)
         
-        # Try to initialize camera with different backends
-        self._init_camera()
+        # Initialize camera
+        self.camera = CameraManager(
+            width=self.frame_width,
+            height=self.frame_height,
+            fps=self.fps
+        )
+        self.camera.initialize()
         
         # Face recognition settings
         default_faces_dir = os.path.join('data', 'known_faces')
@@ -64,72 +68,18 @@ class VisionDisplay:
         self.logger.info(f"Received signal {signum}, shutting down...")
         self.stop()
 
-    def _init_camera(self):
-        """Initialize camera with fallback options"""
-        try:
-            # Try different camera backends
-            camera_options = [
-                (cv2.CAP_V4L2, "V4L2"),  # Try V4L2 first
-                (cv2.CAP_GSTREAMER, "GStreamer"),
-                (cv2.CAP_ANY, "Auto")
-            ]
-            
-            for backend, name in camera_options:
-                self.logger.info(f"Trying camera backend: {name}")
-                try:
-                    self.camera = cv2.VideoCapture(self.camera_index + backend)
-                    if self.camera.isOpened():
-                        # Configure camera
-                        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
-                        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
-                        self.camera.set(cv2.CAP_PROP_FPS, self.fps)
-                        
-                        # Test read
-                        ret, frame = self.camera.read()
-                        if ret and frame is not None:
-                            self.logger.info(f"Successfully initialized camera with {name} backend")
-                            return True
-                        
-                    self.camera.release()
-                    self.camera = None
-                except Exception as e:
-                    self.logger.warning(f"Failed to initialize camera with {name}: {e}")
-            
-            # If we get here, no backend worked
-            raise Exception("Could not initialize camera with any backend")
-            
-        except Exception as e:
-            self.logger.error(f"Camera initialization failed: {e}")
-            if self.camera is not None:
-                self.camera.release()
-                self.camera = None
-            return False
-
-    def _create_mock_frame(self):
-        """Create a mock frame when camera is not available"""
-        frame = np.zeros((self.frame_height, self.frame_width, 3), dtype=np.uint8)
-        cv2.putText(frame, "Camera Not Available", (50, self.frame_height//2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-        return frame
-
     def _capture_loop(self):
-        """Camera capture loop with mock support"""
+        """Camera capture loop"""
         while self.running:
             try:
-                if self.camera is None or not self.camera.isOpened():
-                    # Use mock frame if camera is not available
-                    frame = self._create_mock_frame()
-                else:
-                    ret, frame = self.camera.read()
-                    if not ret or frame is None:
-                        frame = self._create_mock_frame()
-                
-                # Process frame
-                processed_frame = self.process_frame(frame)
-                
-                # Update display queue
-                if not self.frame_queue.full():
-                    self.frame_queue.put(processed_frame, timeout=0.1)
+                ret, frame = self.camera.read_frame()
+                if ret and frame is not None:
+                    # Process frame for face detection
+                    processed_frame = self.process_frame(frame)
+                    
+                    # Update display queue
+                    if not self.frame_queue.full():
+                        self.frame_queue.put(processed_frame, timeout=0.1)
                 
                 time.sleep(1.0 / self.fps)  # Control frame rate
                 
@@ -167,9 +117,8 @@ class VisionDisplay:
             self.display_thread.join(timeout=1.0)
         
         # Release camera
-        if self.camera is not None:
+        if self.camera:
             self.camera.release()
-            self.camera = None
         
         # Close windows
         cv2.destroyAllWindows()
