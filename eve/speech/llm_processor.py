@@ -31,9 +31,21 @@ class LLMProcessor:
         self.logger = logging.getLogger(__name__)
         self.config = config
         
+        # Get the project root directory (where eve package is located)
+        self.project_root = Path(__file__).parent.parent.parent
+        
         # Get model configuration with defaults
-        default_model_path = os.path.join('models', 'llm', 'simple_model.json')
+        default_model_path = os.path.join(self.project_root, 'models', 'llm', 'simple_model.json')
         self.model_path = getattr(config, 'LLM_MODEL_PATH', default_model_path)
+        
+        # Convert string path to Path object for better handling
+        if isinstance(self.model_path, str):
+            self.model_path = Path(self.model_path)
+            
+        # If path is relative, make it absolute from project root
+        if not self.model_path.is_absolute():
+            self.model_path = self.project_root / self.model_path
+            
         self.context_length = getattr(config, 'LLM_CONTEXT_LENGTH', 512)
         
         # Create model directory if it doesn't exist
@@ -67,11 +79,12 @@ class LLMProcessor:
         """Ensure model directory exists and create simple model if needed"""
         try:
             # Create directories if they don't exist
-            model_dir = os.path.dirname(self.model_path)
-            os.makedirs(model_dir, exist_ok=True)
+            self.model_path.parent.mkdir(parents=True, exist_ok=True)
             
             # If model file doesn't exist, create a simple one
-            if not os.path.exists(self.model_path):
+            if not self.model_path.exists():
+                self.logger.info(f"Creating new model file at: {self.model_path}")
+                
                 simple_model = {
                     "responses": {
                         "greeting": ["Hello!", "Hi there!", "Greetings!"],
@@ -100,23 +113,25 @@ class LLMProcessor:
         
         except Exception as e:
             self.logger.error(f"Error creating model directory/file: {e}")
+            self.logger.error(f"Attempted path: {self.model_path}")
             raise
 
     def _init_model(self):
         """Initialize the LLM model"""
         try:
-            if os.path.exists(self.model_path):
+            if self.model_path.exists():
                 with open(self.model_path, 'r') as f:
                     self.model_data = json.load(f)
-                self.logger.info(f"Loaded model from: {self.model_path}")
+                self.logger.info(f"Successfully loaded model from: {self.model_path}")
                 self.mock_mode = False
             else:
-                self.logger.warning(f"Model file not found: {self.model_path}")
+                self.logger.error(f"Model file not found at: {self.model_path}")
                 self.model_data = None
                 self.mock_mode = True
                 
         except Exception as e:
             self.logger.error(f"Failed to load model from file: {self.model_path}")
+            self.logger.error(f"Error details: {str(e)}")
             self.model_data = None
             self.mock_mode = True
 

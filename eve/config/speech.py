@@ -3,10 +3,14 @@ Speech system configuration for EVE2
 """
 
 import os
+from pathlib import Path
+
+# Get the project root directory
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 # LLM Processing
 LLM_MODEL_TYPE = "simple"
-LLM_MODEL_PATH = os.path.join('models', 'llm', 'simple_model.json')
+LLM_MODEL_PATH = os.path.join(PROJECT_ROOT, 'models', 'llm', 'simple_model.json')
 LLM_API_KEY = ""
 LLM_MAX_TOKENS = 100
 LLM_TEMPERATURE = 0.7
