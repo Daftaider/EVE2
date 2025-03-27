@@ -124,20 +124,21 @@ class EVEOrchestrator:
 
         # Initialize display subsystem
         try:
-            # Create display configuration dictionary
+            # Create display configuration dictionary with headless mode
             display_params = {
                 'width': getattr(display_config, 'WIDTH', 800),
                 'height': getattr(display_config, 'HEIGHT', 480),
                 'fps': getattr(display_config, 'FPS', 30),
                 'default_emotion': getattr(display_config, 'DEFAULT_EMOTION', 'neutral'),
                 'background_color': getattr(display_config, 'BACKGROUND_COLOR', (0, 0, 0)),
-                'eye_color': getattr(display_config, 'EYE_COLOR', (0, 191, 255))
+                'eye_color': getattr(display_config, 'EYE_COLOR', (0, 191, 255)),
+                'headless_mode': True  # Force headless mode
             }
             
             # Initialize LCD controller
             self.lcd_controller = LCDController(**display_params)
             
-            self.logger.info("Display subsystem initialized successfully")
+            self.logger.info("Display subsystem initialized successfully in headless mode")
         except Exception as e:
             self.logger.error(f"Failed to initialize display subsystem: {e}")
             raise

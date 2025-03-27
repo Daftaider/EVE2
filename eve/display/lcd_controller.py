@@ -27,8 +27,8 @@ class LCDController:
     """
     
     def __init__(self, width=800, height=480, fps=30, default_emotion="neutral",
-                 background_color=(0, 0, 0), eye_color=(0, 191, 255), headless_mode=False):
-        """Initialize the LCD Controller with display parameters"""
+                 background_color=(0, 0, 0), eye_color=(0, 191, 255), **kwargs):
+        """Initialize the LCD Controller with immediate fallback mode"""
         self.logger = logging.getLogger(__name__)
         self.width = width
         self.height = height
@@ -40,107 +40,39 @@ class LCDController:
         
         self.running = False
         self.render_thread = None
-        self.use_fallback = headless_mode
+        # Force fallback mode immediately - don't try hardware display
+        self.use_fallback = True
         self.emotion_images = {}
-        self.screen = None
-        self.clock = None
-        self.gl_error_count = 0
         
-        # Skip display initialization if headless mode is requested
-        if not self.use_fallback:
-            self._init_display()
-        else:
-            # Initialize minimal pygame and surface
-            pygame.init()
-            self.screen = pygame.Surface((self.width, self.height))
-            self.clock = pygame.time.Clock()
-            self.logger.info("Display initialized in headless mode")
+        # Initialize pygame in headless mode
+        self._init_headless_mode()
         
-        # Load assets
+        # Load emotions
         self._load_assets()
         
-        # Log the mode we're in
-        self.logger.info(f"Display controller initialized in {'fallback' if self.use_fallback else 'standard'} mode")
+        self.logger.info("Display controller initialized in headless mode")
 
-    def _init_display(self):
-        """Try various display modes until one works"""
-        # Try methods in order of preference
-        methods = [
-            self._try_standard_mode,
-            self._try_software_mode,
-            self._try_dummy_mode
-        ]
-        
-        for method in methods:
-            if method():
-                return
-                
-        # If all methods fail, use minimal fallback
-        self.logger.error("All display initialization methods failed")
-        self.use_fallback = True
-        self.screen = pygame.Surface((self.width, self.height))
-
-    def _try_standard_mode(self):
-        """Try normal display mode"""
+    def _init_headless_mode(self):
+        """Initialize pygame in headless/dummy mode"""
         try:
-            pygame.init()
-            pygame.display.init()
-            self.screen = pygame.display.set_mode((self.width, self.height))
-            pygame.display.set_caption("EVE2 Display")
-            self.clock = pygame.time.Clock()
-            
-            # Test if it works
-            self.screen.fill(self.background_color)
-            pygame.display.flip()
-            
-            self.logger.info("Standard display mode initialized successfully")
-            return True
-        except Exception as e:
-            self.logger.debug(f"Standard mode failed: {e}")
-            return False
-
-    def _try_software_mode(self):
-        """Try software rendering mode"""
-        try:
-            os.environ['SDL_VIDEODRIVER'] = 'x11'
-            os.environ['SDL_RENDERER_DRIVER'] = 'software'
-            
-            pygame.display.quit()
-            pygame.display.init()
-            
-            self.screen = pygame.display.set_mode(
-                (self.width, self.height),
-                pygame.SWSURFACE
-            )
-            self.clock = pygame.time.Clock()
-            
-            # Test if it works
-            self.screen.fill(self.background_color)
-            pygame.display.flip()
-            
-            self.logger.info("Software rendering mode initialized successfully")
-            return True
-        except Exception as e:
-            self.logger.debug(f"Software mode failed: {e}")
-            return False
-
-    def _try_dummy_mode(self):
-        """Use dummy driver for headless operation"""
-        try:
+            # Force dummy driver
             os.environ['SDL_VIDEODRIVER'] = 'dummy'
             
-            pygame.display.quit()
-            pygame.display.init()
+            # Initialize pygame
+            pygame.init()
+            if hasattr(pygame, 'display'):
+                pygame.display.init()
             
+            # Create surface for drawing
             self.screen = pygame.Surface((self.width, self.height))
             self.clock = pygame.time.Clock()
-            self.use_fallback = True
             
-            self.logger.info("Dummy display mode initialized successfully")
-            return True
+            self.logger.info("Headless display mode initialized")
         except Exception as e:
-            self.logger.debug(f"Dummy mode failed: {e}")
-            return False
+            self.logger.error(f"Error initializing headless mode: {e}")
+            # Create a minimal surface as fallback
+            self.screen = pygame.Surface((self.width, self.height))
+            self.clock = pygame.time.Clock() if pygame.time else None
 
     def _generate_default_emotion(self):
         """Generate a default emotion face"""
@@ -474,80 +406,41 @@ class LCDController:
                 pass  # Last resort, just ignore if even this fails
 
     def _render_loop(self):
-        """Main rendering loop with minimal logging in fallback mode"""
-        self.logger.info(f"Render loop started in {'fallback' if self.use_fallback else 'display'} mode")
+        """Main rendering loop for headless mode"""
+        self.logger.info("Render loop started in headless mode")
         
         last_log_time = 0
-        fallback_log_interval = 60.0  # Log fallback status once per minute
+        status_interval = 60.0  # Log status once per minute
         
         while self.running:
             try:
-                # Handle events if not in fallback mode
-                if not self.use_fallback:
-                    for event in pygame.event.get():
-                        if event.type == pygame.QUIT:
-                            self.running = False
-                
-                # Always render current emotion to keep state consistent
+                # Still render to keep state consistent
                 self._render_current_emotion()
                 
-                # Update display if not in fallback mode
-                if not self.use_fallback:
-                    try:
-                        pygame.display.flip()
-                        self.gl_error_count = 0  # Reset on success
-                    except pygame.error as e:
-                        self.gl_error_count += 1
-                        
-                        # Log first error and every tenth error
-                        if self.gl_error_count == 1 or self.gl_error_count % 10 == 0:
-                            self.logger.error(f"Display update error ({self.gl_error_count}): {e}")
-                        
-                        # Switch to fallback after repeated errors
-                        if self.gl_error_count >= 3:
-                            self.logger.warning("Too many display errors, switching to fallback mode")
-                            self._switch_to_fallback()
+                # Periodically log status
+                current_time = time.time()
+                if current_time - last_log_time > status_interval:
+                    self.logger.info(f"Display running in headless mode - current emotion: {self.current_emotion}")
+                    last_log_time = current_time
+                
+                # Control frame rate if clock is available
+                if self.clock:
+                    self.clock.tick(self.fps)
                 else:
-                    # Periodically log fallback status
-                    current_time = time.time()
-                    if current_time - last_log_time > fallback_log_interval:
-                        self.logger.info(f"Display running in fallback mode - current emotion: {self.current_emotion}")
-                        last_log_time = current_time
-                
-                # Control frame rate
-                self.clock.tick(self.fps)
-                
+                    time.sleep(1.0 / self.fps)
+                    
             except Exception as e:
                 self.logger.error(f"Error in render loop: {e}")
                 time.sleep(1.0)  # Prevent tight error loop
 
-    def _switch_to_fallback(self):
-        """Switch to fallback mode during runtime"""
-        try:
-            self.use_fallback = True
-            
-            # Try to reinitialize with dummy driver
-            try:
-                os.environ['SDL_VIDEODRIVER'] = 'dummy'
-                pygame.display.quit()
-                pygame.display.init()
-                self.screen = pygame.Surface((self.width, self.height))
-            except:
-                # If that fails, just use a Surface
-                self.screen = pygame.Surface((self.width, self.height))
-                
-            self.logger.info("Switched to fallback display mode")
-        except Exception as e:
-            self.logger.error(f"Error switching to fallback mode: {e}")
-
     def start(self):
-        """Start the display controller"""
+        """Start the display controller in headless mode"""
         if not self.running:
             self.running = True
             self.render_thread = threading.Thread(target=self._render_loop)
             self.render_thread.daemon = True
             self.render_thread.start()
-            self.logger.info("Display controller started")
+            self.logger.info("Display controller started in headless mode")
 
     def stop(self):
         """Stop the display controller"""
@@ -557,10 +450,13 @@ class LCDController:
                 self.render_thread.join(timeout=1.0)
             except:
                 pass
+        
+        # Clean up pygame
         try:
             pygame.quit()
         except:
             pass
+            
         self.logger.info("Display controller stopped")
 
     def set_emotion(self, emotion):
@@ -571,11 +467,11 @@ class LCDController:
             if emotion not in self.emotion_images:
                 self.emotion_images[emotion] = self._generate_default_emotion()
         
-        # Always update current emotion even in fallback mode
+        # Update current emotion
         previous = self.current_emotion
         self.current_emotion = emotion
         
-        if not self.use_fallback and previous != emotion:
+        if previous != emotion:
             self.logger.info(f"Emotion changed: {previous} → {emotion}")
         
         return True

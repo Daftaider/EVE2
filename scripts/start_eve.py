@@ -19,7 +19,7 @@ from eve.orchestrator import create_orchestrator
 from eve.utils import logging_utils
 
 # Add at the top of the file, before importing pygame
-os.environ['SDL_VIDEODRIVER'] = 'x11'
+os.environ['SDL_VIDEODRIVER'] = 'dummy'
 os.environ['SDL_RENDERER_DRIVER'] = 'software'
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 
