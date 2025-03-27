@@ -56,18 +56,23 @@ class LCDController:
             self.window_size = self.config.WINDOW_SIZE
             
         self.fps = fps if fps is not None else self.config.FPS
+        
+        # Ensure default_emotion is a valid Emotion enum
+        if default_emotion is not None and not isinstance(default_emotion, Emotion):
+            logging.warning(f"Invalid default_emotion type: {type(default_emotion)}, using DEFAULT_EMOTION")
+            default_emotion = None
         self._current_emotion = default_emotion if default_emotion is not None else self.config.DEFAULT_EMOTION
         
         # Handle colors
-        self.background_color = self._parse_color(background_color) if background_color else (0, 0, 0)
-        self.eye_color = self._parse_color(eye_color) if eye_color else (255, 255, 255)
+        self.background_color = self._parse_color(background_color) if background_color else self.config.DEFAULT_BACKGROUND_COLOR
+        self.eye_color = self._parse_color(eye_color) if eye_color else self.config.DEFAULT_EYE_COLOR
         
         # Initialize display system
         self._init_display()
         
         # Log initialization parameters
         logging.info(f"LCD Controller initialized with: size={self.window_size}, "
-                    f"fps={self.fps}, default_emotion={self._current_emotion}, "
+                    f"fps={self.fps}, default_emotion={self._current_emotion.name}, "
                     f"background_color={self.background_color}, "
                     f"eye_color={self.eye_color}")
 

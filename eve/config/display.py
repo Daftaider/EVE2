@@ -3,24 +3,31 @@ Display configuration settings for EVE2
 """
 
 from enum import Enum, auto
+from typing import Dict, Tuple, Optional
 
 class Emotion(Enum):
-    NEUTRAL = auto()
-    HAPPY = auto()
-    SAD = auto()
-    ANGRY = auto()
-    SURPRISED = auto()
-    CONFUSED = auto()
+    """Enumeration of possible emotions."""
+    NEUTRAL = "neutral"
+    HAPPY = "happy"
+    SAD = "sad"
+    ANGRY = "angry"
+    SURPRISED = "surprised"
+    CONFUSED = "confused"
+    
+    def __str__(self) -> str:
+        return self.value
 
 class DisplayConfig:
+    """Configuration for the display subsystem."""
+    
     # Display settings
-    WINDOW_SIZE = (800, 480)
-    FPS = 30
-    FULLSCREEN = False
+    WINDOW_SIZE: Tuple[int, int] = (800, 480)
+    FPS: int = 30
+    FULLSCREEN: bool = False
     
     # Emotion settings
-    DEFAULT_EMOTION = Emotion.NEUTRAL
-    EMOTIONS = {
+    DEFAULT_EMOTION: Emotion = Emotion.NEUTRAL
+    EMOTIONS: Dict[Emotion, str] = {
         Emotion.NEUTRAL: "neutral",
         Emotion.HAPPY: "happy",
         Emotion.SAD: "sad",
@@ -29,16 +36,29 @@ class DisplayConfig:
         Emotion.CONFUSED: "confused"
     }
     
+    # Color settings
+    DEFAULT_BACKGROUND_COLOR: Tuple[int, int, int] = (0, 0, 0)  # Black
+    DEFAULT_EYE_COLOR: Tuple[int, int, int] = (255, 255, 255)  # White
+    
     # Asset paths
-    ASSET_DIR = "assets/emotions"
+    ASSET_DIR: str = "assets/emotions"
     
     # Animation settings
-    TRANSITION_SPEED = 0.5  # seconds
+    TRANSITION_SPEED: float = 0.5  # seconds
     
     @classmethod
     def get_emotion_path(cls, emotion: Emotion) -> str:
         """Get the file path for an emotion's image."""
-        return f"{cls.ASSET_DIR}/{cls.EMOTIONS[emotion]}.png"
+        if not isinstance(emotion, Emotion):
+            raise ValueError(f"Expected Emotion enum, got {type(emotion)}")
+        return f"{cls.ASSET_DIR}/{emotion.value}.png"
+
+    @classmethod
+    def validate_emotion(cls, emotion: Optional[Emotion]) -> Emotion:
+        """Validate and return an emotion, defaulting to NEUTRAL if invalid."""
+        if not isinstance(emotion, Emotion):
+            return cls.DEFAULT_EMOTION
+        return emotion
 
 # General display settings
 DISPLAY_ENABLED = True
