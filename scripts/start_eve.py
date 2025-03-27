@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from eve import config
 from eve.orchestrator import EVEOrchestrator
 from eve.utils import logging_utils
+from eve.config.display import Emotion  # Add this import
 
 # Add at the top of the file, before importing pygame
 os.environ['SDL_VIDEODRIVER'] = 'dummy'
@@ -199,7 +200,7 @@ def main():
         'display': {
             'WINDOW_SIZE': (800, 480),
             'FPS': 30,
-            'DEFAULT_EMOTION': 'NEUTRAL',
+            'DEFAULT_EMOTION': Emotion.NEUTRAL,  # Use enum directly
             'DEFAULT_BACKGROUND_COLOR': (0, 0, 0),
             'DEFAULT_EYE_COLOR': (255, 255, 255)
         },

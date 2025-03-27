@@ -7,34 +7,41 @@ from typing import Dict, Tuple, Optional, Union
 
 class Emotion(Enum):
     """Enumeration of possible emotions."""
-    NEUTRAL = 0
-    HAPPY = 1
-    SAD = 2
-    ANGRY = 3
-    SURPRISED = 4
-    CONFUSED = 5
+    NEUTRAL = "neutral"
+    HAPPY = "happy"
+    SAD = "sad"
+    ANGRY = "angry"
+    SURPRISED = "surprised"
+    CONFUSED = "confused"
 
     @classmethod
-    def from_value(cls, value: Union[int, str, 'Emotion']) -> 'Emotion':
+    def from_value(cls, value: Union[str, int, 'Emotion', None]) -> 'Emotion':
         """Convert various input types to Emotion enum."""
+        if value is None:
+            return cls.NEUTRAL
         if isinstance(value, cls):
             return value
-        elif isinstance(value, int):
+        if isinstance(value, str):
             try:
-                return cls(value)
-            except ValueError:
-                return cls.NEUTRAL
-        elif isinstance(value, str):
-            try:
+                # Try direct enum lookup first
                 return cls[value.upper()]
             except KeyError:
+                # Try matching the value
+                for emotion in cls:
+                    if emotion.value == value.lower():
+                        return emotion
+                return cls.NEUTRAL
+        if isinstance(value, int):
+            try:
+                return list(cls)[value]
+            except IndexError:
                 return cls.NEUTRAL
         return cls.NEUTRAL
 
     @property
     def filename(self) -> str:
         """Get the filename for this emotion."""
-        return f"{self.name.lower()}.png"
+        return f"{self.value}.png"
 
 class DisplayConfig:
     """Configuration for the display subsystem."""
@@ -61,10 +68,13 @@ class DisplayConfig:
     TRANSITION_SPEED: float = 0.5
     
     @classmethod
-    def get_emotion_path(cls, emotion: Union[int, str, Emotion]) -> str:
+    def get_emotion_path(cls, emotion: Union[str, Emotion, None]) -> str:
         """Get the file path for an emotion's image."""
-        emotion_enum = Emotion.from_value(emotion)
-        return f"{cls.ASSET_DIR}/{emotion_enum.filename}"
+        if isinstance(emotion, str):
+            emotion = Emotion.from_value(emotion)
+        elif not isinstance(emotion, Emotion):
+            emotion = Emotion.NEUTRAL
+        return f"{cls.ASSET_DIR}/{emotion.value}.png"
 
 # General display settings
 DISPLAY_ENABLED = True

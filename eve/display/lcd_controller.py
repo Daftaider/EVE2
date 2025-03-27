@@ -32,7 +32,7 @@ class LCDController:
                  width: Optional[int] = None,
                  height: Optional[int] = None,
                  fps: Optional[int] = None,
-                 default_emotion: Optional[Union[int, str, Emotion]] = None,
+                 default_emotion: Optional[Union[str, int, Emotion]] = None,
                  background_color: Optional[Union[Tuple[int, int, int], str]] = None,
                  eye_color: Optional[Union[Tuple[int, int, int], str]] = None):
         """
@@ -57,8 +57,8 @@ class LCDController:
             
         self.fps = fps if fps is not None else self.config.FPS
         
-        # Convert and validate emotion
-        self._current_emotion = Emotion.NEUTRAL if default_emotion is None else Emotion(default_emotion)
+        # Convert and validate emotion using the new from_value method
+        self._current_emotion = Emotion.from_value(default_emotion)
         
         # Handle colors
         self.background_color = self._parse_color(background_color) if background_color else (0, 0, 0)
