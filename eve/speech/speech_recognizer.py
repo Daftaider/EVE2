@@ -77,53 +77,32 @@ class SpeechRecognizer:
         self.logger = logging.getLogger(__name__)
         self.config = config
         
-        # Get configuration settings
+        # Get configuration settings with defaults
         speech_config = getattr(config, 'SPEECH_RECOGNITION', {})
+        self.model_type = speech_config.get('model_type', 'google')
+        self.model_path = speech_config.get('model_path', None)
         self.wake_word = speech_config.get('WAKE_WORD', 'eve').lower()
-        self.conversation_timeout = speech_config.get('CONVERSATION_TIMEOUT', 10.0)  # seconds
+        self.conversation_timeout = speech_config.get('CONVERSATION_TIMEOUT', 10.0)
         self.language = speech_config.get('language', 'en-US')
+        self.sample_rate = getattr(config.AUDIO_CAPTURE, 'sample_rate', 16000)
+        self.channels = getattr(config.AUDIO_CAPTURE, 'channels', 1)
         
-        # Get audio settings
-        audio_config = getattr(config, 'AUDIO_CAPTURE', {})
-        self.sample_rate = audio_config.get('sample_rate', 16000)
-        self.channels = audio_config.get('channels', 1)
-        self.chunk_size = audio_config.get('chunk_size', 1024)
+        # Initialize state
+        self.is_listening = False
+        self.in_conversation = False
+        self.last_interaction = 0
+        self.conversation_thread = None
+        self.audio_queue = queue.Queue()
+        
+        # Initialize recognizer based on model type
+        self._init_recognizer()
+        
+        self.logger.info(f"Speech recognizer initialized with wake word: {self.wake_word}")
+        self.logger.info(f"Using model type: {self.model_type}")
         
         # Buffer settings
         self.buffer_duration_sec = 0.5  # Default buffer duration in seconds
         self.buffer_size = int(self.sample_rate * self.buffer_duration_sec)
-        
-        # Initialize recognizer based on model type
-        if self.model_type == 'google':
-            self.recognizer = sr.Recognizer()
-            self.recognizer.energy_threshold = 300  # Adjust based on your needs
-            self.recognizer.dynamic_energy_threshold = True
-            self.recognizer.pause_threshold = 0.8
-        elif self.model_type == 'coqui':
-            if not self.model_path or not os.path.exists(self.model_path):
-                self.logger.warning(f"Model path not found: {self.model_path}, falling back to google")
-                self.model_type = 'google'
-                self.recognizer = sr.Recognizer()
-            else:
-                # Initialize Coqui model here if you're using it
-                pass
-        else:
-            self.logger.warning(f"Unknown model type: {self.model_type}, falling back to google")
-            self.model_type = 'google'
-            self.recognizer = sr.Recognizer()
-        
-        self.logger.info(f"Speech recognizer initialized with wake word: {self.wake_word}")
-        
-        # Initialize mock responses
-        self.mock_responses = [
-            "Hello", "How are you", "What time is it",
-            "Tell me a story", "That's interesting",
-            "I like that", "Can you help me",
-            "What's the weather like", "Good morning",
-            "Good evening"
-        ]
-        
-        self.logger.info("Speech recognizer initialized in mock mode")
         
         # Configuration
         self.threshold = config.speech.recognition_threshold if hasattr(config, 'recognition_threshold') else 0.5
@@ -137,8 +116,6 @@ class SpeechRecognizer:
         
         # Internal state
         self.is_running = False
-        self.is_listening = False
-        self.audio_queue = queue.Queue()
         self.recording_buffer = []
         self.silence_samples = int(self.sample_rate * self.silence_duration_sec)
         self.max_samples = int(self.sample_rate * self.max_recording_sec)
@@ -436,12 +413,15 @@ class SpeechRecognizer:
         """Process audio data and check for wake word or conversation"""
         try:
             # Convert audio data to AudioData object
-            audio = sr.AudioData(audio_data, 
-                               self.config.AUDIO_CAPTURE['sample_rate'],
-                               self.config.AUDIO_CAPTURE['channels'])
+            audio = sr.AudioData(audio_data, self.sample_rate, self.channels)
             
             # Try to recognize the speech
-            text = self.recognizer.recognize_google(audio, language=self.language).lower()
+            if self.model_type == 'google':
+                text = self.recognizer.recognize_google(audio, language=self.language).lower()
+            elif self.model_type == 'sphinx':
+                text = self.recognizer.recognize_sphinx(audio).lower()
+            else:
+                text = self.recognizer.recognize_google(audio, language=self.language).lower()
             
             # Check if we're in a conversation or heard the wake word
             if self.in_conversation:
