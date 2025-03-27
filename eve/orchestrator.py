@@ -123,7 +123,7 @@ class EVEOrchestrator:
                 width=getattr(self.display_config, 'WINDOW_SIZE', (800, 480))[0],
                 height=getattr(self.display_config, 'WINDOW_SIZE', (800, 480))[1],
                 fps=getattr(self.display_config, 'FPS', 30),
-                default_emotion=getattr(self.display_config, 'DEFAULT_EMOTION', Emotion.NEUTRAL),
+                default_emotion=self._current_emotion,
                 background_color=getattr(self.display_config, 'DEFAULT_BACKGROUND_COLOR', (0, 0, 0)),
                 eye_color=getattr(self.display_config, 'DEFAULT_EYE_COLOR', (255, 255, 255))
             )
