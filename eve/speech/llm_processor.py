@@ -26,61 +26,16 @@ class LLMProcessor:
     context across multiple turns.
     """
     
-    def __init__(self, model_type=None, model_path=None, context_length=4096, max_tokens=100, temperature=0.7):
-        """
-        Initialize LLM processor with configurable parameters
+    def __init__(self, config):
+        self.logger = logging.getLogger(__name__)
+        self.config = config
         
-        Args:
-            model_type (str): Type of LLM to use ('simple', 'openai', etc.)
-            model_path (str): Path to model files if needed
-            context_length (int): Maximum context window size
-            max_tokens (int): Maximum tokens in response
-            temperature (float): Sampling temperature for generation
-        """
-        self.model_type = model_type or "simple"
-        self.model_path = model_path
-        self.context_length = context_length
-        self.max_tokens = max_tokens
-        self.temperature = temperature
-        self.model = None
+        # Get model configuration
+        self.model_path = getattr(config, 'LLM_MODEL_PATH', None)
+        self.context_length = getattr(config, 'LLM_CONTEXT_LENGTH', 512)
         
-        logger.info(f"Initializing LLM processor with model type: {self.model_type}")
-        
-        # For simple model, just initialize the basic version and don't try to load anything
-        if self.model_type == "simple":
-            self.model = "simple_model"  # Just a placeholder
-            logger.info("Using simple LLM model (rule-based responses)")
-            return
-        
-        # Only attempt to load external models for non-simple types
-        try:
-            logger.info(f"Loading LLM model from {self.model_path}")
-            
-            # Check for CUDA availability
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    self.device = "cuda"
-                    logger.info("Using CUDA for inference")
-                else:
-                    self.device = "cpu"
-                    logger.info("CUDA is not available, using CPU for inference")
-            except ImportError:
-                self.device = "cpu"
-                logger.info("PyTorch not available, using CPU for inference")
-            
-            # Try to load the model
-            if not os.path.exists(self.model_path):
-                logger.error(f"Failed to load LLM model: Failed to load model from file: {self.model_path}")
-                self.model_type = "simple"
-                self.model = "simple_model"  # Fall back to simple model
-            else:
-                # This would be real model loading code
-                self.model = "loaded_model"
-        except Exception as e:
-            logger.error(f"Failed to load LLM model: {e}")
-            self.model_type = "simple" 
-            self.model = "simple_model"  # Fall back to simple model
+        # Initialize model
+        self._init_model()
         
         # State
         self.is_running = False
@@ -103,6 +58,21 @@ class LLMProcessor:
         else:
             logger.error(f"Model file not found: {self.model_path}")
             
+    def _init_model(self):
+        """Initialize the LLM model with fallback to mock"""
+        try:
+            if self.model_path and os.path.exists(self.model_path):
+                # Here you would normally load your actual LLM model
+                self.logger.info(f"Loaded LLM model from: {self.model_path}")
+                self.mock_mode = False
+            else:
+                self.logger.warning("No valid model path provided, using mock LLM processor")
+                self.mock_mode = True
+                
+        except Exception as e:
+            self.logger.error(f"Failed to load LLM model: {e}")
+            self.mock_mode = True
+
     def _load_model(self):
         """Load the language model."""
         try:
@@ -373,22 +343,32 @@ class LLMProcessor:
         logger.info(f"Processing text with LLM: {text[:50]}...")
         
         # Simple fallback implementation
-        if self.model_type == "simple" or self.model is None:
-            # Generate a simple response based on the input
-            if "hello" in text.lower() or "hi" in text.lower():
-                return "Hello! How can I help you today?"
-            elif "how are you" in text.lower():
-                return "I'm functioning normally. Thank you for asking!"
-            elif "what" in text.lower() and "time" in text.lower():
-                import datetime
-                now = datetime.datetime.now()
-                return f"The current time is {now.strftime('%H:%M:%S')}."
-            elif "weather" in text.lower():
-                return "I'm sorry, I don't have access to weather information right now."
-            else:
-                return f"I received your message: '{text}'. How can I assist you further?"
+        if self.mock_mode:
+            return self._mock_response(text)
         
         # If we have a real model, we would use it here
         # This is just a placeholder for now
         time.sleep(0.5)  # Simulate processing time
-        return f"LLM response to: {text}" 
+        return f"LLM response to: {text}"
+
+    def _mock_response(self, text):
+        """Generate a mock response based on input text"""
+        if not text:
+            return "I didn't catch that."
+        
+        # Simple keyword-based responses
+        text = text.lower()
+        if 'hello' in text or 'hi' in text:
+            return "Hello! How can I help you today?"
+        elif 'how are you' in text:
+            return "I'm functioning normally, thank you for asking."
+        elif 'bye' in text or 'goodbye' in text:
+            return "Goodbye! Have a great day!"
+        elif 'name' in text:
+            return "My name is EVE, nice to meet you!"
+        elif 'weather' in text:
+            return "I'm sorry, I don't have access to weather information."
+        elif 'thank' in text:
+            return "You're welcome!"
+        else:
+            return "I understand you're saying something about " + text.split()[0] + ", but I'm in mock mode right now." 
