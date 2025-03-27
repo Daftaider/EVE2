@@ -12,6 +12,7 @@ import threading
 import queue
 import json
 import traceback
+import random
 from typing import Dict, List, Optional, Tuple, Union, Any, Callable
 from pathlib import Path
 
@@ -32,30 +33,9 @@ class LLMProcessor:
         self.logger = logging.getLogger(__name__)
         self.config = config
         
-        # Get the project root directory
-        self.project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.logger.info(f"Project root: {self.project_root}")
-        
-        # Get model configuration with defaults
-        default_model_path = os.path.join(self.project_root, 'models', 'llm', 'simple_model.json')
-        self.model_path = getattr(config, 'LLM_MODEL_PATH', default_model_path)
-        
-        # If path is relative, make it absolute
-        if not os.path.isabs(self.model_path):
-            self.model_path = os.path.join(self.project_root, self.model_path)
-        
-        self.logger.info(f"Using model path: {self.model_path}")
-        self.context_length = getattr(config, 'LLM_CONTEXT_LENGTH', 512)
-        
-        # Initialize model
-        try:
-            self._ensure_model_directory()
-            self._init_model()
-        except Exception as e:
-            self.logger.error(f"Initialization failed: {str(e)}")
-            self.logger.error(traceback.format_exc())
-            self.model_data = None
-            self.mock_mode = True
+        # Initialize built-in responses
+        self._init_responses()
+        self.logger.info("LLM Processor initialized with built-in responses")
         
         # State
         self.is_running = False
@@ -72,138 +52,76 @@ class LLMProcessor:
         self.conversation_history = []
         self.max_history_turns = 5
         
-        # Initialize the LLM
-        if os.path.exists(self.model_path):
-            self._load_model()
-        else:
-            logger.error(f"Model file not found: {self.model_path}")
-            
-    def _ensure_model_directory(self):
-        """Ensure model directory exists and create simple model if needed"""
-        try:
-            model_dir = os.path.dirname(self.model_path)
-            self.logger.info(f"Creating directory if needed: {model_dir}")
-            
-            # Create directory with full permissions
-            os.makedirs(model_dir, mode=0o777, exist_ok=True)
-            
-            if not os.path.exists(self.model_path):
-                self.logger.info("Model file doesn't exist, creating new one")
-                
-                simple_model = {
-                    "responses": {
-                        "greeting": ["Hello!", "Hi there!", "Greetings!"],
-                        "farewell": ["Goodbye!", "Bye!", "See you later!"],
-                        "thanks": ["You're welcome!", "My pleasure!", "Glad to help!"],
-                        "unknown": ["I'm not sure about that.", "Could you rephrase that?", "I don't understand."],
-                        "status": ["I'm functioning normally.", "All systems operational.", "I'm doing well!"]
-                    },
-                    "keywords": {
-                        "hello": "greeting",
-                        "hi": "greeting",
-                        "hey": "greeting",
-                        "bye": "farewell",
-                        "goodbye": "farewell",
-                        "thanks": "thanks",
-                        "thank you": "thanks",
-                        "how are you": "status"
-                    }
-                }
-                
-                # Write with explicit encoding
-                try:
-                    with open(self.model_path, 'w', encoding='utf-8') as f:
-                        json.dump(simple_model, f, indent=2, ensure_ascii=False)
-                    self.logger.info("Successfully created model file")
-                    
-                    # Set file permissions
-                    os.chmod(self.model_path, 0o666)
-                    self.logger.info("Set file permissions")
-                except Exception as write_error:
-                    self.logger.error(f"Error writing model file: {write_error}")
-                    self.logger.error(traceback.format_exc())
-                    raise
-                
-        except Exception as e:
-            self.logger.error(f"Error in _ensure_model_directory: {e}")
-            self.logger.error(traceback.format_exc())
-            raise
+    def _init_responses(self):
+        """Initialize built-in response patterns"""
+        self.responses = {
+            "greeting": [
+                "Hello! How can I help you today?",
+                "Hi there! What can I do for you?",
+                "Greetings! How may I assist you?"
+            ],
+            "farewell": [
+                "Goodbye! Have a great day!",
+                "See you later!",
+                "Bye! Take care!"
+            ],
+            "thanks": [
+                "You're welcome!",
+                "My pleasure!",
+                "Glad I could help!"
+            ],
+            "status": [
+                "I'm functioning normally, thank you for asking.",
+                "All systems are operational.",
+                "I'm doing well and ready to help!"
+            ],
+            "unknown": [
+                "I'm not sure I understand. Could you rephrase that?",
+                "I didn't quite catch that. Can you say it differently?",
+                "I'm still learning. Could you try asking another way?"
+            ],
+            "weather": [
+                "I'm sorry, I don't have access to weather information yet.",
+                "I can't check the weather right now.",
+                "Weather monitoring isn't part of my capabilities yet."
+            ],
+            "time": [
+                "I'm sorry, I don't have access to the current time.",
+                "Time tracking isn't part of my functions yet.",
+                "I can't tell you the exact time right now."
+            ],
+            "name": [
+                "My name is EVE, nice to meet you!",
+                "I'm EVE, your electronic virtual entity.",
+                "You can call me EVE!"
+            ],
+            "help": [
+                "I can respond to basic greetings and questions. Just start with 'EVE' to get my attention!",
+                "Try asking me how I'm doing, or just say hello!",
+                "I'm here to chat and help where I can. What would you like to know?"
+            ]
+        }
 
-    def _init_model(self):
-        """Initialize the LLM model"""
-        try:
-            self.logger.info(f"Checking if model file exists at: {self.model_path}")
-            if os.path.exists(self.model_path):
-                self.logger.info("Model file exists, attempting to load")
-                try:
-                    with open(self.model_path, 'r', encoding='utf-8') as f:
-                        self.model_data = json.load(f)
-                    self.logger.info("Successfully loaded model data")
-                    self.mock_mode = False
-                except json.JSONDecodeError as je:
-                    self.logger.error(f"JSON decode error: {je}")
-                    raise
-                except Exception as read_error:
-                    self.logger.error(f"Error reading model file: {read_error}")
-                    raise
-            else:
-                self.logger.error("Model file does not exist")
-                self.model_data = None
-                self.mock_mode = True
-                
-        except Exception as e:
-            self.logger.error(f"Error in _init_model: {e}")
-            self.logger.error(traceback.format_exc())
-            raise
-
-    def _load_model(self):
-        """Load the language model."""
-        try:
-            logger.info(f"Loading LLM model from {self.model_path}")
-            
-            # Determine if we should use GPU
-            n_gpu_layers = -1  # Use all layers on GPU if available
-            use_gpu = self._is_cuda_available()
-            
-            if use_gpu:
-                logger.info("CUDA is available, using GPU for inference")
-            else:
-                logger.info("CUDA is not available, using CPU for inference")
-                n_gpu_layers = 0  # Use CPU only
-            
-            # Import here to avoid loading unnecessary dependencies
-            from llama_cpp import Llama
-            
-            # Load the model
-            self.model = Llama(
-                model_path=self.model_path,
-                n_ctx=self.context_length,
-                n_gpu_layers=n_gpu_layers,
-                verbose=False
-            )
-            
-            logger.info("LLM model loaded successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to load LLM model: {e}")
-            self.model = None
-    
-    def _is_cuda_available(self) -> bool:
-        """Check if CUDA is available for GPU acceleration."""
-        try:
-            import torch
-            return torch.cuda.is_available()
-        except ImportError:
-            return False
-    
+        self.keywords = {
+            "hello": "greeting",
+            "hi": "greeting",
+            "hey": "greeting",
+            "bye": "farewell",
+            "goodbye": "farewell",
+            "thanks": "thanks",
+            "thank you": "thanks",
+            "how are you": "status",
+            "weather": "weather",
+            "time": "time",
+            "name": "name",
+            "help": "help",
+            "what can you do": "help"
+        }
+        
     def start(self):
         """Start the LLM processor."""
         if self.is_running:
             logger.warning("LLM processor is already running")
-            return False
-        
-        if self.model is None:
-            logger.error("Cannot start LLM processor: Model not loaded")
             return False
         
         self.is_running = True
@@ -427,27 +345,20 @@ class LLMProcessor:
             if not text:
                 return "I didn't catch that."
             
-            text = text.lower()
+            text = text.lower().strip()
             
-            if self.model_data:
-                # Look for keywords in the text
-                for keyword, response_type in self.model_data["keywords"].items():
-                    if keyword in text:
-                        responses = self.model_data["responses"][response_type]
-                        # Simple rotation through responses
-                        response_index = hash(text) % len(responses)
-                        return responses[response_index]
-                
-                # If no keyword matched, return unknown response
-                responses = self.model_data["responses"]["unknown"]
-                return responses[hash(text) % len(responses)]
+            # Check for keywords in the text
+            for keyword, response_type in self.keywords.items():
+                if keyword in text:
+                    responses = self.responses[response_type]
+                    return random.choice(responses)
             
-            # Fallback to basic responses if model data isn't available
-            return self._mock_response(text)
+            # If no keyword matched, return unknown response
+            return random.choice(self.responses["unknown"])
             
         except Exception as e:
             self.logger.error(f"Error processing text: {e}")
-            return "I'm sorry, I couldn't process that."
+            return "I'm sorry, I couldn't process that properly."
 
     def _mock_response(self, text):
         """Generate a mock response when model isn't available"""
