@@ -3,7 +3,13 @@ Display configuration settings for EVE2
 """
 
 from enum import Enum
-from typing import Dict, Tuple, Optional, Union
+from typing import Dict, Tuple, Optional, Union, Any
+import logging
+import pygame
+from dataclasses import dataclass, field
+import os
+
+logger = logging.getLogger(__name__)
 
 class Emotion(Enum):
     """Enumeration of possible emotions."""
@@ -16,33 +22,42 @@ class Emotion(Enum):
 
     @classmethod
     def from_value(cls, value: Union[str, int, 'Emotion', None]) -> 'Emotion':
-        """Convert various input types to Emotion enum."""
-        if value is None:
-            return cls.NEUTRAL
+        """Convert various input types to Emotion enum, defaulting to NEUTRAL."""
         if isinstance(value, cls):
             return value
-        if isinstance(value, str):
-            try:
-                # Try direct enum lookup first
-                return cls[value.upper()]
-            except KeyError:
-                # Try matching the value
-                for emotion in cls:
-                    if emotion.value == value.lower():
-                        return emotion
-                return cls.NEUTRAL
+        if value is None:
+            return cls.NEUTRAL
+        
+        normalized_value = str(value).strip().upper()
+        
+        # Try direct name lookup
+        if normalized_value in cls.__members__:
+            return cls[normalized_value]
+        
+        # Try value lookup
+        for member in cls:
+            if member.value.upper() == normalized_value:
+                return member
+                
+        # Try index lookup if integer
         if isinstance(value, int):
             try:
                 return list(cls)[value]
             except IndexError:
-                return cls.NEUTRAL
+                pass  # Fall through to default
+
+        logger.warning(f"Invalid emotion value: '{value}', defaulting to NEUTRAL.")
         return cls.NEUTRAL
+
+    def __str__(self) -> str:
+        return self.value
 
     @property
     def filename(self) -> str:
         """Get the filename for this emotion."""
         return f"{self.value}.png"
 
+@dataclass
 class DisplayConfig:
     """Configuration for the display subsystem."""
     
@@ -70,11 +85,51 @@ class DisplayConfig:
     @classmethod
     def get_emotion_path(cls, emotion: Union[str, Emotion, None]) -> str:
         """Get the file path for an emotion's image."""
-        if isinstance(emotion, str):
-            emotion = Emotion.from_value(emotion)
-        elif not isinstance(emotion, Emotion):
-            emotion = Emotion.NEUTRAL
-        return f"{cls.ASSET_DIR}/{emotion.value}.png"
+        emotion_enum = Emotion.from_value(emotion)
+        return os.path.join(cls.ASSET_DIR, f"{emotion_enum.value}.png")
+
+    @staticmethod
+    def parse_color(color_input: Union[Tuple[int, int, int], str, None], default: Tuple[int, int, int]) -> Tuple[int, int, int]:
+        """Parse color input (string or tuple) to RGB tuple."""
+        if color_input is None:
+            return default
+        if isinstance(color_input, tuple) and len(color_input) == 3:
+            return color_input
+        if isinstance(color_input, str):
+            try:
+                # Use pygame's color parsing which is quite flexible
+                color = pygame.Color(color_input)
+                return (color.r, color.g, color.b)
+            except ValueError:
+                logger.warning(f"Invalid color string '{color_input}', using default {default}.")
+                return default
+        logger.warning(f"Invalid color format '{color_input}', using default {default}.")
+        return default
+
+    @classmethod
+    def from_dict(cls, config_dict: Dict[str, Any]) -> 'DisplayConfig':
+        """Create DisplayConfig from dict, applying defaults and type conversions."""
+        
+        # Map dictionary keys to constructor arguments, handling potential type issues
+        kwargs = {}
+        kwargs['WINDOW_SIZE'] = tuple(config_dict.get('WINDOW_SIZE', cls.WINDOW_SIZE))
+        kwargs['FPS'] = int(config_dict.get('FPS', cls.FPS))
+        kwargs['FULLSCREEN'] = bool(config_dict.get('FULLSCREEN', cls.FULLSCREEN))
+        kwargs['DEFAULT_EMOTION'] = Emotion.from_value(config_dict.get('DEFAULT_EMOTION', cls.DEFAULT_EMOTION))
+        kwargs['DEFAULT_BACKGROUND_COLOR'] = cls.parse_color(
+            config_dict.get('DEFAULT_BACKGROUND_COLOR'), cls.DEFAULT_BACKGROUND_COLOR
+        )
+        kwargs['DEFAULT_EYE_COLOR'] = cls.parse_color(
+            config_dict.get('DEFAULT_EYE_COLOR'), cls.DEFAULT_EYE_COLOR
+        )
+        kwargs['ASSET_DIR'] = str(config_dict.get('ASSET_DIR', cls.ASSET_DIR))
+        kwargs['TRANSITION_SPEED'] = float(config_dict.get('TRANSITION_SPEED', cls.TRANSITION_SPEED))
+
+        # Filter out any keys not in the dataclass definition
+        valid_keys = {f.name for f in fields(cls)}
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_keys}
+        
+        return cls(**filtered_kwargs)
 
 # General display settings
 DISPLAY_ENABLED = True

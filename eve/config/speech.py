@@ -4,8 +4,11 @@ Speech system configuration for EVE2
 
 import os
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field, fields
 from typing import Optional, Dict, Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Get the project root directory
 PROJECT_ROOT = str(Path(__file__).parent.parent.parent)
@@ -124,30 +127,42 @@ MIN_PHRASE_TIME = 0.5
 @dataclass
 class SpeechConfig:
     """Configuration for the speech subsystem."""
-    # Speech recognition settings
+    # Recognition
     SPEECH_RECOGNITION_MODEL: str = "google"
     SPEECH_RECOGNITION_LANGUAGE: str = "en-US"
+    WAKE_WORD_PHRASE: str = "hey eve"
+    WAKE_WORD_THRESHOLD: float = 0.5
     
-    # Text-to-speech settings
+    # TTS
     TTS_ENGINE: str = "pyttsx3"
     TTS_VOICE: str = "english"
     TTS_RATE: int = 150
     TTS_VOLUME: float = 1.0
+    COQUI_MODEL_PATH: Optional[str] = None # Set path if using Coqui
     
-    # Audio capture settings
+    # Audio Capture
     AUDIO_DEVICE_INDEX: Optional[int] = None
     AUDIO_SAMPLE_RATE: int = 16000
     AUDIO_CHANNELS: int = 1
     NOISE_THRESHOLD: float = 0.1
     
-    # LLM settings
-    LLM_MODEL_PATH: str = "models/llm/simple_model"
+    # LLM (Optional)
+    LLM_MODEL_PATH: Optional[str] = None
     LLM_CONTEXT_LENGTH: int = 1024
-    
-    # Coqui TTS settings
-    COQUI_MODEL_PATH: str = "models/tts/coqui"
 
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'SpeechConfig':
-        """Create a SpeechConfig from a dictionary."""
-        return cls(**{k: v for k, v in config_dict.items() if hasattr(cls, k)}) 
+        """Create SpeechConfig from a dictionary, applying defaults."""
+        # Get all field names defined in the dataclass
+        known_keys = {f.name for f in fields(cls)}
+        
+        # Filter the input dict to only include known keys
+        filtered_dict = {k: v for k, v in config_dict.items() if k in known_keys}
+
+        # Create instance using filtered dict; dataclass handles defaults for missing keys
+        try:
+            return cls(**filtered_dict)
+        except TypeError as e:
+            logger.error(f"Error creating SpeechConfig from dict: {e}. Config: {config_dict}")
+            # Return default config on error
+            return cls() 

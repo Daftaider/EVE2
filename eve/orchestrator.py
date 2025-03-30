@@ -83,55 +83,52 @@ class EVEOrchestrator:
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize the EVE orchestrator."""
-        self.config = config or {}
-        self._current_emotion = Emotion.NEUTRAL
-        self._last_update = time.time()
-        self._is_listening = False
-        self._wake_word_detected = False
-        
-        # Initialize configs and subsystems
+        self.config_dict = config or {}
+        self._running = False
+        self._audio_thread = None
+        self._state_lock = threading.Lock() # Lock for accessing shared state
+
+        # State variables (protected by lock)
+        self._current_emotion: Emotion = Emotion.NEUTRAL
+        self._is_listening: bool = False # True after wake word, waiting for command
+
+        # Initialize configurations and subsystems
         self._init_configs()
         self._init_subsystems()
-        
-        # Start audio processing thread
-        self._running = True
-        self._audio_thread = threading.Thread(target=self._process_audio, daemon=True)
-        self._audio_thread.start()
-        
-        logging.info("EVEOrchestrator initialized and listening for wake word")
+        logger.info("EVEOrchestrator initialized.")
 
     def _init_configs(self):
         """Initialize configuration objects."""
+        logger.info("Initializing configurations...")
         try:
             # Initialize display config
-            display_dict = self.config.get('display', {})
-            self.display_config = DisplayConfig()
+            self.display_config = DisplayConfig.from_dict(self.config_dict.get('display', {}))
             
             # Handle emotion from config
-            if 'DEFAULT_EMOTION' in display_dict:
-                self._current_emotion = Emotion.from_value(display_dict['DEFAULT_EMOTION'])
+            if 'DEFAULT_EMOTION' in self.display_config.__dict__:
+                self._current_emotion = Emotion.from_value(self.display_config.DEFAULT_EMOTION)
             
             # Set other display config attributes
-            for key, value in display_dict.items():
+            for key, value in self.display_config.__dict__.items():
                 if hasattr(self.display_config, key):
                     setattr(self.display_config, key, value)
 
             # Initialize speech config
-            speech_dict = self.config.get('speech', {})
-            self.speech_config = SpeechConfig.from_dict(speech_dict)
+            self.speech_config = SpeechConfig.from_dict(self.config_dict.get('speech', {}))
 
             # Add wake word settings
-            self.wake_word = self.config.get('wake_word', {}).get('PHRASE', 'hey eve')
-            self.wake_word_threshold = self.config.get('wake_word', {}).get('THRESHOLD', 0.5)
+            self.wake_word = self.speech_config.WAKE_WORD_PHRASE
+            self.wake_word_threshold = self.speech_config.WAKE_WORD_THRESHOLD
 
-            logging.info("Configurations initialized successfully")
+            logger.info("Configurations initialized successfully")
 
         except Exception as e:
-            logging.error(f"Error initializing configs: {e}")
+            logger.error(f"Fatal error initializing configs: {e}", exc_info=True)
             raise
 
     def _init_subsystems(self):
         """Initialize all subsystems."""
+        logger.info("Initializing subsystems...")
         try:
             from eve.display.lcd_controller import LCDController
             
@@ -161,10 +158,11 @@ class EVEOrchestrator:
             # Play startup sound
             self._play_startup_sound()
             
-            logging.info("All subsystems initialized successfully")
+            logger.info("All subsystems initialized successfully")
             
         except Exception as e:
-            logging.error(f"Failed to initialize subsystems: {e}")
+            logger.error(f"Fatal error initializing subsystems: {e}", exc_info=True)
+            self.cleanup()
             raise
 
     def _play_startup_sound(self):
@@ -172,191 +170,175 @@ class EVEOrchestrator:
         try:
             self.tts.speak("EVE system online")
         except Exception as e:
-            logging.error(f"Failed to play startup sound: {e}")
+            logger.warning(f"Failed to play startup sound: {e}")
 
-    def _process_audio(self):
-        """Process audio input in a separate thread."""
+    def start_audio_processing(self):
+        """Starts the audio processing thread."""
+        if self._audio_thread is None or not self._audio_thread.is_alive():
+            self._running = True
+            self._audio_thread = threading.Thread(target=self._audio_processing_loop, daemon=True)
+            self._audio_thread.start()
+            logger.info("Audio processing thread started.")
+        else:
+            logger.warning("Audio processing thread already running.")
+
+    def _audio_processing_loop(self):
+        """Continuously processes audio input for wake word and commands."""
+        logger.info("Audio loop running...")
         while self._running:
             try:
-                if self.audio_capture.has_new_audio():
-                    audio_data = self.audio_capture.get_audio()
-                    
-                    # Check for wake word if not already listening
-                    if not self._is_listening:
-                        if self.speech_recognizer.detect_wake_word(audio_data, self.wake_word):
-                            self._wake_word_detected = True
-                            self._is_listening = True
-                            self._handle_wake_word()
-                    else:
-                        # Process speech if already listening
-                        text = self.speech_recognizer.recognize(audio_data)
-                        if text:
-                            self._handle_speech(text)
-                
-                time.sleep(0.1)  # Prevent tight loop
-                
+                if not self.audio_capture.has_new_audio():
+                    time.sleep(0.05) # Short sleep if no new audio
+                    continue
+
+                audio_data = self.audio_capture.get_audio()
+                if not audio_data:
+                    continue
+
+                with self._state_lock:
+                    is_currently_listening = self._is_listening
+
+                if not is_currently_listening:
+                    # --- Wake Word Detection Phase ---
+                    if self.speech_recognizer.detect_wake_word(
+                        audio_data, self.speech_config.WAKE_WORD_PHRASE
+                    ):
+                        self._handle_wake_word() # State changes happen inside
+                else:
+                    # --- Command Recognition Phase ---
+                    text = self.speech_recognizer.recognize(audio_data)
+                    if text:
+                        self._handle_speech_command(text) # State changes happen inside
+                    # Optional: Add a timeout for listening phase here
+                    # If timeout expires without speech, reset _is_listening
+
             except Exception as e:
-                logging.error(f"Error processing audio: {e}")
-                time.sleep(1)  # Wait before retrying
+                logger.error(f"Error in audio processing loop: {e}", exc_info=True)
+                time.sleep(1) # Avoid spamming logs on persistent errors
+
+        logger.info("Audio processing loop stopped.")
 
     def _handle_wake_word(self):
         """Handle wake word detection."""
-        try:
-            logging.info("Wake word detected!")
-            self.set_emotion(Emotion.SURPRISED)  # Show surprise when activated
-            self.tts.speak("Yes?")
-            time.sleep(0.5)  # Brief pause
-            self.set_emotion(Emotion.NEUTRAL)  # Return to neutral
-        except Exception as e:
-            logging.error(f"Error handling wake word: {e}")
-
-    def _handle_speech(self, text: str):
-        """Handle recognized speech."""
-        try:
-            logging.info(f"Recognized speech: {text}")
-            
-            # Reset listening state after processing
-            self._is_listening = False
-            
-            # Simple responses for testing
-            if "hello" in text.lower():
-                self.set_emotion(Emotion.HAPPY)
-                self.tts.speak("Hello! Nice to meet you!")
-            elif "goodbye" in text.lower():
-                self.set_emotion(Emotion.SAD)
-                self.tts.speak("Goodbye! Have a nice day!")
-            else:
-                self.set_emotion(Emotion.CONFUSED)
-                self.tts.speak("I heard you, but I'm not sure how to respond.")
-            
-            # Return to neutral after response
-            time.sleep(1)
-            self.set_emotion(Emotion.NEUTRAL)
-            
-        except Exception as e:
-            logging.error(f"Error handling speech: {e}")
-
-    def start(self):
-        """Start all subsystems and perform initialization sequence"""
-        try:
-            self.running = True
-            
-            # Start subsystems
-            if self.lcd_controller:
-                self.lcd_controller.start()
-                self.logger.info("Display started")
-            
-            # Perform initialization sequence
-            self._perform_init_sequence()
-            
-            self.logger.info("All subsystems started successfully")
-            
-        except Exception as e:
-            self.logger.error(f"Error starting subsystems: {e}")
-            self.cleanup()
-            raise
-
-    def _perform_init_sequence(self):
-        """Perform initialization sequence with visual and audio feedback"""
-        try:
-            # Short delay to ensure all systems are ready
-            time.sleep(0.5)
-            
-            # Perform blink animation
-            if self.lcd_controller:
-                self.lcd_controller.blink()
-            
-            # Play startup sound
-            self._play_startup_sound()
-            
-            self.logger.info("Initialization sequence completed")
-        except Exception as e:
-            self.logger.error(f"Error during initialization sequence: {e}")
-
-    def stop(self):
-        """Stop all subsystems gracefully"""
-        if self.stopped:
-            return
+        logger.info(f"Wake word '{self.speech_config.WAKE_WORD_PHRASE}' detected!")
+        with self._state_lock:
+            self._is_listening = True
+            self._current_emotion = Emotion.SURPRISED # Show attention
         
-        self.logger.info("Stopping EVE orchestrator...")
-        self.running = False
+        # Update display immediately
+        self.lcd_controller.update(self._current_emotion)
         
         try:
-            # Stop subsystems
-            if hasattr(self, 'lcd_controller') and self.lcd_controller:
-                self.lcd_controller.stop()
-                self.logger.info("Display stopped")
-            
+            self.tts.speak("Yes?") # Acknowledge wake word
+            # No sleep needed here, TTS blocks or handles timing
         except Exception as e:
-            self.logger.error(f"Error during shutdown: {e}")
-        finally:
-            self.stopped = True
-            self.cleanup()
-            self.logger.info("EVE orchestrator stopped")
+            logger.error(f"TTS failed after wake word: {e}")
+        
+        # Optionally, return to NEUTRAL after a short delay or keep SURPRISED while listening
+        # Let's keep SURPRISED for now while listening.
+
+    def _handle_speech_command(self, text: str):
+        """Processes recognized speech command and generates a response."""
+        logger.info(f"Recognized command: '{text}'")
+        response = "Sorry, I didn't understand that." # Default response
+        next_emotion = Emotion.CONFUSED # Default emotion
+
+        # Simple command parsing (replace with more sophisticated logic/LLM later)
+        text_lower = text.lower()
+        if "hello" in text_lower or "hi" in text_lower:
+            response = "Hello there!"
+            next_emotion = Emotion.HAPPY
+        elif "goodbye" in text_lower or "bye" in text_lower:
+            response = "Goodbye!"
+            next_emotion = Emotion.SAD
+        elif "how are you" in text_lower:
+            response = "I am functioning optimally!"
+            next_emotion = Emotion.NEUTRAL
+        
+        # Update state and speak response
+        with self._state_lock:
+            self._current_emotion = next_emotion
+            self._is_listening = False # Stop listening after handling command
+
+        self.lcd_controller.update(self._current_emotion)
+        try:
+            self.tts.speak(response)
+        except Exception as e:
+            logger.error(f"TTS failed for response: {e}")
+
+        # Transition back to neutral after a delay
+        # Consider making this configurable or based on interaction context
+        time.sleep(1.5)
+        self.set_emotion(Emotion.NEUTRAL)
+
+    def set_emotion(self, emotion: Union[str, Emotion]):
+        """Sets the current emotion state safely."""
+        new_emotion = Emotion.from_value(emotion)
+        with self._state_lock:
+            if self._current_emotion != new_emotion:
+                logger.debug(f"Changing emotion from {self._current_emotion.name} to {new_emotion.name}")
+                self._current_emotion = new_emotion
+                # Don't update LCD here, let the main update loop handle it
+                # for smoother rendering, unless immediate change is needed.
+        # If immediate update is desired:
+        # self.lcd_controller.update(self._current_emotion)
+
+    def get_current_emotion(self) -> Emotion:
+        """Gets the current emotion state safely."""
+        with self._state_lock:
+            return self._current_emotion
 
     def update(self):
-        """Update all subsystems."""
+        """Main update loop called periodically. Updates display and potentially other periodic tasks."""
         try:
-            current_time = time.time()
+            # Get current emotion safely
+            current_emotion = self.get_current_emotion()
             
             # Update display
             if hasattr(self, 'lcd_controller'):
-                self.lcd_controller.update(self._current_emotion)
+                self.lcd_controller.update(current_emotion)
             
             # Process any pending audio
             if hasattr(self, 'audio_capture'):
                 self.audio_capture.update()
-            
-            # Cycle emotions every 5 seconds (for testing)
-            if current_time - self._last_update > 5:
-                self._cycle_emotion()
-                self._last_update = current_time
                 
         except Exception as e:
-            logging.error(f"Error in update loop: {e}")
+            logger.error(f"Error in update loop: {e}", exc_info=True)
             raise
 
-    def _cycle_emotion(self):
-        """Cycle through emotions for testing."""
-        emotions = list(Emotion)
-        current_index = emotions.index(self._current_emotion)
-        next_index = (current_index + 1) % len(emotions)
-        self._current_emotion = emotions[next_index]
-        logging.info(f"Switching to emotion: {self._current_emotion.name}")
-
-    def set_emotion(self, emotion: Emotion):
-        """Set the current emotion."""
-        self._current_emotion = Emotion.from_value(emotion)
-        if hasattr(self, 'lcd_controller'):
-            self.lcd_controller.update(self._current_emotion)
-
-    def get_current_emotion(self) -> Emotion:
-        """Get the current emotion."""
-        return self._current_emotion
-
     def cleanup(self):
-        """Clean up all subsystems."""
-        try:
-            self._running = False
-            if hasattr(self, '_audio_thread'):
-                self._audio_thread.join(timeout=1.0)
-            
-            if hasattr(self, 'lcd_controller'):
-                self.lcd_controller.cleanup()
-            
-            if hasattr(self, 'audio_capture'):
-                self.audio_capture.cleanup()
-            
-            if hasattr(self, 'tts'):
-                self.tts.cleanup()
-        except Exception as e:
-            logging.error(f"Error during cleanup: {e}")
+        """Stops threads and cleans up all subsystems."""
+        logger.info("Starting EVEOrchestrator cleanup...")
+        self._running = False # Signal thread to stop
+
+        # Stop and join the audio thread
+        if self._audio_thread and self._audio_thread.is_alive():
+            logger.debug("Waiting for audio thread to finish...")
+            self._audio_thread.join(timeout=2.0) # Wait for thread
+            if self._audio_thread.is_alive():
+                logger.warning("Audio thread did not terminate gracefully.")
+        self._audio_thread = None
+
+        # Cleanup subsystems (in reverse order of dependency if applicable)
+        logger.debug("Cleaning up subsystems...")
+        subsystems = ['tts', 'speech_recognizer', 'audio_capture', 'lcd_controller']
+        for name in subsystems:
+            try:
+                subsystem = getattr(self, name, None)
+                if subsystem and hasattr(subsystem, 'cleanup'):
+                    logger.debug(f"Cleaning up {name}...")
+                    subsystem.cleanup()
+            except Exception as e:
+                logger.error(f"Error cleaning up {name}: {e}", exc_info=True)
+        
+        logger.info("EVEOrchestrator cleanup finished.")
 
     def __enter__(self):
+        self.start_audio_processing() # Start audio thread when entering context
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.cleanup()
+        self.cleanup() # Ensure cleanup on exit
 
     def _process_events(self) -> None:
         """Process events from the event queue"""
