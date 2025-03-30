@@ -405,7 +405,7 @@ class LCDController:
 
             else:
                 # --- Render Normal Emotion View ---
-            if self._current_emotion in self.emotion_images:
+             if self._current_emotion in self.emotion_images:
                 self.screen.blit(self.emotion_images[self._current_emotion], (0, 0))
             
             # Update display
