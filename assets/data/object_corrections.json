@@ -1,0 +1,46 @@
+[
+    {
+        "timestamp": 1743363730.2944002,
+        "box": [
+            280,
+            191,
+            617,
+            445
+        ],
+        "original": "cat",
+        "corrected": "Person"
+    },
+    {
+        "timestamp": 1743363765.4509299,
+        "box": [
+            52,
+            166,
+            626,
+            480
+        ],
+        "original": "cat",
+        "corrected": "Person"
+    },
+    {
+        "timestamp": 1743363820.6045077,
+        "box": [
+            198,
+            206,
+            500,
+            428
+        ],
+        "original": "cat",
+        "corrected": "Person"
+    },
+    {
+        "timestamp": 1743363832.3745203,
+        "box": [
+            153,
+            196,
+            588,
+            447
+        ],
+        "original": "cat",
+        "corrected": "Person"
+    }
+]

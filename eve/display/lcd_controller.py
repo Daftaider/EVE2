@@ -20,6 +20,31 @@ from eve.config.display import Emotion, DisplayConfig
 
 logger = logging.getLogger(__name__)
 
+def calculate_iou(boxA, boxB):
+    """Calculate Intersection over Union (IoU) between two boxes.
+    Boxes are expected in (startX, startY, endX, endY) format.
+    """
+    # Determine the coordinates of the intersection rectangle
+    xA = max(boxA[0], boxB[0])
+    yA = max(boxA[1], boxB[1])
+    xB = min(boxA[2], boxB[2])
+    yB = min(boxA[3], boxB[3])
+
+    # Compute the area of intersection rectangle
+    interArea = max(0, xB - xA) * max(0, yB - yA)
+
+    # Compute the area of both the prediction and ground-truth rectangles
+    boxAArea = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1])
+    boxBArea = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1])
+
+    # Compute the intersection over union
+    iou = interArea / float(boxAArea + boxBArea - interArea)
+
+    # Return the intersection over union value
+    return iou
+
+IOU_THRESHOLD = 0.7 # Overlap threshold to consider a match for correction
+
 class LCDController:
     """
     LCD display controller for rendering eye animations.
@@ -193,9 +218,13 @@ class LCDController:
                emotion: Optional[Emotion] = None, 
                debug_mode: bool = False, 
                debug_frame: Optional[np.ndarray] = None,
-               available_cameras: Optional[List[int]] = None,
-               selected_camera: Optional[int] = None,
-               camera_rotation: int = 0) -> None:
+               detections: Optional[List[Dict[str, Any]]] = None,
+               camera_info: Optional[Dict[str, Any]] = None,
+               camera_rotation: int = 0,
+               is_correcting: bool = False,
+               input_buffer: str = "",
+               corrections: Optional[List[Dict[str, Any]]] = None
+               ) -> None:
         """Update the display with the given emotion or interactive debug view."""
         if not debug_mode and emotion is not None:
             self._current_emotion = emotion
@@ -215,32 +244,89 @@ class LCDController:
 
                 if debug_frame is not None:
                     try:
-                        frame_rgb = cv2.cvtColor(debug_frame, cv2.COLOR_BGR2RGB)
+                        # Determine if frame is BGR (OpenCV) or RGB (Picamera2)
+                        backend = camera_info.get('backend') if camera_info else 'opencv' # Assume opencv if info missing
                         
-                        # Apply rotation based on parameter
-                        if camera_rotation == 90:
-                            frame_rgb = np.rot90(frame_rgb, k=-1)
-                        elif camera_rotation == 180:
-                            frame_rgb = np.rot90(frame_rgb, k=-2)
-                        elif camera_rotation == 270:
-                            frame_rgb = np.rot90(frame_rgb, k=1)
-                        # k=0 (0 degrees) is default
+                        if backend == 'opencv':
+                            frame_rgb = cv2.cvtColor(debug_frame, cv2.COLOR_BGR2RGB)
+                        else: # Assume picamera2 provides RGB
+                            frame_rgb = debug_frame 
                         
+                        # Frame is already correctly rotated, just convert to surface
                         frame_surface = pygame.surfarray.make_surface(frame_rgb.swapaxes(0, 1))
                         scaled_surface = pygame.transform.smoothscale(frame_surface, camera_area_rect.size)
                         self.screen.blit(scaled_surface, camera_area_rect.topleft)
 
+                        # --- 1b. Draw Detections Overlays --- 
+                        if detections:
+                            # Scale factor for drawing on scaled surface
+                            scale_x = camera_area_rect.width / frame_rgb.shape[1]
+                            scale_y = camera_area_rect.height / frame_rgb.shape[0]
+                            
+                            for det in detections:
+                                box = det['box']
+                                original_label = det['label'] # Get the label from the model
+                                confidence = det['confidence']
+                                det_index = det['index']
+                                
+                                # --- Check for Corrections --- 
+                                display_label = original_label
+                                is_corrected = False
+                                if corrections:
+                                     for correction in reversed(corrections): # Check newest first
+                                          # Check if original label matches and boxes overlap sufficiently
+                                          if correction['original'] == original_label and \
+                                             calculate_iou(box, correction['box']) > IOU_THRESHOLD:
+                                                display_label = correction['corrected']
+                                                is_corrected = True
+                                                logger.debug(f"Applying correction: {original_label} -> {display_label} for box {box}")
+                                                break # Apply the most recent matching correction
+                                # ---------------------------
+
+                                # Scale box coordinates to the display rect
+                                startX = int(box[0] * scale_x) + camera_area_rect.left
+                                startY = int(box[1] * scale_y) + camera_area_rect.top
+                                endX = int(box[2] * scale_x) + camera_area_rect.left
+                                endY = int(box[3] * scale_y) + camera_area_rect.top
+                                
+                                # Draw bounding box (maybe change color if corrected?)
+                                box_color = (255, 165, 0) if is_corrected else (0, 255, 0) # Orange if corrected, Green otherwise
+                                pygame.draw.rect(self.screen, box_color, (startX, startY, endX - startX, endY - startY), 2)
+                                
+                                # Draw label text (use display_label)
+                                label_text = f"{display_label}: {confidence:.2f}{' (C)' if is_corrected else ''}"
+                                text_surface = self.debug_font.render(label_text, True, box_color)
+                                text_offset = 5 # Small offset from box line
+                                text_y = startY - text_surface.get_height() - text_offset if startY - text_surface.get_height() - text_offset > camera_area_rect.top else startY + text_offset
+                                text_x = startX + text_offset
+                                self.screen.blit(text_surface, (text_x, text_y))
+                                
+                                # Draw "Fix?" button only if NOT currently correcting
+                                if not is_correcting:
+                                    fix_text_surface = self.debug_font.render("[Fix?]", True, (255, 255, 0)) # Yellow
+                                    fix_rect = fix_text_surface.get_rect(left=text_x + text_surface.get_width() + 10, top=text_y)
+                                    self.screen.blit(fix_text_surface, fix_rect)
+                                    self.debug_ui_elements[f"correct_det_{det_index}"] = fix_rect
+                                
                     except Exception as e:
-                        logger.error(f"Error processing debug frame: {e}")
-                        # Fallback text in camera area
-                        err_text = self.debug_font.render("Error processing frame", True, (255, 0, 0))
-                        err_rect = err_text.get_rect(center=camera_area_rect.center)
-                        self.screen.blit(err_text, err_rect)
+                        logger.error(f"Error processing debug frame or detections: {e}", exc_info=True)
                 else:
                     # Show placeholder text if no frame
-                    no_feed_text = self.debug_font.render(f"No Camera Feed (Selected: {selected_camera})", True, (255, 255, 0))
+                    selected_idx_txt = camera_info.get('selected_index', '?') if camera_info else '?'
+                    backend_txt = camera_info.get('backend', 'Unknown') if camera_info else 'Unknown'
+                    no_feed_text = self.debug_font.render(f"No Feed ({backend_txt} idx:{selected_idx_txt})", True, (255, 255, 0))
                     no_feed_rect = no_feed_text.get_rect(center=camera_area_rect.center)
                     self.screen.blit(no_feed_text, no_feed_rect)
+
+                # --- 1c. Draw Correction Input Prompt (if correcting) --- 
+                if is_correcting:
+                    prompt_text = f"Enter correct label: {input_buffer}_" 
+                    prompt_surface = self.debug_font.render(prompt_text, True, (255, 255, 255), (0, 0, 0)) # White text on black background
+                    prompt_rect = prompt_surface.get_rect(centerx=self.screen.get_rect().centerx, bottom=camera_area_rect.bottom - 10) # Position above UI panel
+                    pygame.draw.rect(self.screen, (0, 0, 0), prompt_rect.inflate(10, 10)) # Black background rect
+                    self.screen.blit(prompt_surface, prompt_rect)
+                    # Maybe highlight the box being corrected?
+                    # target_info = self.orchestrator... (need access or pass info)
 
                 # 2. Render UI Panel at the bottom
                 ui_panel_rect = pygame.Rect(0, camera_area_rect.bottom, self.window_size[0], ui_panel_height)
@@ -251,23 +337,51 @@ class LCDController:
                 line_height = 30
 
                 # -- Camera Selection UI --
-                cam_label = self.debug_font.render("Camera:", True, (200, 200, 200))
+                # Use info from camera_info dict
+                backend = camera_info.get('backend') if camera_info else 'N/A'
+                selected_index = camera_info.get('selected_index') if camera_info else -1
+                available_picam2 = camera_info.get('available_picam2', []) if camera_info else []
+                available_opencv = camera_info.get('available_opencv', []) if camera_info else []
+
+                cam_label = self.debug_font.render(f"Camera ({backend}):", True, (200, 200, 200))
                 self.screen.blit(cam_label, (current_x, current_y))
                 current_x += cam_label.get_width() + 10
 
-                if available_cameras:
-                    for idx in available_cameras:
-                        is_selected = (idx == selected_camera)
-                        text_color = (0, 255, 0) if is_selected else (255, 255, 255)
-                        bg_color = (60, 60, 60) if is_selected else None
-                        cam_text = self.debug_font.render(f"[{idx}]", True, text_color, bg_color)
-                        cam_rect = cam_text.get_rect(topleft=(current_x, current_y))
-                        self.screen.blit(cam_text, cam_rect)
-                        # Store clickable area with ID
-                        self.debug_ui_elements[f"select_cam_{idx}"] = cam_rect 
-                        current_x += cam_rect.width + 15
-                else:
-                    no_cam_text = self.debug_font.render("None found", True, (255, 100, 100))
+                # Display based on backend
+                if backend == 'picamera2':
+                    if available_picam2:
+                         for i, cam_info in enumerate(available_picam2):
+                            is_selected = (i == selected_index)
+                            text_color = (0, 255, 0) if is_selected else (255, 255, 255)
+                            bg_color = (60, 60, 60) if is_selected else None
+                            # Display index and maybe model?
+                            cam_text_str = f"[{i}:{cam_info.get('Model', 'Unknown')[:10]}]"
+                            cam_text = self.debug_font.render(cam_text_str, True, text_color, bg_color)
+                            cam_rect = cam_text.get_rect(topleft=(current_x, current_y))
+                            self.screen.blit(cam_text, cam_rect)
+                            self.debug_ui_elements[f"select_cam_{i}"] = cam_rect # ID still based on list index
+                            current_x += cam_rect.width + 15
+                    else:
+                         no_cam_text = self.debug_font.render("None found", True, (255, 100, 100))
+                         self.screen.blit(no_cam_text, (current_x, current_y))
+                         current_x += no_cam_text.get_width() + 15
+                elif backend == 'opencv':
+                    if available_opencv:
+                        for idx in available_opencv:
+                            is_selected = (idx == selected_index)
+                            text_color = (0, 255, 0) if is_selected else (255, 255, 255)
+                            bg_color = (60, 60, 60) if is_selected else None
+                            cam_text = self.debug_font.render(f"[{idx}]", True, text_color, bg_color)
+                            cam_rect = cam_text.get_rect(topleft=(current_x, current_y))
+                            self.screen.blit(cam_text, cam_rect)
+                            self.debug_ui_elements[f"select_cam_{idx}"] = cam_rect # ID based on OpenCV index
+                            current_x += cam_rect.width + 15
+                    else:
+                        no_cam_text = self.debug_font.render("None found", True, (255, 100, 100))
+                        self.screen.blit(no_cam_text, (current_x, current_y))
+                        current_x += no_cam_text.get_width() + 15
+                else: # Backend unknown or N/A
+                    no_cam_text = self.debug_font.render("N/A", True, (150, 150, 150))
                     self.screen.blit(no_cam_text, (current_x, current_y))
                     current_x += no_cam_text.get_width() + 15
 
@@ -291,8 +405,8 @@ class LCDController:
 
             else:
                 # --- Render Normal Emotion View ---
-                if self._current_emotion in self.emotion_images:
-                    self.screen.blit(self.emotion_images[self._current_emotion], (0, 0))
+            if self._current_emotion in self.emotion_images:
+                self.screen.blit(self.emotion_images[self._current_emotion], (0, 0))
             
             # Update display
             pygame.display.flip()
@@ -422,3 +536,5 @@ class LCDController:
         except Exception as e:
             self.logger.error(f"Error during blink animation: {e}")
             self.is_blinking = False 
+
+    print("libcamera imported successfully!") 

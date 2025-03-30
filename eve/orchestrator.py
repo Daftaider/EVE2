@@ -9,10 +9,14 @@ import signal
 import sys
 import threading
 import time
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Union, Any, Tuple
 import queue
 import importlib
 from types import SimpleNamespace
+from pathlib import Path
+import urllib.request
+import os
+import json
 
 from eve import config
 from eve.utils import logging_utils
@@ -71,11 +75,48 @@ except ImportError:
         RESOLUTION = (640, 480)
         FPS = 30
 
+# Explicitly manage sys.path for system dependencies
+dist_packages_path = '/usr/lib/python3/dist-packages'
+try:
+    # Check if the path exists first to avoid errors
+    if os.path.isdir(dist_packages_path) and dist_packages_path not in sys.path:
+        sys.path.append(dist_packages_path)
+        # Use print directly as logger might not be ready
+        print(f"DEBUG: Added {dist_packages_path} to sys.path for libcamera lookup.", file=sys.stderr)
+except Exception as e:
+    print(f"DEBUG: Error trying to add system path: {e}", file=sys.stderr)
+
+# Initialize logger *before* potential use in except block
+logger = logging.getLogger(__name__)
+
 # Add imports for OpenCV and NumPy
 import cv2
 import numpy as np
+# Attempt to import picamera2
+try:
+    from picamera2 import Picamera2
+    picamera2_available = True
+except ImportError:
+    Picamera2 = None # Define as None if not available
+    picamera2_available = False
+    logger.warning("picamera2 library not found or its dependency 'libcamera' is missing. Falling back to OpenCV VideoCapture (may be less reliable on RPi).")
 
-logger = logging.getLogger(__name__)
+# Constants for Object Detection Model
+MODEL_DIR = Path(__file__).parent.parent / "assets" / "models" / "mobilenet_ssd"
+PROTOTXT_PATH = MODEL_DIR / "MobileNetSSD_deploy.prototxt.txt"
+MODEL_PATH = MODEL_DIR / "MobileNetSSD_deploy.caffemodel"
+CLASSES_PATH = MODEL_DIR / "object_detection_classes_coco.txt" # Using COCO names
+CONFIDENCE_THRESHOLD = 0.4
+
+# URLs for downloading model files
+PROTOTXT_URL = "https://raw.githubusercontent.com/nikmart/pi-object-detection/master/MobileNetSSD_deploy.prototxt.txt"
+# Try sourcing caffemodel from the same repo as the working prototxt
+MODEL_URL = "https://raw.githubusercontent.com/nikmart/pi-object-detection/master/MobileNetSSD_deploy.caffemodel"
+CLASSES_URL = "https://raw.githubusercontent.com/pjreddie/darknet/master/data/coco.names"
+
+# Path for storing corrections
+CORRECTIONS_DIR = Path(__file__).parent.parent / "assets" / "data"
+CORRECTIONS_PATH = CORRECTIONS_DIR / "object_corrections.json"
 
 class EVEOrchestrator:
     """
@@ -95,16 +136,27 @@ class EVEOrchestrator:
         # State variables (protected by lock)
         self._current_emotion: Emotion = Emotion.NEUTRAL
         self._is_listening: bool = False # True after wake word, waiting for command
-        self.camera = None # Add camera attribute
-        self.available_camera_indices: List[int] = []
-        self.selected_camera_index: int = 0 # Default to 0
-        self.camera_rotation: int = 0 # Degrees (0, 90, 180, 270)
+        self.camera = None # Holds either Picamera2 or cv2.VideoCapture instance
+        self.camera_backend = None # 'picamera2' or 'opencv'
+        self.available_camera_indices: List[int] = [] # For OpenCV fallback
+        self.picamera2_cameras = [] # List of dicts from Picamera2.global_camera_info()
+        self.selected_camera_index: int = 0 # Index for OpenCV, ID for Picamera2?
+        self.camera_rotation: int = 180 # Degrees (0, 90, 180, 270)
+        self.object_detection_net = None
+        self.object_detection_classes = None
+        self.last_detections: List[Dict[str, Any]] = [] # Store last frame's detections
+        self.is_correcting_detection: bool = False
+        self.correction_target_info: Optional[Dict[str, Any]] = None
+        self.user_input_buffer: str = ""
+        self.corrections_data: List[Dict[str, Any]] = [] # Store loaded corrections
 
         # Initialize configurations and subsystems
         self._init_configs()
-        self._discover_cameras() # Discover cameras before initializing subsystems that might need them
-        self._init_subsystems()
-        self._init_camera() # Initialize camera using the selected index
+        self._init_object_detection() # Initialize OD model
+        self._load_corrections() # Load corrections after ensuring directory exists
+        self._discover_cameras() # Discover cameras
+        self._init_subsystems() # Init other subsystems
+        self._init_camera() # Initialize camera using the selected index/method
         logger.info("EVEOrchestrator initialized.")
 
     def _init_configs(self):
@@ -135,6 +187,111 @@ class EVEOrchestrator:
         except Exception as e:
             logger.error(f"Fatal error initializing configs: {e}", exc_info=True)
             raise
+
+    def _download_file(self, url: str, dest_path: Path):
+        """Downloads a file from a URL to a destination path, adding a User-Agent header."""
+        logger.info(f"Downloading {dest_path.name} from {url}...")
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        req = urllib.request.Request(url, headers=headers)
+        
+        try:
+            # Ensure parent directory exists
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Download with headers
+            with urllib.request.urlopen(req) as response, open(dest_path, 'wb') as out_file:
+                if response.status == 200:
+                    data = response.read() # Read entire file content
+                    out_file.write(data)
+                    logger.info(f"Successfully downloaded {dest_path.name}.")
+                    return True
+                else:
+                    logger.error(f"Failed to download {dest_path.name}. Status code: {response.status}")
+                    return False
+
+        except Exception as e:
+            logger.error(f"Failed to download {dest_path.name} from {url}: {e}")
+            # Clean up potentially partially downloaded file
+            if dest_path.exists():
+                try:
+                    dest_path.unlink()
+                except OSError as oe:
+                    logger.error(f"Error cleaning up partial file {dest_path}: {oe}")
+            return False
+
+    def _init_object_detection(self):
+        """Load or download the object detection model and class labels."""
+        logger.info("Initializing Object Detection...")
+        
+        # Ensure model directory exists
+        try:
+            MODEL_DIR.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.error(f"Could not create model directory {MODEL_DIR}: {e}")
+            self.object_detection_net = None
+            self.object_detection_classes = None
+            return
+            
+        # Check and download prototxt if missing
+        if not PROTOTXT_PATH.exists():
+            logger.warning(f"Prototxt file not found at {PROTOTXT_PATH}.")
+            if not self._download_file(PROTOTXT_URL, PROTOTXT_PATH):
+                 logger.error("Cannot proceed with object detection without prototxt.")
+                 self.object_detection_net = None
+                 self.object_detection_classes = None
+                 return
+
+        # Check and download model weights if missing
+        if not MODEL_PATH.exists():
+            logger.warning(f"Model weights file not found at {MODEL_PATH}.")
+            if not self._download_file(MODEL_URL, MODEL_PATH):
+                 logger.error("Cannot proceed with object detection without model weights.")
+                 self.object_detection_net = None
+                 self.object_detection_classes = None
+                 return
+                 
+        # Check and download class labels if missing
+        if not CLASSES_PATH.exists():
+            logger.warning(f"Class labels file not found at {CLASSES_PATH}.")
+            if not self._download_file(CLASSES_URL, CLASSES_PATH):
+                 logger.error("Cannot proceed with object detection without class labels.")
+                 self.object_detection_net = None
+                 self.object_detection_classes = None
+                 return
+
+        # --- All files should exist now, proceed with loading --- 
+        try:
+            # Load class labels
+            with open(CLASSES_PATH, 'rt') as f:
+                self.object_detection_classes = f.read().rstrip('\n').split('\n')
+            logger.info(f"Loaded {len(self.object_detection_classes)} object classes.")
+
+            # Load the neural network
+            logger.info(f"Loading object detection model from {MODEL_DIR}...")
+            self.object_detection_net = cv2.dnn.readNetFromCaffe(str(PROTOTXT_PATH), str(MODEL_PATH))
+            logger.info("Object detection model loaded successfully.")
+
+        except Exception as e:
+            logger.error(f"Error loading object detection model or classes after ensuring files exist: {e}", exc_info=True)
+            self.object_detection_net = None
+            self.object_detection_classes = None
+
+    def _load_corrections(self):
+        """Loads saved object detection corrections from the JSON file."""
+        logger.info(f"Attempting to load corrections from {CORRECTIONS_PATH}...")
+        if CORRECTIONS_PATH.exists():
+            try:
+                with open(CORRECTIONS_PATH, 'r') as f:
+                    self.corrections_data = json.load(f)
+                logger.info(f"Loaded {len(self.corrections_data)} corrections.")
+            except (json.JSONDecodeError, IOError, OSError) as e:
+                logger.error(f"Error loading corrections file {CORRECTIONS_PATH}: {e}. Starting with empty list.")
+                self.corrections_data = [] # Reset if file is corrupt
+        else:
+            logger.info("Corrections file not found. Starting with empty list.")
+            self.corrections_data = []
 
     def _init_subsystems(self):
         """Initialize all subsystems."""
@@ -299,8 +456,34 @@ class EVEOrchestrator:
             return self._current_emotion
 
     def _discover_cameras(self):
-        """Check available camera indices using OpenCV."""
-        logger.info("Discovering available cameras...")
+        """Discover cameras using picamera2 if available, else OpenCV."""
+        self.available_camera_indices.clear()
+        self.picamera2_cameras.clear()
+
+        if picamera2_available:
+            logger.info("Discovering cameras using picamera2...")
+            try:
+                self.picamera2_cameras = Picamera2.global_camera_info()
+                if self.picamera2_cameras:
+                    logger.info(f"Found {len(self.picamera2_cameras)} camera(s) via picamera2:")
+                    for i, cam_info in enumerate(self.picamera2_cameras):
+                         logger.info(f"  Camera {i}: ID={cam_info.get('Id')}, Model={cam_info.get('Model')}, Location={cam_info.get('Location')}")
+                    # Select the first camera found by default
+                    self.selected_camera_index = 0 # Use index into self.picamera2_cameras list
+                    self.camera_backend = 'picamera2'
+                else:
+                    logger.warning("picamera2 found no cameras. Falling back to OpenCV.")
+                    self._discover_cameras_opencv()
+            except Exception as e:
+                 logger.error(f"Error discovering cameras with picamera2: {e}. Falling back to OpenCV.", exc_info=True)
+                 self._discover_cameras_opencv()
+        else:
+            self._discover_cameras_opencv()
+
+    def _discover_cameras_opencv(self):
+        """Fallback camera discovery using OpenCV."""
+        self.camera_backend = 'opencv'
+        logger.info("Discovering available cameras (using OpenCV default backend)...")
         index = 0
         max_tested_cameras = 5 # Limit how many indices we test
         while index < max_tested_cameras:
@@ -310,78 +493,149 @@ class EVEOrchestrator:
                 cap.release()
                 logger.info(f"  Found camera at index {index}")
             else:
-                # If index 0 fails, we likely won't find others, but let's test a few more just in case.
-                if index > 0:
-                    break # Stop searching if a higher index fails after finding at least one
+                if index > 0 and self.available_camera_indices:
+                    break
+                elif index == 0 and not self.available_camera_indices:
+                    pass
             index += 1
         
         if not self.available_camera_indices:
-            logger.warning("No cameras discovered.")
-            self.selected_camera_index = -1 # Indicate no camera available
+            logger.warning("OpenCV found no cameras.")
+            self.selected_camera_index = -1
         else:
-             # Ensure default selected index is valid if possible
             if self.selected_camera_index not in self.available_camera_indices:
                  self.selected_camera_index = self.available_camera_indices[0]
-            logger.info(f"Available camera indices: {self.available_camera_indices}")
-            logger.info(f"Initially selected camera index: {self.selected_camera_index}")
+            logger.info(f"Available OpenCV camera indices: {self.available_camera_indices}")
+            logger.info(f"Initially selected OpenCV camera index: {self.selected_camera_index}")
 
     def _init_camera(self):
-        """Initialize the camera using the selected index."""
+        """Initialize the camera using the selected backend and index/ID."""
         # Release existing camera if any
-        if self.camera and self.camera.isOpened():
-            logger.debug(f"Releasing previous camera instance.")
-            self.camera.release()
-            self.camera = None
-            
+        if self.camera:
+             logger.debug(f"Releasing previous camera instance ({self.camera_backend}).")
+             try:
+                 if self.camera_backend == 'picamera2' and hasattr(self.camera, 'close'):
+                     self.camera.close()
+                 elif self.camera_backend == 'opencv' and hasattr(self.camera, 'release'):
+                     self.camera.release()
+             except Exception as e:
+                 logger.error(f"Error releasing previous camera: {e}")
+             self.camera = None
+
+        if self.camera_backend == 'picamera2':
+            self._init_camera_picamera2()
+        elif self.camera_backend == 'opencv':
+             self._init_camera_opencv()
+        else:
+            logger.error("No valid camera backend determined.")
+
+    def _init_camera_picamera2(self):
+         """Initialize camera using Picamera2."""
+         if not self.picamera2_cameras or self.selected_camera_index >= len(self.picamera2_cameras):
+             logger.error("Cannot initialize Picamera2: No cameras found or invalid index selected.")
+             return
+         
+         cam_index_to_use = self.selected_camera_index
+         logger.info(f"Initializing camera using picamera2 (camera index {cam_index_to_use})...")
+         try:
+             self.camera = Picamera2(camera_num=cam_index_to_use)
+             
+             # Configure the main stream for RGB888 format suitable for Pygame
+             # Get available modes if needed to select resolution dynamically
+             # sensor_modes = self.camera.sensor_modes
+             # logger.debug(f"Available sensor modes: {sensor_modes}")
+             main_stream_config = {"format": "RGB888", "size": (640, 480)} # Use a common default size
+             # TODO: Get size from vision_config if available
+             preview_config = self.camera.create_preview_configuration(main=main_stream_config)
+             self.camera.configure(preview_config)
+             logger.info(f"Picamera2 configured with: {preview_config}")
+
+             self.camera.start()
+             logger.info("Camera started successfully using picamera2.")
+             time.sleep(1.0) # Longer delay for picamera2 startup
+             logger.info(f"Picamera2 camera initialized successfully.")
+         except Exception as e:
+             logger.error(f"Error initializing camera with picamera2: {e}", exc_info=True)
+             if self.camera and hasattr(self.camera, 'close'):
+                 try:
+                     self.camera.close()
+                 except Exception as close_e:
+                      logger.error(f"Error closing picamera2 after init failure: {close_e}")
+             self.camera = None
+
+    def _init_camera_opencv(self):
+        """Initialize camera using OpenCV (fallback)."""
         if self.selected_camera_index < 0 or self.selected_camera_index not in self.available_camera_indices:
-             logger.warning(f"Cannot initialize camera: Selected index {self.selected_camera_index} is invalid or unavailable.")
+             logger.warning(f"OpenCV: Cannot initialize camera: Selected index {self.selected_camera_index} is invalid or unavailable.")
              self.camera = None
              return
 
         camera_index = self.selected_camera_index
-        logger.info(f"Initializing camera with index {camera_index}...")
+        logger.info(f"Initializing camera with OpenCV index {camera_index} (using default backend)...")
         try:
             self.camera = cv2.VideoCapture(camera_index)
             if not self.camera.isOpened():
-                logger.error(f"Failed to open camera with index {camera_index}.")
+                logger.error(f"OpenCV: Failed to open camera with index {camera_index} using default backend.")
                 self.camera = None
-                # Attempt self-correction? Maybe later.
-                # If index 0 failed, try next available? 
-                # available_indices = [i for i in self.available_camera_indices if i != camera_index]
-                # if available_indices:
-                #    logger.info(f"Retrying with next available index: {available_indices[0]}")
-                #    self.selected_camera_index = available_indices[0]
-                #    self._init_camera() # Recursive call - be careful
-            else:
-                logger.info(f"Camera index {camera_index} initialized successfully.")
+                return
+            logger.info("OpenCV: Camera opened. Adding short delay...")
+            time.sleep(0.5)
+            logger.info(f"OpenCV: Camera index {camera_index} initialized successfully.")
         except Exception as e:
-            logger.error(f"Error initializing camera index {camera_index}: {e}", exc_info=True)
+            logger.error(f"OpenCV: Error during camera initialization for index {camera_index}: {e}", exc_info=True)
+            if self.camera and hasattr(self.camera, 'release'):
+                 self.camera.release()
             self.camera = None
 
     def update(self, debug_mode: bool = False):
         """Main update loop called periodically. Updates display and potentially other periodic tasks."""
         debug_frame = None # Frame to pass to display controller
+        detections = [] # List of detections to pass to display controller
         try:
             # Capture frame if in debug mode and camera is available
             if debug_mode and self.camera:
-                ret, frame = self.camera.read()
-                if ret:
-                    debug_frame = frame
+                try:
+                    if self.camera_backend == 'picamera2':
+                        debug_frame = self.camera.capture_array("main")
+                    elif self.camera_backend == 'opencv':
+                        ret, frame = self.camera.read()
+                        if ret:
+                            debug_frame = frame
+                        else:
+                            logger.warning("OpenCV: Failed to capture frame from camera.")
+                except Exception as cap_e:
+                     logger.error(f"Error capturing frame using {self.camera_backend}: {cap_e}", exc_info=True)
+
+                # --- Perform Object Detection --- 
+                if debug_frame is not None and self.object_detection_net:
+                     # Get frame (potentially rotated) and list of detections
+                     debug_frame, detections = self._perform_object_detection(debug_frame, self.camera_rotation)
+                     self.last_detections = detections # Store for potential correction
                 else:
-                    logger.warning("Failed to capture frame from camera.")
-            
+                     self.last_detections = [] # Clear if no detection this frame
+                # -----------------------------------
+
             # Get current emotion safely
             current_emotion = self.get_current_emotion()
             
-            # Update display, passing debug mode status, potential frame, and camera info
+            # Update display, passing debug mode status, frame, detections, camera info, and corrections
             if hasattr(self, 'lcd_controller'):
+                camera_info_for_ui = {
+                     'backend': self.camera_backend,
+                     'available_opencv': self.available_camera_indices,
+                     'available_picam2': self.picamera2_cameras,
+                     'selected_index': self.selected_camera_index
+                }
                 self.lcd_controller.update(
                     current_emotion,
                     debug_mode=debug_mode,
                     debug_frame=debug_frame,
-                    available_cameras=self.available_camera_indices,
-                    selected_camera=self.selected_camera_index,
-                    camera_rotation=self.camera_rotation
+                    detections=detections,
+                    camera_info=camera_info_for_ui,
+                    camera_rotation=self.camera_rotation,
+                    is_correcting=self.is_correcting_detection,
+                    input_buffer=self.user_input_buffer,
+                    corrections=self.corrections_data
                 )
             
             # Process any pending audio
@@ -418,14 +672,18 @@ class EVEOrchestrator:
             except Exception as e:
                 logger.error(f"Error cleaning up {name}: {e}", exc_info=True)
         
-        # Release camera
+        # Release camera (using the correct method based on backend)
         if self.camera:
-            logger.debug("Releasing camera...")
+            logger.debug(f"Releasing camera instance ({self.camera_backend})...")
             try:
-                self.camera.release()
-                logger.info("Camera released.")
+                if self.camera_backend == 'picamera2' and hasattr(self.camera, 'close'):
+                    self.camera.close()
+                    logger.info("Picamera2 camera closed.")
+                elif self.camera_backend == 'opencv' and hasattr(self.camera, 'release'):
+                    self.camera.release()
+                    logger.info("OpenCV camera released.")
             except Exception as e:
-                logger.error(f"Error releasing camera: {e}", exc_info=True)
+                logger.error(f"Error releasing/closing camera: {e}", exc_info=True)
             self.camera = None
         
         logger.info("EVEOrchestrator cleanup finished.")
@@ -676,8 +934,162 @@ class EVEOrchestrator:
                     logger.warning(f"Attempted to select invalid rotation {new_rotation} from UI.")
             except (ValueError, IndexError):
                 logger.error(f"Could not parse rotation from element ID: {element_id}")
+        
+        elif element_id.startswith("correct_det_"):
+            if self.is_correcting_detection:
+                 logger.warning("Already in correction mode. Please finish current correction.")
+                 return # Ignore click if already correcting
+                 
+            try:
+                detection_index = int(element_id.split("_")[-1])
+                # Find the corresponding detection from the last frame
+                target_detection = None
+                for det in self.last_detections:
+                     if det['index'] == detection_index:
+                          target_detection = det
+                          break
+                          
+                if target_detection:
+                     logger.info(f"Initiating correction for detection index: {detection_index}, label: '{target_detection['label']}', box: {target_detection['box']}")
+                     # --- Enter Correction Mode --- 
+                     self.is_correcting_detection = True
+                     self.correction_target_info = target_detection # Store full detection info
+                     self.user_input_buffer = "" # Clear input buffer
+                     self.tts.speak(f"What is the correct label?") # Prompt user
+                     # ---------------------------
+                else:
+                     logger.warning(f"Could not find detection details for index {detection_index} from last frame.")
+                 
+            except (ValueError, IndexError):
+                 logger.error(f"Could not parse detection index from element ID: {element_id}")
+
         else:
             logger.warning(f"Unhandled debug UI element click: {element_id}")
+
+    def submit_correction(self, corrected_label: str):
+        """Handles the submitted correction from the user."""
+        if not self.is_correcting_detection or not self.correction_target_info:
+             logger.warning("Submit correction called but not in correction mode.")
+             return
+             
+        original_label = self.correction_target_info.get('label')
+        box = self.correction_target_info.get('box')
+        timestamp = time.time()
+        
+        # Format the correction record
+        correction_record = {
+            "timestamp": timestamp,
+            "box": box,
+            "original": original_label,
+            "corrected": corrected_label.strip() # Remove leading/trailing whitespace
+        }
+        
+        logger.info(f"Correction submitted: {correction_record}")
+        
+        # --- Save Correction --- 
+        try:
+            # Ensure directory exists
+            CORRECTIONS_DIR.mkdir(parents=True, exist_ok=True)
+            # Load existing corrections
+            current_corrections = []
+            if CORRECTIONS_PATH.exists():
+                try:
+                    with open(CORRECTIONS_PATH, 'r') as f:
+                        current_corrections = json.load(f)
+                    if not isinstance(current_corrections, list):
+                         logger.warning(f"Corrections file {CORRECTIONS_PATH} was not a list. Resetting.")
+                         current_corrections = []
+                except (json.JSONDecodeError, IOError) as e:
+                    logger.warning(f"Error reading existing corrections file {CORRECTIONS_PATH}: {e}. Resetting.")
+                    current_corrections = []
+            
+            # Append new correction
+            current_corrections.append(correction_record)
+            
+            # Save updated list back to file
+            with open(CORRECTIONS_PATH, 'w') as f:
+                json.dump(current_corrections, f, indent=4) # Save with indentation
+            logger.info(f"Correction saved to {CORRECTIONS_PATH}")
+            
+            # Update in-memory corrections
+            self.corrections_data = current_corrections
+            
+        except (IOError, OSError) as e:
+            logger.error(f"Error saving correction to {CORRECTIONS_PATH}: {e}")
+        # --------------------------
+
+        # --- Exit Correction Mode --- 
+        self.tts.speak(f"Okay, noted.")
+        self.is_correcting_detection = False
+        self.correction_target_info = None
+        self.user_input_buffer = ""
+        # --------------------------
+        
+    def cancel_correction(self):
+        """Cancels the current correction input."""
+        if self.is_correcting_detection:
+            logger.info("Correction cancelled.")
+            self.is_correcting_detection = False
+            self.correction_target_info = None
+            self.user_input_buffer = ""
+            self.tts.speak("Correction cancelled.")
+
+    def _perform_object_detection(self, frame: np.ndarray, rotation: int) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
+        """Performs object detection, rotates frame if needed, and returns results."""
+        detections_list = []
+        processed_frame = frame.copy() # Work on a copy
+
+        if not self.object_detection_net or not self.object_detection_classes:
+            return processed_frame, detections_list # Return original frame and empty list
+
+        try:
+            # --- Rotate frame BEFORE processing if needed --- 
+            if rotation == 180:
+                processed_frame = cv2.rotate(processed_frame, cv2.ROTATE_180)
+            # ------------------------------------------------
+            
+            (h, w) = processed_frame.shape[:2]
+            blob = cv2.dnn.blobFromImage(cv2.resize(processed_frame, (300, 300)), 0.007843, (300, 300), 127.5)
+
+            self.object_detection_net.setInput(blob)
+            detections = self.object_detection_net.forward()
+
+            for i in np.arange(0, detections.shape[2]):
+                confidence = detections[0, 0, i, 2]
+
+                if confidence > CONFIDENCE_THRESHOLD:
+                    idx = int(detections[0, 0, i, 1])
+                    box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+                    (startX, startY, endX, endY) = box.astype("int")
+
+                    # Explicitly convert numpy ints to Python ints for JSON serialization
+                    py_startX, py_startY, py_endX, py_endY = int(startX), int(startY), int(endX), int(endY)
+
+                    label = "Unknown"
+                    if idx < len(self.object_detection_classes):
+                        label = self.object_detection_classes[idx]
+                    
+                    # Store detection info using Python ints for the box
+                    detections_list.append({
+                        "index": i, 
+                        "label": label,
+                        "confidence": float(confidence),
+                        "box": (py_startX, py_startY, py_endX, py_endY) # Use Python ints
+                    })
+                    
+                    # --- REMOVE DRAWING LOGIC --- 
+                    # label_text = f"{label}: {confidence:.2f}"
+                    # cv2.rectangle(processed_frame, (startX, startY), (endX, endY), (0, 255, 0), 2)
+                    # text_offset = 15
+                    # text_y = startY - text_offset if startY - text_offset > text_offset else startY + text_offset
+                    # cv2.putText(processed_frame, label_text, (startX, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                    # ---------------------------
+
+        except Exception as e:
+            logger.error(f"Error during object detection processing: {e}", exc_info=True)
+
+        # Return the processed (potentially rotated) frame and the list of detections
+        return processed_frame, detections_list
 
 class Event:
     """Event class for internal communication"""

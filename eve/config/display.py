@@ -6,8 +6,9 @@ from enum import Enum
 from typing import Dict, Tuple, Optional, Union, Any
 import logging
 import pygame
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, MISSING
 import os
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -113,12 +114,17 @@ class DisplayConfig:
         defined_fields = {f.name: f for f in fields(cls)}
 
         for field_name, field_def in defined_fields.items():
-            if field_def.default_factory is not field_def.default_factory.__class__:
+            if field_def.default_factory is not MISSING:
                  default_value = field_def.default_factory()
             else:
                  default_value = field_def.default
 
             raw_value = config_dict.get(field_name, default_value)
+            
+            if raw_value is MISSING:
+                if field_def.init:
+                    logger.warning(f"Required config field '{field_name}' missing and no default provided. Skipping.")
+                continue
 
             try:
                 if field_name == 'WINDOW_SIZE':

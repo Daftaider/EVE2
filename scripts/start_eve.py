@@ -91,55 +91,87 @@ class EVEApplication:
         """The main application loop handling events and updates."""
         while self._running:
             try:
-                # Handle Pygame events (essential for window responsiveness)
-                current_time = time.time() # Get time for potential double-click
+                current_time = time.time()
+                
+                # --- Handle Events --- 
+                is_correcting = self.orchestrator and self.orchestrator.is_correcting_detection
+                
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
-                        logger.info("Received Pygame QUIT event.")
                         self._running = False
-                        break # Exit event loop
+                        break 
+                    
+                    # --- Correction Mode Input Handling --- 
+                    if is_correcting:
+                        if event.type == pygame.KEYDOWN:
+                            if event.key == pygame.K_RETURN:
+                                logger.info("Enter pressed during correction.")
+                                # Submit the correction
+                                if self.orchestrator:
+                                    self.orchestrator.submit_correction(self.orchestrator.user_input_buffer)
+                                # is_correcting will be set to False by submit_correction
+                            elif event.key == pygame.K_BACKSPACE:
+                                # Remove last character from buffer
+                                if self.orchestrator:
+                                    self.orchestrator.user_input_buffer = self.orchestrator.user_input_buffer[:-1]
+                            elif event.key == pygame.K_ESCAPE:
+                                # Cancel correction on Escape key
+                                if self.orchestrator:
+                                     self.orchestrator.cancel_correction()
+                            else:
+                                # Append typed character to buffer
+                                if self.orchestrator:
+                                     self.orchestrator.user_input_buffer += event.unicode
+                        # Ignore other events like mouse clicks while correcting
+                        continue # Skip normal event processing
 
-                    # --- Debug Mode Toggling ---
-                    # 1. CTRL+S Key Combination
+                    # --- Normal Mode Input Handling --- 
+                    # Debug Mode Toggling (CTRL+S)
                     if event.type == pygame.KEYDOWN:
                         mods = pygame.key.get_mods()
                         if event.key == pygame.K_s and (mods & pygame.KMOD_CTRL):
                             self.debug_mode = not self.debug_mode
                             logger.info(f"Debug mode toggled {'ON' if self.debug_mode else 'OFF'} via CTRL+S")
+                            # If entering correction mode while debug is off, turn debug on
+                            if is_correcting and not self.debug_mode:
+                                 self.debug_mode = True 
 
-                    # 2. Double-Tap / Double-Click
+                    # Debug Mode Toggling & UI Clicks (Mouse)
                     if event.type == pygame.MOUSEBUTTONDOWN:
-                        if event.button == 1: # Left mouse button
-                            # Check for UI element click FIRST if in debug mode
-                            clicked_element_id = None
-                            if self.debug_mode and self.orchestrator and hasattr(self.orchestrator, 'lcd_controller'):
-                                if hasattr(self.orchestrator.lcd_controller, 'get_debug_ui_element_at'):
-                                     clicked_element_id = self.orchestrator.lcd_controller.get_debug_ui_element_at(event.pos)
-                                
-                            if clicked_element_id:
-                                # Handle click on a specific UI element
-                                logger.debug(f"Debug UI element clicked: {clicked_element_id}")
-                                if hasattr(self.orchestrator, 'handle_debug_ui_click'):
-                                    self.orchestrator.handle_debug_ui_click(clicked_element_id)
-                                # Prevent double-click toggle if a UI element was clicked
-                                self.last_click_time = 0 
+                        # Check for UI element click FIRST if in debug mode
+                        clicked_element_id = None
+                        if self.debug_mode and self.orchestrator and hasattr(self.orchestrator, 'lcd_controller'):
+                            if hasattr(self.orchestrator.lcd_controller, 'get_debug_ui_element_at'):
+                                 clicked_element_id = self.orchestrator.lcd_controller.get_debug_ui_element_at(event.pos)
+                            
+                        if clicked_element_id:
+                            # Handle click on a specific UI element
+                            logger.debug(f"Debug UI element clicked: {clicked_element_id}")
+                            if hasattr(self.orchestrator, 'handle_debug_ui_click'):
+                                self.orchestrator.handle_debug_ui_click(clicked_element_id)
+                            # Prevent double-click toggle if a UI element was clicked
+                            self.last_click_time = 0 
+                        else:
+                            # If not clicking a UI element, check for double-click to toggle debug mode
+                            if current_time - self.last_click_time < self.double_click_threshold:
+                                self.debug_mode = not self.debug_mode
+                                logger.info(f"Debug mode toggled {'ON' if self.debug_mode else 'OFF'} via double-click")
+                                # If turning off debug mode while correcting, cancel correction
+                                if is_correcting and not self.debug_mode:
+                                     if self.orchestrator:
+                                         self.orchestrator.cancel_correction()
+                                self.last_click_time = 0 # Reset after double-click detected
                             else:
-                                # If not clicking a UI element, check for double-click to toggle debug mode
-                                if current_time - self.last_click_time < self.double_click_threshold:
-                                    self.debug_mode = not self.debug_mode
-                                    logger.info(f"Debug mode toggled {'ON' if self.debug_mode else 'OFF'} via double-click")
-                                    self.last_click_time = 0 # Reset after double-click detected
-                                else:
-                                    self.last_click_time = current_time
-
+                                self.last_click_time = current_time
+                
                 if not self._running:
-                    break # Exit main loop if running flag changed
+                    break 
 
-                # Update the orchestrator (which updates subsystems)
-                # Ensure orchestrator exists before calling update
+                # --- Update Orchestrator --- 
                 if self.orchestrator:
                     self.orchestrator.update(debug_mode=self.debug_mode)
 
+                # --- Frame Limiter --- 
                 # Control loop timing - sleep based on desired FPS
                 # This prevents high CPU usage in the main thread.
                 # The orchestrator's update frequency depends on this.
@@ -149,7 +181,7 @@ class EVEApplication:
                      fps = self.orchestrator.display_config.FPS
                 time.sleep(1.0 / fps)
 
-            except KeyboardInterrupt: # Redundant if signals handled, but safe
+            except KeyboardInterrupt: 
                 logger.info("KeyboardInterrupt received in main loop.")
                 self._running = False
             except Exception as e:
