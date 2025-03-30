@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Dict, Tuple, Optional, Union, Any
 import logging
 import pygame
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 import os
 
 logger = logging.getLogger(__name__)

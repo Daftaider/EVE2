@@ -71,6 +71,10 @@ except ImportError:
         RESOLUTION = (640, 480)
         FPS = 30
 
+# Add imports for OpenCV and NumPy
+import cv2
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 class EVEOrchestrator:
@@ -91,10 +95,16 @@ class EVEOrchestrator:
         # State variables (protected by lock)
         self._current_emotion: Emotion = Emotion.NEUTRAL
         self._is_listening: bool = False # True after wake word, waiting for command
+        self.camera = None # Add camera attribute
+        self.available_camera_indices: List[int] = []
+        self.selected_camera_index: int = 0 # Default to 0
+        self.camera_rotation: int = 0 # Degrees (0, 90, 180, 270)
 
         # Initialize configurations and subsystems
         self._init_configs()
+        self._discover_cameras() # Discover cameras before initializing subsystems that might need them
         self._init_subsystems()
+        self._init_camera() # Initialize camera using the selected index
         logger.info("EVEOrchestrator initialized.")
 
     def _init_configs(self):
@@ -288,23 +298,100 @@ class EVEOrchestrator:
         with self._state_lock:
             return self._current_emotion
 
-    def update(self):
-        """Main update loop called periodically. Updates display and potentially other periodic tasks."""
+    def _discover_cameras(self):
+        """Check available camera indices using OpenCV."""
+        logger.info("Discovering available cameras...")
+        index = 0
+        max_tested_cameras = 5 # Limit how many indices we test
+        while index < max_tested_cameras:
+            cap = cv2.VideoCapture(index)
+            if cap.isOpened():
+                self.available_camera_indices.append(index)
+                cap.release()
+                logger.info(f"  Found camera at index {index}")
+            else:
+                # If index 0 fails, we likely won't find others, but let's test a few more just in case.
+                if index > 0:
+                    break # Stop searching if a higher index fails after finding at least one
+            index += 1
+        
+        if not self.available_camera_indices:
+            logger.warning("No cameras discovered.")
+            self.selected_camera_index = -1 # Indicate no camera available
+        else:
+             # Ensure default selected index is valid if possible
+            if self.selected_camera_index not in self.available_camera_indices:
+                 self.selected_camera_index = self.available_camera_indices[0]
+             logger.info(f"Available camera indices: {self.available_camera_indices}")
+             logger.info(f"Initially selected camera index: {self.selected_camera_index}")
+
+    def _init_camera(self):
+        """Initialize the camera using the selected index."""
+        # Release existing camera if any
+        if self.camera and self.camera.isOpened():
+            logger.debug(f"Releasing previous camera instance.")
+            self.camera.release()
+            self.camera = None
+            
+        if self.selected_camera_index < 0 or self.selected_camera_index not in self.available_camera_indices:
+             logger.warning(f"Cannot initialize camera: Selected index {self.selected_camera_index} is invalid or unavailable.")
+             self.camera = None
+             return
+
+        camera_index = self.selected_camera_index
+        logger.info(f"Initializing camera with index {camera_index}...")
         try:
+            self.camera = cv2.VideoCapture(camera_index)
+            if not self.camera.isOpened():
+                logger.error(f"Failed to open camera with index {camera_index}.")
+                self.camera = None
+                # Attempt self-correction? Maybe later.
+                # If index 0 failed, try next available? 
+                # available_indices = [i for i in self.available_camera_indices if i != camera_index]
+                # if available_indices:
+                #    logger.info(f"Retrying with next available index: {available_indices[0]}")
+                #    self.selected_camera_index = available_indices[0]
+                #    self._init_camera() # Recursive call - be careful
+            else:
+                logger.info(f"Camera index {camera_index} initialized successfully.")
+        except Exception as e:
+            logger.error(f"Error initializing camera index {camera_index}: {e}", exc_info=True)
+            self.camera = None
+
+    def update(self, debug_mode: bool = False):
+        """Main update loop called periodically. Updates display and potentially other periodic tasks."""
+        debug_frame = None # Frame to pass to display controller
+        try:
+            # Capture frame if in debug mode and camera is available
+            if debug_mode and self.camera:
+                ret, frame = self.camera.read()
+                if ret:
+                    debug_frame = frame
+                else:
+                    logger.warning("Failed to capture frame from camera.")
+            
             # Get current emotion safely
             current_emotion = self.get_current_emotion()
             
-            # Update display
+            # Update display, passing debug mode status, potential frame, and camera info
             if hasattr(self, 'lcd_controller'):
-                self.lcd_controller.update(current_emotion)
+                self.lcd_controller.update(
+                    current_emotion,
+                    debug_mode=debug_mode,
+                    debug_frame=debug_frame,
+                    available_cameras=self.available_camera_indices,
+                    selected_camera=self.selected_camera_index,
+                    camera_rotation=self.camera_rotation
+                )
             
             # Process any pending audio
             if hasattr(self, 'audio_capture'):
-                self.audio_capture.update()
+                self.audio_capture.update() # Audio update doesn't need debug mode (yet)
                 
         except Exception as e:
             logger.error(f"Error in update loop: {e}", exc_info=True)
-            raise
+            # Avoid raising here to prevent crashing the main loop on camera/display errors
+            # raise
 
     def cleanup(self):
         """Stops threads and cleans up all subsystems."""
@@ -330,6 +417,16 @@ class EVEOrchestrator:
                     subsystem.cleanup()
             except Exception as e:
                 logger.error(f"Error cleaning up {name}: {e}", exc_info=True)
+        
+        # Release camera
+        if self.camera:
+            logger.debug("Releasing camera...")
+            try:
+                self.camera.release()
+                logger.info("Camera released.")
+            except Exception as e:
+                logger.error(f"Error releasing camera: {e}", exc_info=True)
+            self.camera = None
         
         logger.info("EVEOrchestrator cleanup finished.")
 
@@ -545,6 +642,42 @@ class EVEOrchestrator:
                     
         except Exception as e:
             self.logger.error(f"Error processing frame: {e}")
+
+    def handle_debug_ui_click(self, element_id: str):
+        """Handles clicks detected on the debug UI elements."""
+        logger.debug(f"Handling debug UI click: {element_id}")
+
+        if element_id.startswith("select_cam_"):
+            try:
+                new_index = int(element_id.split("_")[-1])
+                if new_index in self.available_camera_indices:
+                    if self.selected_camera_index != new_index:
+                        logger.info(f"User selected camera index: {new_index}")
+                        self.selected_camera_index = new_index
+                        self._init_camera() # Re-initialize camera with new index
+                    else:
+                        logger.debug(f"Camera index {new_index} already selected.")
+                else:
+                    logger.warning(f"Attempted to select invalid camera index {new_index} from UI.")
+            except (ValueError, IndexError):
+                logger.error(f"Could not parse camera index from element ID: {element_id}")
+
+        elif element_id.startswith("rotate_"):
+            try:
+                new_rotation = int(element_id.split("_")[-1])
+                if new_rotation in [0, 90, 180, 270]:
+                    if self.camera_rotation != new_rotation:
+                        logger.info(f"User selected camera rotation: {new_rotation} degrees")
+                        self.camera_rotation = new_rotation
+                        # No need to re-init camera, LCD controller handles rotation display
+                    else:
+                        logger.debug(f"Rotation {new_rotation} already selected.")
+                else:
+                    logger.warning(f"Attempted to select invalid rotation {new_rotation} from UI.")
+            except (ValueError, IndexError):
+                logger.error(f"Could not parse rotation from element ID: {element_id}")
+        else:
+            logger.warning(f"Unhandled debug UI element click: {element_id}")
 
 class Event:
     """Event class for internal communication"""

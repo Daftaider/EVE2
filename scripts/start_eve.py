@@ -33,6 +33,9 @@ class EVEApplication:
     def __init__(self):
         self._running = True
         self.orchestrator = None
+        self.debug_mode = False  # Add debug mode flag
+        self.last_click_time = 0 # For double-click detection
+        self.double_click_threshold = 0.5 # Seconds for double-click
         self._setup_signal_handlers()
 
     def _setup_signal_handlers(self):
@@ -89,23 +92,62 @@ class EVEApplication:
         while self._running:
             try:
                 # Handle Pygame events (essential for window responsiveness)
+                current_time = time.time() # Get time for potential double-click
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         logger.info("Received Pygame QUIT event.")
                         self._running = False
                         break # Exit event loop
-                
+
+                    # --- Debug Mode Toggling ---
+                    # 1. CTRL+S Key Combination
+                    if event.type == pygame.KEYDOWN:
+                        mods = pygame.key.get_mods()
+                        if event.key == pygame.K_s and (mods & pygame.KMOD_CTRL):
+                            self.debug_mode = not self.debug_mode
+                            logger.info(f"Debug mode toggled {'ON' if self.debug_mode else 'OFF'} via CTRL+S")
+
+                    # 2. Double-Tap / Double-Click
+                    if event.type == pygame.MOUSEBUTTONDOWN:
+                        if event.button == 1: # Left mouse button
+                            # Check for UI element click FIRST if in debug mode
+                            clicked_element_id = None
+                            if self.debug_mode and self.orchestrator and hasattr(self.orchestrator, 'lcd_controller'):
+                                if hasattr(self.orchestrator.lcd_controller, 'get_debug_ui_element_at'):
+                                     clicked_element_id = self.orchestrator.lcd_controller.get_debug_ui_element_at(event.pos)
+                                
+                            if clicked_element_id:
+                                # Handle click on a specific UI element
+                                logger.debug(f"Debug UI element clicked: {clicked_element_id}")
+                                if hasattr(self.orchestrator, 'handle_debug_ui_click'):
+                                    self.orchestrator.handle_debug_ui_click(clicked_element_id)
+                                # Prevent double-click toggle if a UI element was clicked
+                                self.last_click_time = 0 
+                            else:
+                                # If not clicking a UI element, check for double-click to toggle debug mode
+                                if current_time - self.last_click_time < self.double_click_threshold:
+                                    self.debug_mode = not self.debug_mode
+                                    logger.info(f"Debug mode toggled {'ON' if self.debug_mode else 'OFF'} via double-click")
+                                    self.last_click_time = 0 # Reset after double-click detected
+                                else:
+                                    self.last_click_time = current_time
+
                 if not self._running:
                     break # Exit main loop if running flag changed
 
                 # Update the orchestrator (which updates subsystems)
+                # Ensure orchestrator exists before calling update
                 if self.orchestrator:
-                    self.orchestrator.update()
+                    self.orchestrator.update(debug_mode=self.debug_mode)
 
                 # Control loop timing - sleep based on desired FPS
                 # This prevents high CPU usage in the main thread.
                 # The orchestrator's update frequency depends on this.
-                time.sleep(1.0 / self.orchestrator.display_config.FPS if self.orchestrator else 0.1)
+                # Ensure orchestrator and its config are available before accessing FPS
+                fps = 30 # Default FPS if orchestrator not ready
+                if self.orchestrator and self.orchestrator.display_config:
+                     fps = self.orchestrator.display_config.FPS
+                time.sleep(1.0 / fps)
 
             except KeyboardInterrupt: # Redundant if signals handled, but safe
                 logger.info("KeyboardInterrupt received in main loop.")
