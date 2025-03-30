@@ -68,9 +68,9 @@ class DisplayConfig:
     
     # Emotion settings
     DEFAULT_EMOTION: Emotion = Emotion.NEUTRAL
-    EMOTION_FILENAMES: Dict[Emotion, str] = {
-        emotion: emotion.filename for emotion in Emotion
-    }
+    EMOTION_FILENAMES: Dict[Emotion, str] = field(
+        default_factory=lambda: {e: e.filename for e in Emotion}
+    )
     
     # Color settings
     DEFAULT_BACKGROUND_COLOR: Tuple[int, int, int] = (0, 0, 0)
@@ -86,7 +86,7 @@ class DisplayConfig:
     def get_emotion_path(cls, emotion: Union[str, Emotion, None]) -> str:
         """Get the file path for an emotion's image."""
         emotion_enum = Emotion.from_value(emotion)
-        return os.path.join(cls.ASSET_DIR, f"{emotion_enum.value}.png")
+        return os.path.join(cls.ASSET_DIR, emotion_enum.filename)
 
     @staticmethod
     def parse_color(color_input: Union[Tuple[int, int, int], str, None], default: Tuple[int, int, int]) -> Tuple[int, int, int]:
