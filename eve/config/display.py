@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Dict, Tuple, Optional, Union, Any
 import logging
 import pygame
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 import os
 
 logger = logging.getLogger(__name__)
@@ -109,27 +109,46 @@ class DisplayConfig:
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'DisplayConfig':
         """Create DisplayConfig from dict, applying defaults and type conversions."""
-        
-        # Map dictionary keys to constructor arguments, handling potential type issues
-        kwargs = {}
-        kwargs['WINDOW_SIZE'] = tuple(config_dict.get('WINDOW_SIZE', cls.WINDOW_SIZE))
-        kwargs['FPS'] = int(config_dict.get('FPS', cls.FPS))
-        kwargs['FULLSCREEN'] = bool(config_dict.get('FULLSCREEN', cls.FULLSCREEN))
-        kwargs['DEFAULT_EMOTION'] = Emotion.from_value(config_dict.get('DEFAULT_EMOTION', cls.DEFAULT_EMOTION))
-        kwargs['DEFAULT_BACKGROUND_COLOR'] = cls.parse_color(
-            config_dict.get('DEFAULT_BACKGROUND_COLOR'), cls.DEFAULT_BACKGROUND_COLOR
-        )
-        kwargs['DEFAULT_EYE_COLOR'] = cls.parse_color(
-            config_dict.get('DEFAULT_EYE_COLOR'), cls.DEFAULT_EYE_COLOR
-        )
-        kwargs['ASSET_DIR'] = str(config_dict.get('ASSET_DIR', cls.ASSET_DIR))
-        kwargs['TRANSITION_SPEED'] = float(config_dict.get('TRANSITION_SPEED', cls.TRANSITION_SPEED))
+        instance_kwargs = {}
+        defined_fields = {f.name: f for f in fields(cls)}
 
-        # Filter out any keys not in the dataclass definition
-        valid_keys = {f.name for f in fields(cls)}
-        filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_keys}
-        
-        return cls(**filtered_kwargs)
+        for field_name, field_def in defined_fields.items():
+            if field_def.default_factory is not field_def.default_factory.__class__:
+                 default_value = field_def.default_factory()
+            else:
+                 default_value = field_def.default
+
+            raw_value = config_dict.get(field_name, default_value)
+
+            try:
+                if field_name == 'WINDOW_SIZE':
+                    instance_kwargs[field_name] = tuple(map(int, raw_value))
+                elif field_name == 'FPS':
+                     instance_kwargs[field_name] = int(raw_value)
+                elif field_name == 'FULLSCREEN':
+                     instance_kwargs[field_name] = bool(raw_value)
+                elif field_name == 'DEFAULT_EMOTION':
+                     instance_kwargs[field_name] = Emotion.from_value(raw_value)
+                elif field_name == 'DEFAULT_BACKGROUND_COLOR':
+                     instance_kwargs[field_name] = cls.parse_color(raw_value, cls.DEFAULT_BACKGROUND_COLOR)
+                elif field_name == 'DEFAULT_EYE_COLOR':
+                      instance_kwargs[field_name] = cls.parse_color(raw_value, cls.DEFAULT_EYE_COLOR)
+                elif field_name == 'ASSET_DIR':
+                     instance_kwargs[field_name] = str(raw_value)
+                elif field_name == 'TRANSITION_SPEED':
+                     instance_kwargs[field_name] = float(raw_value)
+                elif field_name == 'EMOTION_FILENAMES':
+                     if isinstance(raw_value, dict):
+                         instance_kwargs[field_name] = raw_value
+                     else:
+                         instance_kwargs[field_name] = default_value
+                else:
+                    instance_kwargs[field_name] = raw_value
+            except (ValueError, TypeError) as e:
+                 logger.warning(f"Error processing config field '{field_name}' with value '{raw_value}': {e}. Using default.")
+                 instance_kwargs[field_name] = default_value
+
+        return cls(**instance_kwargs)
 
 # General display settings
 DISPLAY_ENABLED = True
