@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Tuple, Any, Union
 import pygame
 import numpy as np
 from PIL import Image, ImageDraw
+import cv2
 
 from eve import config
 from eve.config.display import Emotion, DisplayConfig
@@ -69,6 +70,10 @@ class LCDController:
         
         # Initialize display system
         self._init_display()
+        
+        # Font for debug text
+        self.debug_font = pygame.font.SysFont(None, 36) # Smaller font for more info
+        self.debug_ui_elements: Dict[str, pygame.Rect] = {} # Store clickable UI elements {id: rect}
         
         # Log initialization parameters
         logging.info(f"LCD Controller initialized with: size={self.window_size}, "
@@ -184,33 +189,130 @@ class LCDController:
         }
         return colors.get(emotion, (0, 0, 0))
 
-    def update(self, emotion: Optional[Emotion] = None) -> None:
-        """Update the display with the given emotion."""
-        if emotion is not None:
+    def update(self, 
+               emotion: Optional[Emotion] = None, 
+               debug_mode: bool = False, 
+               debug_frame: Optional[np.ndarray] = None,
+               available_cameras: Optional[List[int]] = None,
+               selected_camera: Optional[int] = None,
+               camera_rotation: int = 0) -> None:
+        """Update the display with the given emotion or interactive debug view."""
+        if not debug_mode and emotion is not None:
             self._current_emotion = emotion
 
         try:
-            # Handle pygame events
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.cleanup()
-                    return
-                
             # Clear screen with background color
             self.screen.fill(self.background_color)
+            self.debug_ui_elements.clear() # Clear previous UI element positions
             
-            # Draw current emotion
-            if self._current_emotion in self.emotion_images:
-                self.screen.blit(self.emotion_images[self._current_emotion], (0, 0))
+            if debug_mode:
+                # --- Render Debug Mode View (Camera + UI) ---
+                
+                # 1. Render Camera Feed (if available)
+                camera_area_rect = self.screen.get_rect() # Default to full screen
+                ui_panel_height = 80 # Reserve space at the bottom for UI
+                camera_area_rect.height -= ui_panel_height
+
+                if debug_frame is not None:
+                    try:
+                        frame_rgb = cv2.cvtColor(debug_frame, cv2.COLOR_BGR2RGB)
+                        
+                        # Apply rotation based on parameter
+                        if camera_rotation == 90:
+                            frame_rgb = np.rot90(frame_rgb, k=-1)
+                        elif camera_rotation == 180:
+                            frame_rgb = np.rot90(frame_rgb, k=-2)
+                        elif camera_rotation == 270:
+                            frame_rgb = np.rot90(frame_rgb, k=1)
+                        # k=0 (0 degrees) is default
+                        
+                        frame_surface = pygame.surfarray.make_surface(frame_rgb.swapaxes(0, 1))
+                        scaled_surface = pygame.transform.smoothscale(frame_surface, camera_area_rect.size)
+                        self.screen.blit(scaled_surface, camera_area_rect.topleft)
+
+                    except Exception as e:
+                        logger.error(f"Error processing debug frame: {e}")
+                        # Fallback text in camera area
+                        err_text = self.debug_font.render("Error processing frame", True, (255, 0, 0))
+                        err_rect = err_text.get_rect(center=camera_area_rect.center)
+                        self.screen.blit(err_text, err_rect)
+                else:
+                    # Show placeholder text if no frame
+                    no_feed_text = self.debug_font.render(f"No Camera Feed (Selected: {selected_camera})", True, (255, 255, 0))
+                    no_feed_rect = no_feed_text.get_rect(center=camera_area_rect.center)
+                    self.screen.blit(no_feed_text, no_feed_rect)
+
+                # 2. Render UI Panel at the bottom
+                ui_panel_rect = pygame.Rect(0, camera_area_rect.bottom, self.window_size[0], ui_panel_height)
+                pygame.draw.rect(self.screen, (40, 40, 40), ui_panel_rect) # Dark grey panel
+                
+                current_x = 10
+                current_y = ui_panel_rect.top + 10
+                line_height = 30
+
+                # -- Camera Selection UI --
+                cam_label = self.debug_font.render("Camera:", True, (200, 200, 200))
+                self.screen.blit(cam_label, (current_x, current_y))
+                current_x += cam_label.get_width() + 10
+
+                if available_cameras:
+                    for idx in available_cameras:
+                        is_selected = (idx == selected_camera)
+                        text_color = (0, 255, 0) if is_selected else (255, 255, 255)
+                        bg_color = (60, 60, 60) if is_selected else None
+                        cam_text = self.debug_font.render(f"[{idx}]", True, text_color, bg_color)
+                        cam_rect = cam_text.get_rect(topleft=(current_x, current_y))
+                        self.screen.blit(cam_text, cam_rect)
+                        # Store clickable area with ID
+                        self.debug_ui_elements[f"select_cam_{idx}"] = cam_rect 
+                        current_x += cam_rect.width + 15
+                else:
+                    no_cam_text = self.debug_font.render("None found", True, (255, 100, 100))
+                    self.screen.blit(no_cam_text, (current_x, current_y))
+                    current_x += no_cam_text.get_width() + 15
+
+                # -- Rotation Selection UI --
+                current_y += line_height # Move to next line
+                current_x = 10
+                rot_label = self.debug_font.render("Rotation:", True, (200, 200, 200))
+                self.screen.blit(rot_label, (current_x, current_y))
+                current_x += rot_label.get_width() + 10
+
+                for angle in [0, 90, 180, 270]:
+                    is_selected = (angle == camera_rotation)
+                    text_color = (0, 255, 0) if is_selected else (255, 255, 255)
+                    bg_color = (60, 60, 60) if is_selected else None
+                    rot_text = self.debug_font.render(f"[{angle}°]", True, text_color, bg_color)
+                    rot_rect = rot_text.get_rect(topleft=(current_x, current_y))
+                    self.screen.blit(rot_text, rot_rect)
+                    # Store clickable area with ID
+                    self.debug_ui_elements[f"rotate_{angle}"] = rot_rect
+                    current_x += rot_rect.width + 15
+
+            else:
+                # --- Render Normal Emotion View ---
+                if self._current_emotion in self.emotion_images:
+                    self.screen.blit(self.emotion_images[self._current_emotion], (0, 0))
             
             # Update display
             pygame.display.flip()
             
-            # Maintain frame rate
-            self.clock.tick(self.fps)
-            
         except Exception as e:
             logging.error(f"Error updating display: {e}")
+
+    def get_debug_ui_element_at(self, pos: Tuple[int, int]) -> Optional[str]:
+        """Check if a position overlaps with a known debug UI element.
+
+        Args:
+            pos: The (x, y) coordinate to check.
+
+        Returns:
+            The string ID of the clicked element (e.g., 'select_cam_1') or None.
+        """
+        for element_id, rect in self.debug_ui_elements.items():
+            if rect.collidepoint(pos):
+                return element_id
+        return None
 
     def set_eye_color(self, color: Union[Tuple[int, int, int], str]) -> None:
         """Set a new eye color and reload images."""
