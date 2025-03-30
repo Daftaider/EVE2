@@ -322,8 +322,8 @@ class EVEOrchestrator:
              # Ensure default selected index is valid if possible
             if self.selected_camera_index not in self.available_camera_indices:
                  self.selected_camera_index = self.available_camera_indices[0]
-             logger.info(f"Available camera indices: {self.available_camera_indices}")
-             logger.info(f"Initially selected camera index: {self.selected_camera_index}")
+            logger.info(f"Available camera indices: {self.available_camera_indices}")
+            logger.info(f"Initially selected camera index: {self.selected_camera_index}")
 
     def _init_camera(self):
         """Initialize the camera using the selected index."""
