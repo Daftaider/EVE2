@@ -33,9 +33,9 @@ class EVEApplication:
     def __init__(self):
         self._running = True
         self.orchestrator = None
-        self.debug_mode = False  # Add debug mode flag
-        self.last_click_time = 0 # For double-click detection
-        self.double_click_threshold = 0.5 # Seconds for double-click
+        self.debug_menu_active = False 
+        self.last_click_time = 0
+        self.double_click_threshold = 0.5
         self._setup_signal_handlers()
 
     def _setup_signal_handlers(self):
@@ -93,8 +93,9 @@ class EVEApplication:
             try:
                 current_time = time.time()
                 
-                # --- Handle Events --- 
+                # Get current state from orchestrator if available
                 is_correcting = self.orchestrator and self.orchestrator.is_correcting_detection
+                current_debug_view = self.orchestrator.current_debug_view if self.orchestrator else None
                 
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
@@ -125,51 +126,49 @@ class EVEApplication:
                         # Ignore other events like mouse clicks while correcting
                         continue # Skip normal event processing
 
-                    # --- Normal Mode Input Handling --- 
-                    # Debug Mode Toggling (CTRL+S)
+                    # --- Normal / Debug Menu Event Handling --- 
+                    # Toggle Debug Menu (CTRL+S)
                     if event.type == pygame.KEYDOWN:
                         mods = pygame.key.get_mods()
                         if event.key == pygame.K_s and (mods & pygame.KMOD_CTRL):
-                            self.debug_mode = not self.debug_mode
-                            logger.info(f"Debug mode toggled {'ON' if self.debug_mode else 'OFF'} via CTRL+S")
-                            # If entering correction mode while debug is off, turn debug on
-                            if is_correcting and not self.debug_mode:
-                                 self.debug_mode = True 
+                            self.debug_menu_active = not self.debug_menu_active
+                            logger.info(f"Debug Menu toggled {'ON' if self.debug_menu_active else 'OFF'} via CTRL+S")
+                            # If turning off menu, tell orchestrator to clear view
+                            if not self.debug_menu_active and self.orchestrator:
+                                self.orchestrator.set_debug_view(None) 
 
-                    # Debug Mode Toggling & UI Clicks (Mouse)
+                    # Debug Menu Toggle & UI Clicks (Mouse)
                     if event.type == pygame.MOUSEBUTTONDOWN:
-                        # Check for UI element click FIRST if in debug mode
-                        clicked_element_id = None
-                        if self.debug_mode and self.orchestrator and hasattr(self.orchestrator, 'lcd_controller'):
-                            if hasattr(self.orchestrator.lcd_controller, 'get_debug_ui_element_at'):
-                                 clicked_element_id = self.orchestrator.lcd_controller.get_debug_ui_element_at(event.pos)
-                            
-                        if clicked_element_id:
-                            # Handle click on a specific UI element
-                            logger.debug(f"Debug UI element clicked: {clicked_element_id}")
-                            if hasattr(self.orchestrator, 'handle_debug_ui_click'):
-                                self.orchestrator.handle_debug_ui_click(clicked_element_id)
-                            # Prevent double-click toggle if a UI element was clicked
-                            self.last_click_time = 0 
-                        else:
-                            # If not clicking a UI element, check for double-click to toggle debug mode
-                            if current_time - self.last_click_time < self.double_click_threshold:
-                                self.debug_mode = not self.debug_mode
-                                logger.info(f"Debug mode toggled {'ON' if self.debug_mode else 'OFF'} via double-click")
-                                # If turning off debug mode while correcting, cancel correction
-                                if is_correcting and not self.debug_mode:
-                                     if self.orchestrator:
-                                         self.orchestrator.cancel_correction()
-                                self.last_click_time = 0 # Reset after double-click detected
+                        if event.button == 1:
+                            clicked_element_id = None
+                            # Only check UI elements if menu is active
+                            if self.debug_menu_active and self.orchestrator and hasattr(self.orchestrator, 'lcd_controller'):
+                                if hasattr(self.orchestrator.lcd_controller, 'get_debug_ui_element_at'):
+                                     clicked_element_id = self.orchestrator.lcd_controller.get_debug_ui_element_at(event.pos)
+                                
+                            if clicked_element_id:
+                                if hasattr(self.orchestrator, 'handle_debug_ui_click'):
+                                    self.orchestrator.handle_debug_ui_click(clicked_element_id)
+                                self.last_click_time = 0 # Prevent double-click toggle
                             else:
-                                self.last_click_time = current_time
+                                # Double-click toggles menu
+                                if current_time - self.last_click_time < self.double_click_threshold:
+                                    self.debug_menu_active = not self.debug_menu_active
+                                    logger.info(f"Debug Menu toggled {'ON' if self.debug_menu_active else 'OFF'} via double-click")
+                                    # If turning off menu, clear view
+                                    if not self.debug_menu_active and self.orchestrator:
+                                         self.orchestrator.set_debug_view(None)
+                                    self.last_click_time = 0
+                                else:
+                                    self.last_click_time = current_time
                 
                 if not self._running:
                     break 
 
                 # --- Update Orchestrator --- 
                 if self.orchestrator:
-                    self.orchestrator.update(debug_mode=self.debug_mode)
+                    # Pass menu active state, orchestrator handles current_view internally
+                    self.orchestrator.update(debug_menu_active=self.debug_menu_active)
 
                 # --- Frame Limiter --- 
                 # Control loop timing - sleep based on desired FPS

@@ -17,6 +17,7 @@ from pathlib import Path
 import urllib.request
 import os
 import json
+import sounddevice as sd
 
 from eve import config
 from eve.utils import logging_utils
@@ -129,12 +130,13 @@ class EVEOrchestrator:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize the EVE orchestrator."""
         self.config_dict = config or {}
-        self._running = False
+        self._running = True # Flag for main loop and threads
+        self._state_lock = threading.Lock() # Lock for state variables
+        self.event_queue = queue.Queue() # Queue for inter-thread communication
+        self.tts_queue = queue.Queue() # Queue for TTS requests
+        self.llm_queue = queue.Queue() # Queue for LLM requests
+        self.event_handlers = {} # Handlers for events from queue
         self._audio_thread = None
-        self._state_lock = threading.Lock() # Lock for accessing shared state
-
-        # State variables (protected by lock)
-        self._current_emotion: Emotion = Emotion.NEUTRAL
         self._is_listening: bool = False # True after wake word, waiting for command
         self.camera = None # Holds either Picamera2 or cv2.VideoCapture instance
         self.camera_backend = None # 'picamera2' or 'opencv'
@@ -149,11 +151,22 @@ class EVEOrchestrator:
         self.correction_target_info: Optional[Dict[str, Any]] = None
         self.user_input_buffer: str = ""
         self.corrections_data: List[Dict[str, Any]] = [] # Store loaded corrections
+        # Debug state
+        self.debug_menu_active: bool = False # Track if menu should be processed by update
+        self.current_debug_view: Optional[str] = None # None, 'VIDEO', 'AUDIO'
+        # Audio Debug State
+        self.audio_debug_listen_always: bool = False
+        self.last_recognized_text: str = ""
+        # Audio State
+        self.available_audio_devices = []
+        self.selected_audio_device_index: Optional[int] = None # Can be None for default
+        self.last_audio_rms: float = 0.0
 
         # Initialize configurations and subsystems
         self._init_configs()
         self._init_object_detection() # Initialize OD model
         self._load_corrections() # Load corrections after ensuring directory exists
+        self._discover_audio_devices() # Discover audio devices
         self._discover_cameras() # Discover cameras
         self._init_subsystems() # Init other subsystems
         self._init_camera() # Initialize camera using the selected index/method
@@ -310,17 +323,28 @@ class EVEOrchestrator:
                 eye_color=getattr(self.display_config, 'DEFAULT_EYE_COLOR', (255, 255, 255))
             )
             
-            # Initialize audio capture
+            # Initialize audio capture with selected device index
             from eve.speech.audio_capture import AudioCapture
-            self.audio_capture = AudioCapture(self.speech_config)
+            # Update speech_config in memory before passing (or pass index directly)
+            # self.speech_config.AUDIO_DEVICE_INDEX = self.selected_audio_device_index 
+            # Or modify AudioCapture to accept index directly? Let's pass updated config.
+            temp_speech_config = SimpleNamespace(**vars(self.speech_config)) # Create a mutable copy
+            temp_speech_config.AUDIO_DEVICE_INDEX = self.selected_audio_device_index
+            self.audio_capture = AudioCapture(temp_speech_config)
 
             # Initialize speech recognition
             from eve.speech.speech_recognizer import SpeechRecognizer
-            self.speech_recognizer = SpeechRecognizer(self.speech_config)
+            self.speech_recognizer = SpeechRecognizer(self.speech_config) # Recognizer doesn't need device index directly
 
             # Initialize text-to-speech
             from eve.speech.text_to_speech import TextToSpeech
-            self.tts = TextToSpeech(self.speech_config)
+            # Pass config values explicitly using keyword arguments
+            self.tts = TextToSpeech(
+                engine=getattr(self.speech_config, 'TTS_ENGINE', 'pyttsx3'),
+                voice=getattr(self.speech_config, 'TTS_VOICE', 'english'),
+                rate=getattr(self.speech_config, 'TTS_RATE', 150),
+                volume=getattr(self.speech_config, 'TTS_VOLUME', 1.0)
+            )
 
             # Play startup sound
             self._play_startup_sound()
@@ -342,101 +366,107 @@ class EVEOrchestrator:
     def start_audio_processing(self):
         """Starts the audio processing thread."""
         if self._audio_thread is None or not self._audio_thread.is_alive():
-            self._running = True
+            self._running = True # Ensure running flag is set
+            # --- Start Audio Capture --- 
+            if hasattr(self, 'audio_capture') and self.audio_capture:
+                try:
+                     self.audio_capture.start_recording()
+                except Exception as e:
+                     logger.error(f"Failed to start audio capture stream: {e}", exc_info=True)
+                     # Decide if this is fatal? Maybe EVE can run without audio?
+                     return # Don't start thread if capture failed
+            else:
+                 logger.warning("AudioCapture subsystem not available, cannot start audio processing.")
+                 return
+            # -------------------------
             self._audio_thread = threading.Thread(target=self._audio_processing_loop, daemon=True)
             self._audio_thread.start()
             logger.info("Audio processing thread started.")
         else:
-            logger.warning("Audio processing thread already running.")
+            logger.warning("Audio processing thread is already running.")
 
     def _audio_processing_loop(self):
-        """Continuously processes audio input for wake word and commands."""
+        """Dedicated thread for processing audio input."""
         logger.info("Audio loop running...")
-        while self._running:
-            try:
-                if not self.audio_capture.has_new_audio():
-                    time.sleep(0.05) # Short sleep if no new audio
-                    continue
-
-                audio_data = self.audio_capture.get_audio()
-                if not audio_data:
-                    continue
-
-                with self._state_lock:
-                    is_currently_listening = self._is_listening
-
-                if not is_currently_listening:
-                    # --- Wake Word Detection Phase ---
-                    if self.speech_recognizer.detect_wake_word(
-                        audio_data, self.speech_config.WAKE_WORD_PHRASE
-                    ):
-                        self._handle_wake_word() # State changes happen inside
+        try:
+            while self._running:
+                if hasattr(self, 'audio_capture'):
+                     # Get latest RMS value for display
+                     self.last_audio_rms = self.audio_capture.get_last_rms()
+                     
+                     if self.audio_capture.has_new_audio():
+                        audio_data = self.audio_capture.get_audio_data()
+                        
+                        if audio_data:
+                            if hasattr(self, 'speech_recognizer') and self.speech_recognizer:
+                                # Determine listen_for_command flag
+                                listen_for_command = self._is_listening
+                                # Override if in Audio Debug Listen Always mode
+                                if self.current_debug_view == 'AUDIO' and self.audio_debug_listen_always:
+                                     listen_for_command = True
+                                     
+                                self.speech_recognizer.process_audio_chunk(
+                                     audio_data,
+                                     listen_for_command=listen_for_command,
+                                     wake_word_callback=self._handle_wake_word_detected,
+                                     command_callback=self._handle_command_recognized
+                                )
+                            else:
+                                 logger.warning("SpeechRecognizer not available, skipping audio processing.")
+                     else:
+                          time.sleep(0.01) # Shorter sleep when actively checking RMS
                 else:
-                    # --- Command Recognition Phase ---
-                    text = self.speech_recognizer.recognize(audio_data)
-                    if text:
-                        self._handle_speech_command(text) # State changes happen inside
-                    # Optional: Add a timeout for listening phase here
-                    # If timeout expires without speech, reset _is_listening
-
-            except Exception as e:
-                logger.error(f"Error in audio processing loop: {e}", exc_info=True)
-                time.sleep(1) # Avoid spamming logs on persistent errors
-
-        logger.info("Audio processing loop stopped.")
-
-    def _handle_wake_word(self):
-        """Handle wake word detection."""
-        logger.info(f"Wake word '{self.speech_config.WAKE_WORD_PHRASE}' detected!")
-        with self._state_lock:
-            self._is_listening = True
-            self._current_emotion = Emotion.SURPRISED # Show attention
-        
-        # Update display immediately
-        self.lcd_controller.update(self._current_emotion)
-        
-        try:
-            self.tts.speak("Yes?") # Acknowledge wake word
-            # No sleep needed here, TTS blocks or handles timing
+                    time.sleep(0.05)
         except Exception as e:
-            logger.error(f"TTS failed after wake word: {e}")
-        
-        # Optionally, return to NEUTRAL after a short delay or keep SURPRISED while listening
-        # Let's keep SURPRISED for now while listening.
+            logger.error(f"Error in audio processing loop: {e}", exc_info=True)
+        finally:
+             logger.info("Audio processing loop stopped.")
 
-    def _handle_speech_command(self, text: str):
-        """Processes recognized speech command and generates a response."""
-        logger.info(f"Recognized command: '{text}'")
-        response = "Sorry, I didn't understand that." # Default response
-        next_emotion = Emotion.CONFUSED # Default emotion
-
-        # Simple command parsing (replace with more sophisticated logic/LLM later)
-        text_lower = text.lower()
-        if "hello" in text_lower or "hi" in text_lower:
-            response = "Hello there!"
-            next_emotion = Emotion.HAPPY
-        elif "goodbye" in text_lower or "bye" in text_lower:
-            response = "Goodbye!"
-            next_emotion = Emotion.SAD
-        elif "how are you" in text_lower:
-            response = "I am functioning optimally!"
-            next_emotion = Emotion.NEUTRAL
-        
-        # Update state and speak response
+    def _handle_wake_word_detected(self):
+        """Callback function when the wake word is detected."""
         with self._state_lock:
-            self._current_emotion = next_emotion
-            self._is_listening = False # Stop listening after handling command
-
-        self.lcd_controller.update(self._current_emotion)
-        try:
-            self.tts.speak(response)
-        except Exception as e:
-            logger.error(f"TTS failed for response: {e}")
-
-        # Transition back to neutral after a delay
-        # Consider making this configurable or based on interaction context
-        time.sleep(1.5)
-        self.set_emotion(Emotion.NEUTRAL)
+            if not self._is_listening:
+                logger.info("Wake word detected! Entering listening state.")
+                self._is_listening = True
+                self.tts.speak("Yes?") # Provide audible feedback
+                # TODO: Add a timer here to automatically exit listening state after N seconds of silence/no command?
+            else:
+                 logger.debug("Wake word detected while already listening.")
+                 
+    def _handle_command_recognized(self, text: str, confidence: float):
+        # Store last recognized text for debug display
+        self.last_recognized_text = text 
+        
+        # Check if we are in Audio Debug listen always mode
+        is_audio_debug_listening = self.current_debug_view == 'AUDIO' and self.audio_debug_listen_always
+        
+        with self._state_lock:
+            if self._is_listening or is_audio_debug_listening:
+                 logger.info(f"Command recognized: '{text}' (Confidence: {confidence:.2f}) (Mode: {'Normal' if self._is_listening else 'Audio Debug'})")
+                 
+                 # --- Speak back if in audio debug --- 
+                 if is_audio_debug_listening:
+                      # TODO: Maybe add a toggle for speaking back?
+                      self.tts.speak(text)
+                 # ------------------------------------
+                 
+                 # --- Normal command processing / Stop listening check ---
+                 # Only process stop commands etc. if in normal listening mode
+                 if self._is_listening:
+                     stop_phrases = ["stop listening", "never mind", "cancel", "go away", "shut up"] 
+                     if any(phrase in text.lower() for phrase in stop_phrases):
+                          logger.info("Stop listening command detected. Exiting listening state.")
+                          self.tts.speak("Okay.")
+                          self._is_listening = False
+                          return 
+                     
+                     # TODO: Process actual command (LLM etc.)
+                     self.tts.speak(f"I heard {text}") # Placeholder
+                     logger.info("Exiting listening state after command recognition.")
+                     self._is_listening = False 
+                 # ------------------------------------------------------
+            else:
+                 logger.warning(f"Command '{text}' recognized but not in listening state or audio debug.")
 
     def set_emotion(self, emotion: Union[str, Emotion]):
         """Sets the current emotion state safely."""
@@ -587,13 +617,16 @@ class EVEOrchestrator:
                  self.camera.release()
             self.camera = None
 
-    def update(self, debug_mode: bool = False):
-        """Main update loop called periodically. Updates display and potentially other periodic tasks."""
-        debug_frame = None # Frame to pass to display controller
-        detections = [] # List of detections to pass to display controller
+    def update(self, debug_menu_active: bool = False):
+        """Main update loop called periodically. Updates subsystems and display based on state."""
+        # Update internal menu state based on main app flag
+        self.debug_menu_active = debug_menu_active
+        
+        debug_frame = None
+        detections = [] 
         try:
             # Capture frame if in debug mode and camera is available
-            if debug_mode and self.camera:
+            if debug_frame is None and self.camera:
                 try:
                     if self.camera_backend == 'picamera2':
                         debug_frame = self.camera.capture_array("main")
@@ -606,36 +639,38 @@ class EVEOrchestrator:
                 except Exception as cap_e:
                      logger.error(f"Error capturing frame using {self.camera_backend}: {cap_e}", exc_info=True)
 
-                # --- Perform Object Detection --- 
-                if debug_frame is not None and self.object_detection_net:
-                     # Get frame (potentially rotated) and list of detections
+                # --- Perform Object Detection (only if needed for video debug) --- 
+                if debug_frame is not None and self.object_detection_net and self.current_debug_view == 'VIDEO':
                      debug_frame, detections = self._perform_object_detection(debug_frame, self.camera_rotation)
-                     self.last_detections = detections # Store for potential correction
+                     self.last_detections = detections 
                 else:
-                     self.last_detections = [] # Clear if no detection this frame
+                     self.last_detections = [] 
                 # -----------------------------------
 
             # Get current emotion safely
             current_emotion = self.get_current_emotion()
             
-            # Update display, passing debug mode status, frame, detections, camera info, and corrections
+            # Update display, passing relevant state
             if hasattr(self, 'lcd_controller'):
-                camera_info_for_ui = {
-                     'backend': self.camera_backend,
-                     'available_opencv': self.available_camera_indices,
-                     'available_picam2': self.picamera2_cameras,
-                     'selected_index': self.selected_camera_index
-                }
+                camera_info_for_ui = { 'backend': self.camera_backend, 'available_opencv': self.available_camera_indices, 'available_picam2': self.picamera2_cameras, 'selected_index': self.selected_camera_index }
                 self.lcd_controller.update(
                     current_emotion,
-                    debug_mode=debug_mode,
-                    debug_frame=debug_frame,
-                    detections=detections,
+                    debug_menu_active=self.debug_menu_active,
+                    current_debug_view=self.current_debug_view, # Pass current view
+                    # debug_mode=... (deprecated)
+                    debug_frame=debug_frame if self.current_debug_view == 'VIDEO' else None, # Only pass frame if video view active
+                    detections=detections if self.current_debug_view == 'VIDEO' else [], # Only pass detections if video view active
                     camera_info=camera_info_for_ui,
                     camera_rotation=self.camera_rotation,
                     is_correcting=self.is_correcting_detection,
                     input_buffer=self.user_input_buffer,
-                    corrections=self.corrections_data
+                    corrections=self.corrections_data,
+                    # Audio Debug Info
+                    audio_debug_listen_always=self.audio_debug_listen_always,
+                    last_recognized_text=self.last_recognized_text,
+                    available_audio_devices=self.available_audio_devices, # Pass devices
+                    selected_audio_device_index=self.selected_audio_device_index, # Pass selected index
+                    last_audio_rms=self.last_audio_rms # Pass RMS value
                 )
             
             # Process any pending audio
@@ -650,19 +685,45 @@ class EVEOrchestrator:
     def cleanup(self):
         """Stops threads and cleans up all subsystems."""
         logger.info("Starting EVEOrchestrator cleanup...")
+
+        # --- 1. Stop Audio Capture Input --- 
+        # This stops the sounddevice callback from adding more data
+        if hasattr(self, 'audio_capture') and self.audio_capture:
+            logger.debug("Stopping AudioCapture stream first...")
+            try:
+                # Use stop_recording which handles stream closure etc.
+                self.audio_capture.stop_recording()
+                logger.info("Audio capture stream stopped.")
+            except Exception as e:
+                 logger.error(f"Error stopping AudioCapture stream during cleanup: {e}", exc_info=True)
+        # -----------------------------------
+
+        # --- 2. Signal Processing Loop to Stop --- 
         self._running = False # Signal thread to stop
+        # --------------------------------------- 
 
-        # Stop and join the audio thread
+        # --- 3. Wait for Processing Loop to Finish --- 
         if self._audio_thread and self._audio_thread.is_alive():
-            logger.debug("Waiting for audio thread to finish...")
-            self._audio_thread.join(timeout=2.0) # Wait for thread
+            logger.debug("Waiting for audio processing thread to finish...")
+            # Increased timeout slightly just in case last transcription runs long
+            self._audio_thread.join(timeout=5.0) 
             if self._audio_thread.is_alive():
-                logger.warning("Audio thread did not terminate gracefully.")
+                logger.warning("Audio processing thread did not terminate gracefully after join.")
+            else:
+                 logger.info("Audio processing thread joined successfully.") # Add success log
         self._audio_thread = None
+        # ------------------------------------------- 
 
-        # Cleanup subsystems (in reverse order of dependency if applicable)
+        # --- 4. Cleanup Subsystems (including final AudioCapture cleanup) --- 
         logger.debug("Cleaning up subsystems...")
-        subsystems = ['tts', 'speech_recognizer', 'audio_capture', 'lcd_controller']
+        # Call audio_capture cleanup explicitly here if it has one, after thread join
+        if hasattr(self, 'audio_capture') and self.audio_capture and hasattr(self.audio_capture, 'cleanup'):
+             try:
+                  self.audio_capture.cleanup()
+             except Exception as e:
+                  logger.error(f"Error during final AudioCapture cleanup: {e}", exc_info=True)
+                 
+        subsystems = ['tts', 'speech_recognizer', 'lcd_controller'] 
         for name in subsystems:
             try:
                 subsystem = getattr(self, name, None)
@@ -671,8 +732,9 @@ class EVEOrchestrator:
                     subsystem.cleanup()
             except Exception as e:
                 logger.error(f"Error cleaning up {name}: {e}", exc_info=True)
+        # -----------------------------------------------------------------
         
-        # Release camera (using the correct method based on backend)
+        # --- 5. Release Camera --- 
         if self.camera:
             logger.debug(f"Releasing camera instance ({self.camera_backend})...")
             try:
@@ -685,6 +747,7 @@ class EVEOrchestrator:
             except Exception as e:
                 logger.error(f"Error releasing/closing camera: {e}", exc_info=True)
             self.camera = None
+        # ------------------------
         
         logger.info("EVEOrchestrator cleanup finished.")
 
@@ -902,69 +965,127 @@ class EVEOrchestrator:
             self.logger.error(f"Error processing frame: {e}")
 
     def handle_debug_ui_click(self, element_id: str):
-        """Handles clicks detected on the debug UI elements."""
         logger.debug(f"Handling debug UI click: {element_id}")
 
-        if element_id.startswith("select_cam_"):
-            try:
-                new_index = int(element_id.split("_")[-1])
-                if new_index in self.available_camera_indices:
-                    if self.selected_camera_index != new_index:
-                        logger.info(f"User selected camera index: {new_index}")
-                        self.selected_camera_index = new_index
-                        self._init_camera() # Re-initialize camera with new index
-                    else:
-                        logger.debug(f"Camera index {new_index} already selected.")
-                else:
-                    logger.warning(f"Attempted to select invalid camera index {new_index} from UI.")
-            except (ValueError, IndexError):
-                logger.error(f"Could not parse camera index from element ID: {element_id}")
+        # --- New Menu Navigation Clicks --- 
+        if element_id == "menu_video":
+             self.set_debug_view('VIDEO')
+             return
+        if element_id == "menu_audio":
+             self.set_debug_view('AUDIO')
+             return
+        if element_id == "back_to_menu":
+             self.set_debug_view(None)
+             return
+        # ----------------------------------
 
-        elif element_id.startswith("rotate_"):
-            try:
-                new_rotation = int(element_id.split("_")[-1])
-                if new_rotation in [0, 90, 180, 270]:
-                    if self.camera_rotation != new_rotation:
-                        logger.info(f"User selected camera rotation: {new_rotation} degrees")
-                        self.camera_rotation = new_rotation
-                        # No need to re-init camera, LCD controller handles rotation display
+        # Existing handlers (only active if appropriate view is shown)
+        if self.current_debug_view == 'VIDEO':
+            if element_id.startswith("select_cam_"):
+                try:
+                    new_index = int(element_id.split("_")[-1])
+                    if new_index in self.available_camera_indices:
+                        if self.selected_camera_index != new_index:
+                            logger.info(f"User selected camera index: {new_index}")
+                            self.selected_camera_index = new_index
+                            self._init_camera() # Re-initialize camera with new index
+                        else:
+                            logger.debug(f"Camera index {new_index} already selected.")
                     else:
-                        logger.debug(f"Rotation {new_rotation} already selected.")
-                else:
-                    logger.warning(f"Attempted to select invalid rotation {new_rotation} from UI.")
-            except (ValueError, IndexError):
-                logger.error(f"Could not parse rotation from element ID: {element_id}")
+                        logger.warning(f"Attempted to select invalid camera index {new_index} from UI.")
+                except (ValueError, IndexError):
+                    logger.error(f"Could not parse camera index from element ID: {element_id}")
+
+            elif element_id.startswith("rotate_"):
+                try:
+                    new_rotation = int(element_id.split("_")[-1])
+                    if new_rotation in [0, 90, 180, 270]:
+                        if self.camera_rotation != new_rotation:
+                            logger.info(f"User selected camera rotation: {new_rotation} degrees")
+                            self.camera_rotation = new_rotation
+                            # No need to re-init camera, LCD controller handles rotation display
+                        else:
+                            logger.debug(f"Rotation {new_rotation} already selected.")
+                    else:
+                        logger.warning(f"Attempted to select invalid rotation {new_rotation} from UI.")
+                except (ValueError, IndexError):
+                    logger.error(f"Could not parse rotation from element ID: {element_id}")
+            
+            elif element_id.startswith("correct_det_"):
+                if self.is_correcting_detection:
+                     logger.warning("Already in correction mode. Please finish current correction.")
+                     return # Ignore click if already correcting
+                     
+                try:
+                    detection_index = int(element_id.split("_")[-1])
+                    # Find the corresponding detection from the last frame
+                    target_detection = None
+                    for det in self.last_detections:
+                         if det['index'] == detection_index:
+                              target_detection = det
+                              break
+                              
+                    if target_detection:
+                         logger.info(f"Initiating correction for detection index: {detection_index}, label: '{target_detection['label']}', box: {target_detection['box']}")
+                         # --- Enter Correction Mode --- 
+                         self.is_correcting_detection = True
+                         self.correction_target_info = target_detection # Store full detection info
+                         self.user_input_buffer = "" # Clear input buffer
+                         self.tts.speak(f"What is the correct label?") # Prompt user
+                         # ---------------------------
+                    else:
+                         logger.warning(f"Could not find detection details for index {detection_index} from last frame.")
+                     
+                except (ValueError, IndexError):
+                     logger.error(f"Could not parse detection index from element ID: {element_id}")
+
+        elif self.current_debug_view == 'AUDIO':
+             if element_id == "audio_toggle_listen":
+                  self.audio_debug_listen_always = not self.audio_debug_listen_always
+                  logger.info(f"Audio Debug: Listen Always set to {self.audio_debug_listen_always}")
+                  # Reset last text when toggling
+                  self.last_recognized_text = ""
+                  return # Handled
+             elif element_id.startswith("select_audio_dev_"):
+                  try:
+                       new_index_str = element_id.split("_")[-1]
+                       new_index = int(new_index_str) if new_index_str != 'None' else None
+                       
+                       # Validate selection
+                       is_valid = False
+                       if new_index is None:
+                            is_valid = True # Default is always valid
+                       else:
+                            is_valid = any(dev['index'] == new_index for dev in self.available_audio_devices)
+                            
+                       if is_valid:
+                            if self.selected_audio_device_index != new_index:
+                                 logger.info(f"User selected audio device index: {new_index if new_index is not None else 'Default'}")
+                                 self.selected_audio_device_index = new_index
+                                 # Need to re-initialize audio capture subsystem
+                                 logger.info("Re-initializing Audio Capture with new device...")
+                                 if hasattr(self, 'audio_capture'):
+                                      self.audio_capture.cleanup() # Stop existing stream
+                                 try:
+                                      temp_speech_config = SimpleNamespace(**vars(self.speech_config))
+                                      temp_speech_config.AUDIO_DEVICE_INDEX = self.selected_audio_device_index
+                                      self.audio_capture = AudioCapture(temp_speech_config)
+                                      # Restart recording if it was running (it should be if audio thread is running)
+                                      self.audio_capture.start_recording() 
+                                      logger.info("Audio Capture re-initialized successfully.")
+                                 except Exception as e:
+                                      logger.error(f"Failed to re-initialize Audio Capture: {e}", exc_info=True)
+                                      # TODO: Maybe disable audio debug / display error?
+                            else:
+                                 logger.debug(f"Audio device {new_index} already selected.")
+                       else:
+                            logger.warning(f"Attempted to select invalid audio device index {new_index}")
+                  except (ValueError, IndexError):
+                       logger.error(f"Could not parse audio device index from element ID: {element_id}")
+                  return # Handled
         
-        elif element_id.startswith("correct_det_"):
-            if self.is_correcting_detection:
-                 logger.warning("Already in correction mode. Please finish current correction.")
-                 return # Ignore click if already correcting
-                 
-            try:
-                detection_index = int(element_id.split("_")[-1])
-                # Find the corresponding detection from the last frame
-                target_detection = None
-                for det in self.last_detections:
-                     if det['index'] == detection_index:
-                          target_detection = det
-                          break
-                          
-                if target_detection:
-                     logger.info(f"Initiating correction for detection index: {detection_index}, label: '{target_detection['label']}', box: {target_detection['box']}")
-                     # --- Enter Correction Mode --- 
-                     self.is_correcting_detection = True
-                     self.correction_target_info = target_detection # Store full detection info
-                     self.user_input_buffer = "" # Clear input buffer
-                     self.tts.speak(f"What is the correct label?") # Prompt user
-                     # ---------------------------
-                else:
-                     logger.warning(f"Could not find detection details for index {detection_index} from last frame.")
-                 
-            except (ValueError, IndexError):
-                 logger.error(f"Could not parse detection index from element ID: {element_id}")
-
-        else:
-            logger.warning(f"Unhandled debug UI element click: {element_id}")
+        # Fall through for unhandled clicks
+        logger.warning(f"Unhandled debug UI element click: {element_id} (Current view: {self.current_debug_view})")
 
     def submit_correction(self, corrected_label: str):
         """Handles the submitted correction from the user."""
@@ -1090,6 +1211,46 @@ class EVEOrchestrator:
 
         # Return the processed (potentially rotated) frame and the list of detections
         return processed_frame, detections_list
+
+    def set_debug_view(self, view_name: Optional[str]):
+        """Sets the active debug view."""
+        logger.info(f"Setting debug view to: {view_name}")
+        if view_name not in [None, 'VIDEO', 'AUDIO']:
+             logger.warning(f"Invalid debug view name: {view_name}. Setting to None.")
+             self.current_debug_view = None
+        else:
+             self.current_debug_view = view_name
+        # Reset correction state when changing views
+        self.cancel_correction() 
+
+    def _discover_audio_devices(self):
+         """Queries and lists available audio input devices."""
+         logger.info("Discovering audio input devices...")
+         try:
+             devices = sd.query_devices()
+             self.available_audio_devices = []
+             # Filter for input devices
+             for i, device in enumerate(devices):
+                 # Check if it has input channels (max_input_channels > 0)
+                 if device['max_input_channels'] > 0:
+                     self.available_audio_devices.append({'index': i, 'name': device['name']})
+                     logger.info(f"  Found Input Device {i}: {device['name']}")
+             
+             # Get default index from config if specified, otherwise use system default (None)
+             self.selected_audio_device_index = getattr(self.speech_config, 'AUDIO_DEVICE_INDEX', None)
+             # Basic validation - check if selected index exists in our list
+             if self.selected_audio_device_index is not None:
+                  found = any(dev['index'] == self.selected_audio_device_index for dev in self.available_audio_devices)
+                  if not found:
+                      logger.warning(f"Configured audio device index {self.selected_audio_device_index} not found or not an input device. Using default.")
+                      self.selected_audio_device_index = None
+                      
+             logger.info(f"Selected audio device: {self.selected_audio_device_index if self.selected_audio_device_index is not None else 'Default'}")
+
+         except Exception as e:
+             logger.error(f"Error querying audio devices: {e}. Cannot select specific device.", exc_info=True)
+             self.available_audio_devices = []
+             self.selected_audio_device_index = None
 
 class Event:
     """Event class for internal communication"""

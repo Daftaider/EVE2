@@ -43,40 +43,68 @@ class TextToSpeech:
 
     def _init_engine(self):
         """Initialize the text-to-speech engine with fallbacks"""
+        self.logger.info("[TTS Init Trace] Entering _init_engine...")
         try:
+            # Try pyttsx3 first
             if self.engine_type == 'pyttsx3':
+                self.logger.info("[TTS Init Trace] Attempting pyttsx3 init...")
                 try:
                     import pyttsx3
                     self.engine = pyttsx3.init()
                     self.engine.setProperty('rate', self.rate)
                     self.engine.setProperty('volume', self.volume)
                     self.logger.info("Initialized pyttsx3 engine")
-                    return
+                    self.logger.info("[TTS Init Trace] pyttsx3 Success.")
+                    return # Success with pyttsx3
                 except ImportError:
-                    self.logger.warning("pyttsx3 not available, falling back to espeak")
+                    self.logger.warning("[TTS Init Trace] pyttsx3 ImportError. Falling back to espeak.")
                     self.engine_type = 'espeak'
                 except Exception as e:
-                    self.logger.warning(f"Error initializing pyttsx3: {e}, falling back to espeak")
+                    self.logger.warning(f"[TTS Init Trace] pyttsx3 Exception: {e}. Falling back to espeak.")
                     self.engine_type = 'espeak'
+                self.logger.info("[TTS Init Trace] pyttsx3 check finished.")
+            else:
+                 self.logger.info("[TTS Init Trace] Skipping pyttsx3 (engine_type was not pyttsx3).")
 
-            # Fallback to espeak
+            # Fallback to espeak: Try running it directly
             if self.engine_type == 'espeak':
-                # Check if espeak is installed
-                if shutil.which('espeak'):
-                    self.engine = 'espeak'
-                    self.logger.info("Initialized espeak engine")
-                    return
-                else:
-                    self.logger.warning("espeak not found, falling back to mock engine")
+                self.logger.info("[TTS Init Trace] Attempting espeak check...")
+                try:
+                    result = subprocess.run(['espeak', '--version'], capture_output=True, text=True, check=False, timeout=2)
+                    self.logger.info(f"[TTS Init Trace] espeak check subprocess finished. Return code: {result.returncode}")
+                    if result.returncode == 0 or "Espeak NG" in result.stdout or "eSpeak" in result.stdout:
+                         self.engine = 'espeak'
+                         self.logger.info(f"Initialized espeak engine (found via subprocess check).")
+                         self.logger.info("[TTS Init Trace] espeak Success.")
+                         return # Success with espeak
+                    else:
+                         self.logger.warning(f"[TTS Init Trace] espeak check failed (RC={result.returncode}). Falling back to mock.")
+                         self.engine_type = 'mock'
+                except FileNotFoundError:
+                    self.logger.warning("[TTS Init Trace] espeak FileNotFoundError. Falling back to mock.")
                     self.engine_type = 'mock'
+                except subprocess.TimeoutExpired:
+                     self.logger.warning("[TTS Init Trace] espeak TimeoutExpired. Falling back to mock.")
+                     self.engine_type = 'mock'
+                except Exception as e:
+                    self.logger.warning(f"[TTS Init Trace] espeak Exception: {e}. Falling back to mock.")
+                    self.engine_type = 'mock'
+                self.logger.info("[TTS Init Trace] espeak check finished.")
+            else:
+                 self.logger.info("[TTS Init Trace] Skipping espeak check (engine_type was not espeak).")
 
             # Final fallback to mock engine
             if self.engine_type == 'mock':
+                self.logger.info("[TTS Init Trace] engine_type is mock. Setting engine to mock.")
                 self.engine = 'mock'
                 self.logger.info("Initialized mock text-to-speech engine")
+            else:
+                 self.logger.warning(f"[TTS Init Trace] Reached end of _init_engine unexpectedly with engine_type={self.engine_type}. Defaulting to mock.")
+                 self.engine_type = 'mock'
+                 self.engine = 'mock'
 
         except Exception as e:
-            self.logger.error(f"Failed to initialize text-to-speech: {e}")
+            self.logger.error(f"[TTS Init Trace] Outer Exception in _init_engine: {e}. Defaulting to mock.", exc_info=True)
             self.engine_type = 'mock'
             self.engine = 'mock'
 
