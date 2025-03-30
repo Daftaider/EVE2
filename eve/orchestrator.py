@@ -161,6 +161,7 @@ class EVEOrchestrator:
         self.available_audio_devices = []
         self.selected_audio_device_index: Optional[int] = None # Can be None for default
         self.last_audio_rms: float = 0.0
+        self.current_porcupine_sensitivity: float = 0.5 # Track sensitivity (assuming first keyword for UI)
 
         # Initialize configurations and subsystems
         self._init_configs()
@@ -170,6 +171,8 @@ class EVEOrchestrator:
         self._discover_cameras() # Discover cameras
         self._init_subsystems() # Init other subsystems
         self._init_camera() # Initialize camera using the selected index/method
+        # Fetch initial sensitivity after subsystems are created
+        self._update_sensitivity_from_capture()
         logger.info("EVEOrchestrator initialized.")
 
     def _init_configs(self):
@@ -391,17 +394,18 @@ class EVEOrchestrator:
         try:
             while self._running:
                 if hasattr(self, 'audio_capture'):
-                     # Get latest RMS value for display
                      self.last_audio_rms = self.audio_capture.get_last_rms()
                      
                      if self.audio_capture.has_new_audio():
                         audio_data = self.audio_capture.get_audio_data()
                         
+                        if not self._running:
+                            logger.debug("_running flag is False, breaking audio loop before processing chunk.")
+                            break
+                        
                         if audio_data:
                             if hasattr(self, 'speech_recognizer') and self.speech_recognizer:
-                                # Determine listen_for_command flag
                                 listen_for_command = self._is_listening
-                                # Override if in Audio Debug Listen Always mode
                                 if self.current_debug_view == 'AUDIO' and self.audio_debug_listen_always:
                                      listen_for_command = True
                                      
@@ -414,8 +418,12 @@ class EVEOrchestrator:
                             else:
                                  logger.warning("SpeechRecognizer not available, skipping audio processing.")
                      else:
-                          time.sleep(0.01) # Shorter sleep when actively checking RMS
+                          if not self._running:
+                               break
+                          time.sleep(0.01)
                 else:
+                    if not self._running:
+                         break
                     time.sleep(0.05)
         except Exception as e:
             logger.error(f"Error in audio processing loop: {e}", exc_info=True)
@@ -670,7 +678,9 @@ class EVEOrchestrator:
                     last_recognized_text=self.last_recognized_text,
                     available_audio_devices=self.available_audio_devices, # Pass devices
                     selected_audio_device_index=self.selected_audio_device_index, # Pass selected index
-                    last_audio_rms=self.last_audio_rms # Pass RMS value
+                    last_audio_rms=self.last_audio_rms,
+                    # Sensitivity for UI
+                    current_porcupine_sensitivity=self.current_porcupine_sensitivity 
                 )
             
             # Process any pending audio
@@ -686,55 +696,65 @@ class EVEOrchestrator:
         """Stops threads and cleans up all subsystems."""
         logger.info("Starting EVEOrchestrator cleanup...")
 
-        # --- 1. Stop Audio Capture Input --- 
-        # This stops the sounddevice callback from adding more data
+        # --- 1. Stop Audio Capture Stream Callback --- 
+        # Tells sounddevice to stop calling the audio callback
         if hasattr(self, 'audio_capture') and self.audio_capture:
-            logger.debug("Stopping AudioCapture stream first...")
+            logger.debug("Cleanup Step 1: Stopping AudioCapture stream callback...")
             try:
-                # Use stop_recording which handles stream closure etc.
-                self.audio_capture.stop_recording()
-                logger.info("Audio capture stream stopped.")
+                # Use the new method to only stop the callback
+                self.audio_capture.stop_stream() 
+                logger.info("Cleanup Step 1: Audio capture stream callback stopped.")
             except Exception as e:
-                 logger.error(f"Error stopping AudioCapture stream during cleanup: {e}", exc_info=True)
-        # -----------------------------------
+                 logger.error(f"Cleanup Step 1: Error stopping AudioCapture stream callback: {e}", exc_info=True)
+            logger.debug("Cleanup Step 1: Finished stopping stream callback.")
+        # --------------------------------------------
 
         # --- 2. Signal Processing Loop to Stop --- 
-        self._running = False # Signal thread to stop
+        logger.debug("Cleanup Step 2: Setting self._running = False")
+        self._running = False 
         # --------------------------------------- 
 
         # --- 3. Wait for Processing Loop to Finish --- 
         if self._audio_thread and self._audio_thread.is_alive():
-            logger.debug("Waiting for audio processing thread to finish...")
-            # Increased timeout slightly just in case last transcription runs long
+            logger.debug("Cleanup Step 3: Joining audio processing thread (timeout=5.0s)...")
             self._audio_thread.join(timeout=5.0) 
             if self._audio_thread.is_alive():
-                logger.warning("Audio processing thread did not terminate gracefully after join.")
+                logger.warning("Cleanup Step 3: Audio processing thread did NOT terminate gracefully after join timeout.")
             else:
-                 logger.info("Audio processing thread joined successfully.") # Add success log
+                 logger.info("Cleanup Step 3: Audio processing thread joined successfully.")
         self._audio_thread = None
+        logger.debug("Cleanup Step 3: Finished joining thread.")
         # ------------------------------------------- 
 
-        # --- 4. Cleanup Subsystems (including final AudioCapture cleanup) --- 
-        logger.debug("Cleaning up subsystems...")
-        # Call audio_capture cleanup explicitly here if it has one, after thread join
+        # --- 4. Cleanup Subsystems --- 
+        logger.debug("Cleanup Step 4: Cleaning up subsystems...")
+        # Call AudioCapture cleanup (which now closes the stream) AFTER thread join
         if hasattr(self, 'audio_capture') and self.audio_capture and hasattr(self.audio_capture, 'cleanup'):
+             logger.debug("Cleanup Step 4a: Calling audio_capture.cleanup() to close stream...")
              try:
                   self.audio_capture.cleanup()
+                  logger.debug("Cleanup Step 4a: Finished audio_capture.cleanup().")
              except Exception as e:
-                  logger.error(f"Error during final AudioCapture cleanup: {e}", exc_info=True)
+                  logger.error(f"Cleanup Step 4a: Error during final AudioCapture cleanup (close_stream): {e}", exc_info=True)
                  
         subsystems = ['tts', 'speech_recognizer', 'lcd_controller'] 
         for name in subsystems:
+            logger.debug(f"Cleanup Step 4b: Checking subsystem '{name}'...")
             try:
                 subsystem = getattr(self, name, None)
                 if subsystem and hasattr(subsystem, 'cleanup'):
-                    logger.debug(f"Cleaning up {name}...")
+                    logger.debug(f"Cleanup Step 4b: Calling {name}.cleanup()...")
                     subsystem.cleanup()
+                    logger.debug(f"Cleanup Step 4b: Finished {name}.cleanup().")
+                else:
+                     logger.debug(f"Cleanup Step 4b: Subsystem '{name}' not found or has no cleanup method.")
             except Exception as e:
-                logger.error(f"Error cleaning up {name}: {e}", exc_info=True)
-        # -----------------------------------------------------------------
+                logger.error(f"Cleanup Step 4b: Error cleaning up {name}: {e}", exc_info=True)
+        logger.debug("Cleanup Step 4: Finished cleaning up subsystems.")
+        # ------------------------------
         
         # --- 5. Release Camera --- 
+        logger.debug("Cleanup Step 5: Releasing camera...")
         if self.camera:
             logger.debug(f"Releasing camera instance ({self.camera_backend})...")
             try:
@@ -747,6 +767,7 @@ class EVEOrchestrator:
             except Exception as e:
                 logger.error(f"Error releasing/closing camera: {e}", exc_info=True)
             self.camera = None
+        logger.debug("Cleanup Step 5: Finished releasing camera.")
         # ------------------------
         
         logger.info("EVEOrchestrator cleanup finished.")
@@ -1083,6 +1104,27 @@ class EVEOrchestrator:
                   except (ValueError, IndexError):
                        logger.error(f"Could not parse audio device index from element ID: {element_id}")
                   return # Handled
+             elif element_id == "sensitivity_increase":
+                  if hasattr(self, 'audio_capture') and self.audio_capture:
+                       current_list = self.audio_capture.get_porcupine_sensitivity()
+                       if current_list:
+                            new_val = round(min(1.0, current_list[0] + 0.1), 1)
+                            # Assume we modify only the first sensitivity for now
+                            new_list = [new_val] + current_list[1:] 
+                            self.audio_capture.set_porcupine_sensitivity(new_list)
+                            self._update_sensitivity_from_capture() # Update orchestrator state
+                  return # Handled
+                  
+             elif element_id == "sensitivity_decrease":
+                  if hasattr(self, 'audio_capture') and self.audio_capture:
+                       current_list = self.audio_capture.get_porcupine_sensitivity()
+                       if current_list:
+                            new_val = round(max(0.0, current_list[0] - 0.1), 1)
+                            # Assume we modify only the first sensitivity for now
+                            new_list = [new_val] + current_list[1:] 
+                            self.audio_capture.set_porcupine_sensitivity(new_list)
+                            self._update_sensitivity_from_capture() # Update orchestrator state
+                  return # Handled
         
         # Fall through for unhandled clicks
         logger.warning(f"Unhandled debug UI element click: {element_id} (Current view: {self.current_debug_view})")
@@ -1251,6 +1293,21 @@ class EVEOrchestrator:
              logger.error(f"Error querying audio devices: {e}. Cannot select specific device.", exc_info=True)
              self.available_audio_devices = []
              self.selected_audio_device_index = None
+
+    def _update_sensitivity_from_capture(self):
+         """Updates the orchestrator's sensitivity state from AudioCapture."""
+         if hasattr(self, 'audio_capture') and self.audio_capture:
+              sens_list = self.audio_capture.get_porcupine_sensitivity()
+              if sens_list:
+                   # Store only the first sensitivity for the UI for now
+                   self.current_porcupine_sensitivity = sens_list[0]
+                   logger.debug(f"Updated orchestrator sensitivity state: {self.current_porcupine_sensitivity:.2f}")
+              else:
+                   # Handle case where sensitivity list might be empty (e.g., init failed)
+                   self.current_porcupine_sensitivity = 0.5 # Default
+                   logger.warning("Could not get sensitivities from AudioCapture, using default.")
+         else:
+              self.current_porcupine_sensitivity = 0.5 # Default
 
 class Event:
     """Event class for internal communication"""

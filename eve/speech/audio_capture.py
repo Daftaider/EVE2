@@ -3,6 +3,8 @@ import queue
 import threading
 import sounddevice as sd
 import numpy as np
+import pvporcupine
+from typing import Optional, List
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +25,89 @@ class AudioCapture:
         self._lock = threading.Lock()
         self.last_rms: float = 0.0 # Add attribute for RMS
 
+        # --- Porcupine Wake Word Detection ---
+        self.porcupine: Optional[pvporcupine.Porcupine] = None
+        self._porcupine_buffer = bytearray()
+        self._wake_word_detected_flag = False
+        self.current_sensitivities: List[float] = [0.5] # Default if not in config
+        self._init_porcupine() # Initializes using self.current_sensitivities
+        # -------------------------------------
+
         logger.info(f"AudioCapture configured: Rate={self.sample_rate}, Channels={self.channels}, Device={self.device_index or 'Default'}")
+
+    def _init_porcupine(self, sensitivities: Optional[List[float]] = None): # Accept optional sensitivities
+        """Initializes the Porcupine wake word engine."""
+        # If sensitivities are provided, update the instance variable
+        if sensitivities is not None:
+             self.current_sensitivities = sensitivities
+             
+        # --- Delete existing instance if any ---
+        if self.porcupine:
+             try:
+                  self.porcupine.delete()
+                  logger.info("Deleted existing Porcupine instance before re-initialization.")
+                  self.porcupine = None
+             except Exception as e:
+                  logger.error(f"Error deleting existing Porcupine instance: {e}", exc_info=True)
+                  # Attempt to continue, but Porcupine might be in a bad state
+        # ---------------------------------------
+
+        logger.info(f"Initializing Porcupine with sensitivities: {self.current_sensitivities} ...\n")
+        try:
+            access_key = getattr(self.speech_config, 'PICOVOICE_ACCESS_KEY', None)
+            # ... (rest of access key check)
+
+            # Keyword setup (paths or built-ins)
+            keyword_paths = getattr(self.speech_config, 'PICOVOICE_KEYWORD_PATH', None)
+            keywords = None
+            num_keywords = 0
+            if keyword_paths:
+                 if isinstance(keyword_paths, str): keyword_paths = [keyword_paths]
+                 num_keywords = len(keyword_paths)
+                 logger.info(f"Using Porcupine custom keyword paths: {keyword_paths}")
+            else:
+                 keywords = getattr(self.speech_config, 'PICOVOICE_BUILTIN_KEYWORD', 'porcupine')
+                 if isinstance(keywords, str): keywords = [keywords]
+                 num_keywords = len(keywords)
+                 logger.info(f"Using Porcupine built-in keywords: {keywords}")
+
+            # --- Validate Sensitivities ---
+            config_sensitivities = getattr(self.speech_config, 'PICOVOICE_SENSITIVITIES', None)
+            if sensitivities is None and config_sensitivities is not None:
+                 # Use config sensitivities on first init if provided
+                  self.current_sensitivities = config_sensitivities
+                  
+            if not isinstance(self.current_sensitivities, list):
+                 logger.warning(f"Sensitivities are not a list ({self.current_sensitivities}). Resetting to defaults for {num_keywords} keywords.")
+                 self.current_sensitivities = [0.5] * num_keywords
+            elif len(self.current_sensitivities) != num_keywords:
+                 logger.warning(f"Number of sensitivities ({len(self.current_sensitivities)}) != number of keywords ({num_keywords}). Resetting sensitivities to defaults.")
+                 self.current_sensitivities = [0.5] * num_keywords
+            # Clamp values between 0.0 and 1.0
+            self.current_sensitivities = [max(0.0, min(1.0, s)) for s in self.current_sensitivities]
+            logger.info(f"Using final sensitivities: {self.current_sensitivities}")
+            # -----------------------------
+
+            library_path = getattr(self.speech_config, 'PICOVOICE_LIBRARY_PATH', None)
+            model_path = getattr(self.speech_config, 'PICOVOICE_MODEL_PATH', None)
+
+            self.porcupine = pvporcupine.create(
+                access_key=access_key,
+                keyword_paths=keyword_paths,
+                keywords=keywords,
+                sensitivities=self.current_sensitivities, # Use the validated list
+                library_path=library_path,
+                model_path=model_path
+            )
+
+            # ... (rest of validation and logging)
+
+        except pvporcupine.PorcupineError as pe:
+             # ... (error handling)
+             self.porcupine = None # Ensure it's None on failure
+        except Exception as e:
+             # ... (error handling)
+             self.porcupine = None # Ensure it's None on failure
 
     def _audio_callback(self, indata: np.ndarray, frames: int, time, status):
         """This is called (from a separate thread) for each audio block."""
@@ -92,34 +176,49 @@ class AudioCapture:
                 self.stream = None
                 self.is_recording = False
 
-    def stop_recording(self):
-        """Stop recording audio."""
+    def stop_stream(self):
+        """Stops the audio stream from calling the callback."""
+        logger.info("Stopping audio stream callback...")
         with self._lock:
-            if not self.is_recording or self.stream is None:
-                logger.warning("Audio recording is not active or stream is None.")
-                self.is_recording = False # Ensure state is correct
-                return
-                
+            self.is_recording = False # Prevent adding to queue
+        if self.stream and not self.stream.stopped:
             try:
-                logger.info("Stopping audio stream...")
-                if self.stream.active:
-                     self.stream.stop()
-                self.stream.close()
-                self.is_recording = False
-                # Clear the queue after stopping?
-                while not self.audio_queue.empty():
-                    try:
-                        self.audio_queue.get_nowait()
-                    except queue.Empty:
-                        break
-                logger.info("Audio stream stopped and queue cleared.")
+                self.stream.stop()
+                logger.debug("Sounddevice stream stopped.")
             except Exception as e:
-                logger.error(f"Error stopping audio stream: {e}", exc_info=True)
-                # Try to force state even on error
-                self.is_recording = False 
-            finally:
-                self.stream = None # Ensure stream object is cleared
-        
+                logger.error(f"Error stopping sounddevice stream: {e}", exc_info=True)
+                
+    def close_stream(self):
+        """Closes the audio stream and releases resources."""
+        logger.info("Closing audio stream...")
+        if self.stream:
+            try:
+                # Ensure stopped first, just in case
+                if not self.stream.stopped:
+                    self.stream.stop()
+                    
+                if not self.stream.closed:
+                    self.stream.close()
+                    logger.debug("Sounddevice stream closed.")
+                self.stream = None
+                logger.info("Audio stream closed successfully.")
+            except Exception as e:
+                logger.error(f"Error closing sounddevice stream: {e}", exc_info=True)
+                self.stream = None # Ensure stream is None even on error
+        # Clear queue on close
+        with self._lock:
+            while not self.audio_queue.empty():
+                try: self.audio_queue.get_nowait()
+                except queue.Empty: break
+            self.is_recording = False
+            logger.debug("Audio queue cleared.")
+
+    def stop_recording(self):
+        """Stops and closes the audio stream. Use stop_stream() and close_stream() for finer control."""
+        logger.warning("Using deprecated stop_recording(). Call stop_stream() and close_stream() instead.")
+        self.stop_stream()
+        self.close_stream()
+
     def has_new_audio(self) -> bool:
         """Check if new audio data is available in the queue."""
         return not self.audio_queue.empty()
@@ -148,7 +247,29 @@ class AudioCapture:
         pass
 
     def cleanup(self):
-         """Ensure the stream is stopped and closed."""
-         self.stop_recording()
+        logger.info("AudioCapture cleanup: Closing stream and deleting Porcupine...")
+        self.close_stream()
+        if self.porcupine:
+            try:
+                 self.porcupine.delete()
+                 logger.info("Porcupine instance deleted.")
+            except Exception as e:
+                 logger.error(f"Error deleting Porcupine instance: {e}", exc_info=True)
+            self.porcupine = None
+        else:
+             logger.debug("No Porcupine instance to delete during cleanup.")
+
+    def get_porcupine_sensitivity(self) -> List[float]:
+         """Returns the current list of Porcupine sensitivities."""
+         # Return a copy to prevent external modification?
+         return list(self.current_sensitivities) 
+
+    def set_porcupine_sensitivity(self, new_sensitivities: List[float]):
+         """Sets new Porcupine sensitivities and re-initializes the engine."""
+         logger.info(f"Attempting to set new Porcupine sensitivities: {new_sensitivities}")
+         # Re-initialize Porcupine with the new sensitivities
+         # _init_porcupine handles validation, deletion, and creation
+         self._init_porcupine(sensitivities=new_sensitivities)
+         # Optionally: Check if self.porcupine is None after re-init and log/raise error
 
 # Also update the __init__.py file if needed 

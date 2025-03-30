@@ -230,7 +230,9 @@ class LCDController:
                last_recognized_text: str = "",
                available_audio_devices: Optional[List[Dict]] = None,
                selected_audio_device_index: Optional[int] = None,
-               last_audio_rms: float = 0.0
+               last_audio_rms: float = 0.0,
+               # Sensitivity
+               current_porcupine_sensitivity: float = 0.5
                ) -> None:
         """Update the display: Normal emotion, debug menu, or specific debug view."""
         # Normal Emotion Mode (if debug menu isn't active)
@@ -497,6 +499,36 @@ class LCDController:
                       current_x += no_dev_rect.width + 15
                       
                  current_y += 30 # Spacing
+
+                 # --- Sensitivity Control --- 
+                 sens_label_surf = self.debug_font.render("Wake Word Sensitivity:", True, (200, 200, 200))
+                 sens_label_rect = sens_label_surf.get_rect(left=10, top=current_y)
+                 self.screen.blit(sens_label_surf, sens_label_rect)
+                 current_y += sens_label_rect.height + 10
+                 
+                 control_x = 20
+                 
+                 # Decrease Button
+                 minus_surf = self.debug_font_large.render(" - ", True, (255, 255, 255), (80, 0, 0))
+                 minus_rect = minus_surf.get_rect(left=control_x, top=current_y)
+                 self.screen.blit(minus_surf, minus_rect)
+                 self.debug_ui_elements["sensitivity_decrease"] = minus_rect
+                 control_x += minus_rect.width + 15
+                 
+                 # Sensitivity Value Display
+                 sens_val_text = f"{current_porcupine_sensitivity:.1f}" # Format to 1 decimal place
+                 sens_val_surf = self.debug_font_large.render(sens_val_text, True, (255, 255, 0))
+                 sens_val_rect = sens_val_surf.get_rect(left=control_x, centery=minus_rect.centery)
+                 self.screen.blit(sens_val_surf, sens_val_rect)
+                 control_x += sens_val_rect.width + 15
+                 
+                 # Increase Button
+                 plus_surf = self.debug_font_large.render(" + ", True, (255, 255, 255), (0, 80, 0))
+                 plus_rect = plus_surf.get_rect(left=control_x, top=current_y)
+                 self.screen.blit(plus_surf, plus_rect)
+                 self.debug_ui_elements["sensitivity_increase"] = plus_rect
+                 
+                 current_y += plus_rect.height + 20 # Spacing after sensitivity
 
                  # --- Sound Level Meter --- 
                  meter_label_surf = self.debug_font.render("Input Level:", True, (200, 200, 200))
