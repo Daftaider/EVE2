@@ -425,17 +425,17 @@ class EVEOrchestrator:
                     if not self._running:
                          break
                     time.sleep(0.05)
-        except Exception as e:
-            logger.error(f"Error in audio processing loop: {e}", exc_info=True)
+            except Exception as e:
+                logger.error(f"Error in audio processing loop: {e}", exc_info=True)
         finally:
-             logger.info("Audio processing loop stopped.")
+        logger.info("Audio processing loop stopped.")
 
     def _handle_wake_word_detected(self):
         """Callback function when the wake word is detected."""
         with self._state_lock:
             if not self._is_listening:
                 logger.info("Wake word detected! Entering listening state.")
-                self._is_listening = True
+            self._is_listening = True
                 self.tts.speak("Yes?") # Provide audible feedback
                 # TODO: Add a timer here to automatically exit listening state after N seconds of silence/no command?
             else:

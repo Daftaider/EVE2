@@ -157,7 +157,7 @@ class SpeechRecognizer:
                  self.logger.debug("Whisper produced no text segments.")
                  
             # --- Process recognized text --- 
-            if text:
+                if text:
                 text_lower = text.lower()
                 if listen_for_command:
                      self.logger.debug(f"Calling command callback for: '{text}'")

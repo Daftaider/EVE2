@@ -237,8 +237,8 @@ class LCDController:
         """Update the display: Normal emotion, debug menu, or specific debug view."""
         # Normal Emotion Mode (if debug menu isn't active)
         if not debug_menu_active:
-            if emotion is not None:
-                self._current_emotion = emotion
+        if emotion is not None:
+            self._current_emotion = emotion
             try:
                 self.screen.fill(self.background_color)
                 if self._current_emotion in self.emotion_images:
