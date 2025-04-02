@@ -146,6 +146,17 @@ class Emotion(Enum):
             logging.warning(f"Invalid emotion value '{value}'. Defaulting to NEUTRAL.")
             return cls.NEUTRAL
 
+# Placeholder Event class - NEEDS TO BE DEFINED BEFORE EVEOrchestrator
+class Event:
+    """Simple Event class for internal communication."""
+    def __init__(self, topic: str, data: Optional[Dict] = None):
+        self.topic = topic
+        self.data = data if data is not None else {}
+        self.timestamp = time.time()
+
+    def __repr__(self):
+        return f"Event(topic='{self.topic}', data={self.data}, timestamp={self.timestamp})"
+
 class EVEOrchestrator:
     """
     Main coordinator for the EVE2 system.
@@ -1353,13 +1364,6 @@ class EVEOrchestrator:
                    logger.warning("Could not get sensitivities from AudioCapture, using default.")
          else:
               self.current_porcupine_sensitivity = 0.5 # Default
-
-class Event:
-    """Event class for internal communication"""
-    def __init__(self, topic, data):
-        self.topic = topic
-        self.data = data
-        self.timestamp = time.time()
 
 def create_orchestrator():
     """Create and initialize an EVE orchestrator instance"""
