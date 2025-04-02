@@ -155,13 +155,16 @@ class SpeechRecognizer:
                  self.logger.info(f"Whisper recognized: '{text}' (Lang: {info.language}, Prob: {info.language_probability:.2f})")
             else:
                  self.logger.debug("Whisper produced no text segments.")
+                 text = "" # Ensure text is defined
                  
             # --- Process recognized text --- 
-                if text:
+            if text:
                 text_lower = text.lower()
+                # Use a placeholder confidence if Whisper doesn't provide one easily
+                confidence = 0.8 # Placeholder confidence
                 if listen_for_command:
                      self.logger.debug(f"Calling command callback for: '{text}'")
-                     command_callback(text, confidence) # Pass 0.0 confidence for now
+                     command_callback(text, confidence) 
                 else:
                      # Check for wake word (case-insensitive)
                      self.logger.debug(f"Checking for wake word '{self.wake_word}' in '{text_lower}'...")
