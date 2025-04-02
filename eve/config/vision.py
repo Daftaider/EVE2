@@ -13,7 +13,7 @@ CAMERA_FLIP_VERTICAL = False
 # Processing settings
 VISION_PROCESSING_INTERVAL = 0.1  # seconds between processing frames
 VISION_ENABLED = True
-VISION_DEBUG = False
+VISION_DEBUG = True
 VISION_OVERLAY = True
 
 # Face detection settings
@@ -44,11 +44,11 @@ EMOTION_THRESHOLD = 0.5  # Minimum confidence for emotion detection
 EMOTION_CONFIDENCE_THRESHOLD = 0.5  # Add this line - alias for EMOTION_THRESHOLD
 
 # Object detection
-OBJECT_DETECTION_ENABLED = False
-OBJECT_DETECTION_MODEL = "yolo"
-OBJECT_DETECTION_CONFIDENCE = 0.5
-OBJECT_DETECTION_INTERVAL = 1.0  # Seconds
-OBJECT_CLASSES_FILE = "models/object_detection/coco.names"
+OBJECT_DETECTION_ENABLED = True  # Enable object detection
+OBJECT_DETECTION_MODEL = "yolov8n.pt"  # Use YOLOv8 nano model
+OBJECT_DETECTION_CONFIDENCE = 0.5  # Increase confidence threshold back to 0.5
+OBJECT_DETECTION_INTERVAL = 0.2  # Process more frequently for testing
+OBJECT_DETECTION_CLASSES = ["person", "cat", "dog", "bird", "car", "bicycle", "motorcycle", "bus", "truck"]  # Common classes to detect
 
 # Tracking settings
 TRACKING_ENABLED = False
@@ -90,6 +90,13 @@ class VisionConfig:
     SCALE_FACTOR = 1.1
     MIN_NEIGHBORS = 5
     
+    # Object detection settings
+    OBJECT_DETECTION_ENABLED = True
+    OBJECT_DETECTION_MODEL = "yolov8n.pt"
+    OBJECT_DETECTION_CONFIDENCE = 0.5
+    OBJECT_DETECTION_INTERVAL = 0.5
+    OBJECT_DETECTION_CLASSES = ["person", "cat", "dog", "bird", "car", "bicycle", "motorcycle", "bus", "truck"]
+    
     # Debug settings
     DEBUG = False
-    SHOW_DETECTION = False 
+    SHOW_DETECTION = True  # Show detection boxes by default 

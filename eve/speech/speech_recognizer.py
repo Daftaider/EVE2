@@ -18,7 +18,6 @@ from faster_whisper import WhisperModel
 import eve.config as config
 import random
 from eve.config.communication import TOPICS
-import speech_recognition as sr
 
 logger = logging.getLogger(__name__)
 
@@ -67,143 +66,115 @@ class RequestError(SpeechRecognitionError):
 
 class SpeechRecognizer:
     """
-    Speech recognition using WhisperModel.
-    
-    This class provides functionality for capturing audio and converting
-    it to text using the Whisper speech recognition model.
+    Speech recognition using faster-whisper.
+    Handles wake word detection (basic, text-based) and command recognition via callbacks.
     """
     
     def __init__(self, config):
         self.logger = logging.getLogger(__name__)
         self.config = config
         
-        # Get configuration settings with defaults
-        speech_config = getattr(config, 'SPEECH_RECOGNITION', {})
-        self.model_type = 'google'  # Force Google recognition for now
-        self.wake_word = speech_config.get('WAKE_WORD', 'eve').lower()
-        self.conversation_timeout = speech_config.get('CONVERSATION_TIMEOUT', 10.0)
-        self.language = speech_config.get('language', 'en-US')
+        # Wake word and language from config
+        self.wake_word = getattr(self.config, 'WAKE_WORD_PHRASE', 'eve').lower()
+        self.language = getattr(self.config, 'SPEECH_RECOGNITION_LANGUAGE', 'en') # Whisper uses language codes like 'en'
         
-        # Get audio settings
-        audio_config = getattr(config, 'AUDIO_CAPTURE', {})
-        self.sample_rate = audio_config.get('sample_rate', 16000)
-        self.channels = audio_config.get('channels', 1)
+        # Audio format parameters
+        self.sample_rate = getattr(self.config, 'AUDIO_SAMPLE_RATE', 16000)
+        # Whisper works internally with mono
+        self.channels = 1 # Force mono for Whisper processing?
+        self.sample_width = 2 # Bytes per sample (int16)
         
-        # Initialize state
-        self.is_listening = False
-        self.in_conversation = False
-        self.last_interaction = 0
-        self.conversation_thread = None
-        self.audio_queue = queue.Queue(maxsize=100)  # Limit queue size
+        # faster-whisper specific config
+        # Recommend starting small: tiny.en or base.en
+        self.model_size = getattr(self.config, 'WHISPER_MODEL_SIZE', 'tiny.en') 
+        self.device = getattr(self.config, 'WHISPER_DEVICE', 'cpu')
+        # Use int8 for faster CPU inference
+        self.compute_type = getattr(self.config, 'WHISPER_COMPUTE_TYPE', 'int8') 
         
-        # Initialize recognizer
+        self.model: Optional[WhisperModel] = None
         self._init_recognizer()
         
-        self.logger.info(f"Speech recognizer initialized with wake word: {self.wake_word}")
-        self.logger.info(f"Using model type: {self.model_type}")
+        self.logger.info(f"Speech recognizer initialized. Wake Word='{self.wake_word}', Lang='{self.language}', Model='{self.model_size}'")
+        self.logger.warning("Current wake word detection uses text check after STT and is not efficient or reliable.")
 
     def _init_recognizer(self):
-        """Initialize the speech recognizer"""
+        """Initialize the faster-whisper model."""
+        self.logger.info(f"Loading faster-whisper model: {self.model_size} (Device: {self.device}, Compute: {self.compute_type})")
         try:
-            self.recognizer = sr.Recognizer()
-            # Adjust recognition parameters
-            self.recognizer.energy_threshold = 300  # minimum audio energy to consider for recording
-            self.recognizer.dynamic_energy_threshold = True
-            self.recognizer.pause_threshold = 0.8  # seconds of non-speaking audio before a phrase is considered complete
-            self.recognizer.phrase_threshold = 0.3  # minimum seconds of speaking audio before we consider the speaking audio a phrase
-            self.recognizer.non_speaking_duration = 0.5  # seconds of non-speaking audio to keep on both sides of the recording
+            # Model is downloaded automatically by faster-whisper on first use
+            self.model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
+            self.logger.info(f"faster-whisper model '{self.model_size}' loaded successfully.")
+            # Perform a dummy inference to potentially speed up the first real one
+            # dummy_audio = np.zeros(self.sample_rate * 1, dtype=np.float32) # 1 second of silence
+            # _, _ = self.model.transcribe(dummy_audio, language=self.language)
+            # logger.info("Performed dummy whisper inference.")
             
         except Exception as e:
-            self.logger.error(f"Error initializing recognizer: {e}")
-            raise
+            self.logger.error(f"Error loading faster-whisper model '{self.model_size}': {e}", exc_info=True)
+            self.model = None
 
-    def process_audio(self, audio_data):
-        """Process audio data and check for wake word or conversation"""
+    def process_audio_chunk(
+        self,
+        audio_data: bytes,
+        listen_for_command: bool,
+        wake_word_callback: Callable[[], None],
+        command_callback: Callable[[str, float], None]
+    ):
+        """Process a chunk of audio data using faster-whisper."""
+        if not self.model:
+             self.logger.error("Whisper model not loaded. Cannot process audio.")
+             return
+        if not audio_data:
+            return
+             
         try:
-            # Convert audio data to AudioData object
-            audio = sr.AudioData(audio_data, self.sample_rate, self.channels)
+            # Convert int16 bytes back to float32 numpy array
+            # Ensure data length is multiple of sample width
+            if len(audio_data) % self.sample_width != 0:
+                 # Handle potentially incomplete chunk if necessary
+                 # For now, log warning and potentially skip/truncate
+                 self.logger.warning(f"Audio data length ({len(audio_data)}) not multiple of sample width ({self.sample_width}). Truncating.")
+                 audio_data = audio_data[:len(audio_data) - (len(audio_data) % self.sample_width)]
+                 
+            audio_int16 = np.frombuffer(audio_data, dtype=np.int16)
+            audio_float32 = audio_int16.astype(np.float32) / 32768.0
             
-            # Try to recognize the speech
-            try:
-                text = self.recognizer.recognize_google(audio, language=self.language).lower()
-                self.logger.debug(f"Recognized text: {text}")
-            except sr.UnknownValueError:
-                return None
-            except sr.RequestError as e:
-                self.logger.error(f"Could not request results from Google Speech Recognition service: {e}")
-                return None
+            # Transcribe using faster-whisper
+            # beam_size=1 can be faster but less accurate, beam_size=5 is default
+            # vad_filter=True can help filter silence (requires additional setup/libs)
+            self.logger.debug("Transcribing audio chunk with faster-whisper...")
+            segments, info = self.model.transcribe(audio_float32, language=self.language, beam_size=1)
             
-            # Check if we're in a conversation or heard the wake word
-            if self.in_conversation:
-                if time.time() - self.last_interaction > self.conversation_timeout:
-                    self.logger.info("Conversation timed out")
-                    self.in_conversation = False
-                else:
-                    self.last_interaction = time.time()
-                    return text
+            text = ""
+            confidence = 0.0 # Whisper doesn't provide a simple overall confidence easily
             
-            # Check for wake word
-            if self.wake_word in text:
-                self.logger.info("Wake word detected!")
-                self.in_conversation = True
-                self.last_interaction = time.time()
-                # Remove wake word from response
-                return text.replace(self.wake_word, '').strip()
-            
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"Error processing audio: {e}")
-            return None
-
-    def start_listening(self):
-        """Start the listening thread"""
-        if not self.is_listening:
-            self.is_listening = True
-            self.conversation_thread = threading.Thread(target=self._listen_loop)
-            self.conversation_thread.daemon = True
-            self.conversation_thread.start()
-            self.logger.info("Started listening for wake word and conversations")
-
-    def stop_listening(self):
-        """Stop the listening thread"""
-        self.is_listening = False
-        if self.conversation_thread:
-            self.conversation_thread.join(timeout=1.0)
-        self.in_conversation = False
-        self.logger.info("Stopped listening")
-
-    def _listen_loop(self):
-        """Main listening loop"""
-        while self.is_listening:
-            try:
-                # Get audio from queue if available
-                try:
-                    audio_data = self.audio_queue.get(timeout=0.1)
-                except queue.Empty:
-                    continue
-                
-                # Process the audio
-                text = self.process_audio(audio_data)
-                
+            # Concatenate text from segments
+            recognized_texts = [segment.text for segment in segments]
+            if recognized_texts:
+                 text = " ".join(recognized_texts).strip()
+                 self.logger.info(f"Whisper recognized: '{text}' (Lang: {info.language}, Prob: {info.language_probability:.2f})")
+            else:
+                 self.logger.debug("Whisper produced no text segments.")
+                 
+            # --- Process recognized text --- 
                 if text:
-                    self.logger.info(f"Recognized: {text}")
-                    # Here you would typically send the text to your processing pipeline
-                    
-            except Exception as e:
-                self.logger.error(f"Error in listening loop: {e}")
-                time.sleep(0.1)
-
-    def add_audio(self, audio_data):
-        """Add audio data to the processing queue"""
-        try:
-            if self.audio_queue.qsize() < 100:  # Prevent queue from growing too large
-                self.audio_queue.put(audio_data, block=False)
-        except queue.Full:
-            self.logger.warning("Audio queue full, dropping frame")
+                text_lower = text.lower()
+                if listen_for_command:
+                     self.logger.debug(f"Calling command callback for: '{text}'")
+                     command_callback(text, confidence) # Pass 0.0 confidence for now
+                else:
+                     # Check for wake word (case-insensitive)
+                     self.logger.debug(f"Checking for wake word '{self.wake_word}' in '{text_lower}'...")
+                     if self.wake_word in text_lower:
+                          self.logger.info(f"Wake word FOUND in text: '{text}'")
+                          wake_word_callback()
+                     else:
+                          self.logger.debug("Wake word NOT found in text.")
+                          
         except Exception as e:
-            self.logger.error(f"Error adding audio to queue: {e}")
+            self.logger.error(f"Unexpected error processing audio chunk with Whisper: {e}", exc_info=True)
 
+    # recognize_file can potentially remain if needed elsewhere
     def recognize_file(self, file_path: str) -> Tuple[str, float]:
         """
         Recognize speech from an audio file.
@@ -218,35 +189,30 @@ class SpeechRecognizer:
             logger.error(f"Audio file not found: {file_path}")
             return "", 0.0
         
-        if self.recognizer is None:
-            logger.error("Cannot recognize speech: Recognizer not initialized")
+        if self.model is None:
+            logger.error("Cannot recognize speech: Model not initialized")
             return "", 0.0
         
         try:
             # Transcribe the audio file
-            with sr.AudioFile(file_path) as source:
-                audio = self.recognizer.record(source)
-                text = self.recognizer.recognize_google(audio, language=self.language).lower()
+            with open(file_path, "rb") as f:
+                audio_data = f.read()
+                text, confidence = self.process_audio_chunk(audio_data, False, lambda: None, lambda t, c: None)
                 text = text.strip()
                 
                 logger.info(f"Recognized from file: '{text}'")
-                return text, 1.0
+                return text, confidence
             
-        except sr.UnknownValueError:
-            logger.debug("Speech not understood")
-            return "", 0.0
-        except sr.RequestError as e:
+        except Exception as e:
             logger.error(f"Speech recognition error: {e}")
             return "", 0.0
 
-    def _check_model_exists(self, model_type):
-        """Check if the specified model files exist"""
-        if model_type == "google":
-            # Google doesn't require local model files
-            return True
-        return False
-
+    # reset might be useful if recognizer state needs clearing
     def reset(self):
-        """Reset the recognizer state"""
-        if hasattr(self, 'recognizer'):
-            self.recognizer = sr.Recognizer()
+        """Reset the recognizer state (if applicable in the future)."""
+        self.logger.info("Resetting SpeechRecognizer state (currently no action).")
+        # Potentially re-initialize self.model if needed
+        pass
+
+    # Remove _check_model_exists as we are forcing Google for now
+    # def _check_model_exists(self, model_type):

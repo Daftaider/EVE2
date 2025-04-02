@@ -42,5 +42,16 @@
         ],
         "original": "cat",
         "corrected": "Person"
+    },
+    {
+        "timestamp": 1743365686.0909865,
+        "box": [
+            -7,
+            167,
+            644,
+            479
+        ],
+        "original": "sheep",
+        "corrected": "Person"
     }
 ]

@@ -9,6 +9,8 @@ import time
 import face_recognition
 import signal
 from eve.vision.camera_utils import CameraManager
+from eve.vision.object_detector import ObjectDetector
+from eve.config.vision import OBJECT_DETECTION_ENABLED, OBJECT_DETECTION_MODEL, OBJECT_DETECTION_CONFIDENCE
 
 class VisionDisplay:
     def __init__(self, config):
@@ -57,6 +59,18 @@ class VisionDisplay:
         self.learning_faces_count = 0
         self.temp_face_encodings = []
         
+        # Initialize object detector if enabled
+        self.object_detector = None
+        if OBJECT_DETECTION_ENABLED:
+            try:
+                self.object_detector = ObjectDetector(
+                    model_path=OBJECT_DETECTION_MODEL,
+                    confidence_threshold=OBJECT_DETECTION_CONFIDENCE
+                )
+                self.logger.info("Object detector initialized successfully")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize object detector: {e}")
+        
         # Set up signal handler
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -70,12 +84,21 @@ class VisionDisplay:
 
     def _capture_loop(self):
         """Camera capture loop"""
+        last_object_detection_time = 0
+        
         while self.running:
             try:
                 ret, frame = self.camera.read_frame()
                 if ret and frame is not None:
                     # Process frame for face detection
                     processed_frame = self.process_frame(frame)
+                    
+                    # Run object detection if enabled and interval has passed
+                    if (self.object_detector is not None and 
+                        time.time() - last_object_detection_time >= self.config.OBJECT_DETECTION_INTERVAL):
+                        detections = self.object_detector.detect(frame)
+                        processed_frame = self.object_detector.draw_detections(processed_frame, detections)
+                        last_object_detection_time = time.time()
                     
                     # Update display queue
                     if not self.frame_queue.full():
@@ -248,9 +271,9 @@ class VisionDisplay:
             os.environ['OPENCV_VIDEOIO_PRIORITY_GSTREAMER'] = '0'
             
             # Create a basic window
-            cv2.namedWindow(self.window_name, cv2.WINDOW_AUTOSIZE)
-            self.logger.info("Initialized fallback display mode")
-            return True
+            cv2.namedWindow('EVE Vision', cv2.WINDOW_NORMAL)
+            self.initialized = True
+            
         except Exception as e:
-            self.logger.error(f"Failed to initialize fallback display: {e}")
-            return False 
+            self.logger.error(f"Failed to initialize display: {e}")
+            raise 
