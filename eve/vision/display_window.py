@@ -17,7 +17,7 @@ from eve.vision.object_detector import ObjectDetector
 logger = logging.getLogger(__name__)
 
 class VisionDisplay:
-    \"\"\"Handles displaying the vision processing output in an OpenCV window.\"\"\"
+    """Handles displaying the vision processing output in an OpenCV window."""
 
     # Corrected __init__ signature and implementation
     def __init__(self, 
@@ -25,7 +25,7 @@ class VisionDisplay:
                  camera: Camera, 
                  face_detector: Optional[FaceDetector] = None, 
                  object_detector: Optional[ObjectDetector] = None):
-        \"\"\"
+        """
         Initialize the Vision Display.
 
         Args:
@@ -33,7 +33,7 @@ class VisionDisplay:
             camera: The initialized Camera instance.
             face_detector: Optional initialized FaceDetector instance.
             object_detector: Optional initialized ObjectDetector instance.
-        \"\"\"
+        """
         self.logger = logging.getLogger(__name__)
         self.config = config
         self.camera = camera

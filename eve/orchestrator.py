@@ -9,7 +9,7 @@ import signal
 import sys
 import threading
 import time
-from typing import Dict, List, Optional, Union, Any, Tuple
+from typing import Dict, List, Optional, Union, Any, Tuple, Callable
 import queue
 import importlib
 from types import SimpleNamespace
@@ -18,6 +18,7 @@ import urllib.request
 import os
 import json
 import sounddevice as sd
+from enum import Enum # Import Enum
 
 from eve import config
 from eve.utils import logging_utils
@@ -118,6 +119,32 @@ CLASSES_URL = "https://raw.githubusercontent.com/pjreddie/darknet/master/data/co
 # Path for storing corrections
 CORRECTIONS_DIR = Path(__file__).parent.parent / "assets" / "data"
 CORRECTIONS_PATH = CORRECTIONS_DIR / "object_corrections.json"
+
+# Define Emotion Enum based on config
+class Emotion(Enum):
+    NEUTRAL = "neutral"
+    HAPPY = "happy"
+    SAD = "sad"
+    ANGRY = "angry"
+    SURPRISED = "surprised"
+    CONFUSED = "confused"
+    DISGUSTED = "disgusted"
+    FEARFUL = "fearful"
+    # Add any other potential emotions used internally, like ATTENTIVE?
+    ATTENTIVE = "attentive" 
+    TALKING = "talking" # If needed for TTS state
+
+    @classmethod
+    def from_value(cls, value: Union[str, 'Emotion']) -> 'Emotion':
+        if isinstance(value, cls):
+            return value
+        try:
+            # Match case-insensitively
+            return cls[value.upper()]
+        except KeyError:
+            # Fallback to default if value doesn't match any enum member
+            logging.warning(f"Invalid emotion value '{value}'. Defaulting to NEUTRAL.")
+            return cls.NEUTRAL
 
 class EVEOrchestrator:
     """
@@ -431,16 +458,20 @@ class EVEOrchestrator:
         finally:
         logger.info("Audio processing loop stopped.")
 
-    def _handle_wake_word_detected(self):
-        """Callback function when the wake word is detected."""
+    def _handle_wake_word_detected(self, event: Event):
+        """Handles WAKE_WORD_DETECTED event."""
         with self._state_lock:
             if not self._is_listening:
-                logger.info("Wake word detected! Entering listening state.")
-            self._is_listening = True
-                self.tts.speak("Yes?") # Provide audible feedback
-                # TODO: Add a timer here to automatically exit listening state after N seconds of silence/no command?
+                self.logger.info("Wake word detected! Entering listening state.")
+                self._is_listening = True
+                self._last_interaction_time = time.time()
+                # Optional: Change emotion, provide audio feedback
+                self.set_emotion(Emotion.ATTENTIVE) # Use the defined Enum
+                if self.tts: self.tts.speak("Yes?")
+                # TODO: Add timer to exit listening state after timeout
             else:
-                 logger.debug("Wake word detected while already listening.")
+                 self.logger.debug("Wake word detected while already listening - resetting timer.")
+                 self._last_interaction_time = time.time() # Reset timeout
 
     def _handle_command_recognized(self, text: str, confidence: float):
         # Store last recognized text for debug display
@@ -626,72 +657,61 @@ class EVEOrchestrator:
                  self.camera.release()
             self.camera = None
 
-    def update(self, debug_menu_active: bool = False):
-        """Main update loop called periodically. Updates subsystems and display based on state."""
-        # Update internal menu state based on main app flag
-        self.debug_menu_active = debug_menu_active
-        
-        debug_frame = None
-        detections = [] 
-        try:
-            # Capture frame if in debug mode and camera is available
-            if debug_frame is None and self.camera:
-                try:
-                    if self.camera_backend == 'picamera2':
-                        debug_frame = self.camera.capture_array("main")
-                    elif self.camera_backend == 'opencv':
-                        ret, frame = self.camera.read()
-                        if ret:
-                            debug_frame = frame
-                        else:
-                            logger.warning("OpenCV: Failed to capture frame from camera.")
-                except Exception as cap_e:
-                     logger.error(f"Error capturing frame using {self.camera_backend}: {cap_e}", exc_info=True)
+    def update(self):
+        """
+        Main update method, called periodically.
+        Handles state updates, checks timeouts, updates display.
+        """
+        # --- State Checks / Timeouts ---
+        with self._state_lock:
+             if self._is_listening:
+                  # Check if listening state should time out
+                  timeout_duration = 10.0 # seconds
+                  if time.time() - self._last_interaction_time > timeout_duration:
+                       self.logger.info(f"Listening timed out after {timeout_duration}s of inactivity.")
+                       self._is_listening = False
+                       self.set_emotion(Emotion.NEUTRAL) # Use the defined Enum
+                       if self.tts: 
+                           try:
+                               self.tts.speak("Never mind.") # Optional feedback
+                           except Exception as tts_err:
+                               self.logger.warning(f"Error calling TTS during listening timeout: {tts_err}")
 
-                # --- Perform Object Detection (only if needed for video debug) --- 
-                if debug_frame is not None and self.object_detection_net and self.current_debug_view == 'VIDEO':
-                     debug_frame, detections = self._perform_object_detection(debug_frame, self.camera_rotation)
-                     self.last_detections = detections 
-                else:
-                     self.last_detections = [] 
-                # -----------------------------------
+        # --- Update Display Controller (Outside the state lock) ---
+        if self.lcd_controller and hasattr(self.lcd_controller, 'update'):
+             try:
+                  # Gather necessary state for the display
+                  emotion = self.get_current_emotion() # Get state safely
+                  is_listening = False # Get state safely
+                  with self._state_lock:
+                      is_listening = self._is_listening
+                  
+                  # Get debug frame if needed (this part seems complex and might need review later)
+                  debug_frame = None
+                  if self.debug_menu_active and self.current_debug_view == 'VIDEO':
+                       if self.camera: 
+                           ret, frame = self.camera.read() # Get latest frame
+                           if ret: debug_frame = frame
+                       # Get detections to draw on debug frame? Requires storing them.
 
-            # Get current emotion safely
-            current_emotion = self.get_current_emotion()
-            
-            # Update display, passing relevant state
-            if hasattr(self, 'lcd_controller'):
-                camera_info_for_ui = { 'backend': self.camera_backend, 'available_opencv': self.available_camera_indices, 'available_picam2': self.picamera2_cameras, 'selected_index': self.selected_camera_index }
-                self.lcd_controller.update(
-                    current_emotion,
-                    debug_menu_active=self.debug_menu_active,
-                    current_debug_view=self.current_debug_view, # Pass current view
-                    # debug_mode=... (deprecated)
-                    debug_frame=debug_frame if self.current_debug_view == 'VIDEO' else None, # Only pass frame if video view active
-                    detections=detections if self.current_debug_view == 'VIDEO' else [], # Only pass detections if video view active
-                    camera_info=camera_info_for_ui,
-                    camera_rotation=self.camera_rotation,
-                    is_correcting=self.is_correcting_detection,
-                    input_buffer=self.user_input_buffer,
-                    corrections=self.corrections_data,
-                    # Audio Debug Info
-                    audio_debug_listen_always=self.audio_debug_listen_always,
-                    last_recognized_text=self.last_recognized_text,
-                    available_audio_devices=self.available_audio_devices, # Pass devices
-                    selected_audio_device_index=self.selected_audio_device_index, # Pass selected index
-                    last_audio_rms=self.last_audio_rms,
-                    # Sensitivity for UI
-                    current_porcupine_sensitivity=self.current_porcupine_sensitivity 
-                )
-            
-            # Process any pending audio
-            if hasattr(self, 'audio_capture'):
-                self.audio_capture.update() # Audio update doesn't need debug mode (yet)
-                
-        except Exception as e:
-            logger.error(f"Error in update loop: {e}", exc_info=True)
-            # Avoid raising here to prevent crashing the main loop on camera/display errors
-            # raise
+                  display_state = {
+                       "emotion": emotion,
+                       "is_listening": is_listening, # Use safe value
+                       "debug_menu_active": self.debug_menu_active,
+                       "current_debug_view": self.current_debug_view,
+                       "debug_frame": debug_frame,
+                       # Add other necessary state...
+                  }
+                  # Call display update
+                  self.lcd_controller.update(**display_state) 
+             except Exception as e:
+                  self.logger.error(f"Error updating display controller: {e}", exc_info=True)
+
+        # --- Other periodic checks? ---
+        # Example: Check if subsystems are still running?
+        # if self.face_detector and not self.face_detector.is_running():
+        #     self.logger.warning("Face detector thread seems to have stopped unexpectedly.")
+        #     # Attempt restart? Post error event?
 
     def cleanup(self):
         """Stops threads and cleans up all subsystems."""
