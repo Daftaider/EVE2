@@ -5,6 +5,7 @@ import numpy as np
 import os
 import queue
 import threading # Added for thread safety
+import random # Added random import for mock camera
 from typing import Optional, Tuple, List
 from eve.config import SystemConfig # Import the main config object type
 

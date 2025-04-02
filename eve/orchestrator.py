@@ -287,25 +287,30 @@ class EVEOrchestrator:
 
     def _register_event_handlers(self) -> Dict[str, Callable]:
         """Maps event topics to handler methods within the orchestrator."""
+        # Use lowercase keys as defined in communication config
         handlers = {
             # --- Vision Events ---
-            TOPICS['FACE_DETECTED']: self._handle_face_detected,
-            TOPICS['FACE_RECOGNIZED']: self._handle_face_recognized,
-            TOPICS['FACE_LEARNED']: self._handle_face_learned,
-            TOPICS['FACE_LOST']: self._handle_face_lost,
-            TOPICS['EMOTION_DETECTED']: self._handle_emotion_detected,
-            TOPICS['OBJECT_DETECTED']: self._handle_object_detected, 
+            TOPICS.get('face_detected', 'face_detected'): self._handle_face_detected,
+            TOPICS.get('face_recognized', 'face_recognized'): self._handle_face_recognized,
+            TOPICS.get('face_learned', 'face_learned'): self._handle_face_learned,
+            TOPICS.get('face_lost', 'face_lost'): self._handle_face_lost,
+            TOPICS.get('emotion_detected', 'emotion_detected'): self._handle_emotion_detected,
+            TOPICS.get('object_detected', 'object_detected'): self._handle_object_detected, 
              # --- Speech Events ---
-            TOPICS['WAKE_WORD_DETECTED']: self._handle_wake_word_detected,
-            TOPICS['SPEECH_RECOGNIZED']: self._handle_speech_recognized,
-            TOPICS['TTS_START']: self._handle_tts_start,
-            TOPICS['TTS_DONE']: self._handle_tts_done,
+            # Assuming these keys exist in TOPICS dict
+            TOPICS.get('wake_word_detected', 'wake_word_detected'): self._handle_wake_word_detected,
+            TOPICS.get('speech_recognized', 'speech_recognized'): self._handle_speech_recognized,
+            TOPICS.get('tts_start', 'tts_start'): self._handle_tts_start, # Assuming these exist
+            TOPICS.get('tts_done', 'tts_done'): self._handle_tts_done, # Assuming these exist
             # --- System Events ---
-            TOPICS['SYSTEM_ERROR']: self._handle_system_error,
-            TOPICS['SYSTEM_LEARNING_STARTED']: self._handle_learning_started,
-            TOPICS['SYSTEM_LEARNING_CANCELLED']: self._handle_learning_cancelled,
+            # Assuming these keys exist in TOPICS dict
+            TOPICS.get('system_error', 'error'): self._handle_system_error, # Map to 'error' if system_error doesn't exist
+            TOPICS.get('system_learning_started', 'system_learning_started'): self._handle_learning_started,
+            TOPICS.get('system_learning_cancelled', 'system_learning_cancelled'): self._handle_learning_cancelled,
         }
-        self.logger.info(f"Registered {len(handlers)} event handlers.")
+        # Filter out entries where the key lookup might have failed (though .get avoids KeyError)
+        # handlers = {k: v for k, v in handlers.items() if k is not None} # Optional: Stricter check
+        self.logger.info(f"Registered {len(handlers)} event handlers using TOPICS keys: {list(handlers.keys())}")
         return handlers
 
     def _configure_subsystem_callbacks(self):
@@ -319,8 +324,11 @@ class EVEOrchestrator:
               self.speech_recognizer.command_callback = self._internal_command_callback
               self.logger.debug("Set wake_word/command callbacks for SpeechRecognizer.")
         if self.tts and hasattr(self.tts, 'set_callbacks'): 
-              on_start_cb = lambda text: self.post_event(TOPICS['TTS_START'], {'text': text})
-              on_done_cb = lambda text: self.post_event(TOPICS['TTS_DONE'], {'text': text})
+              # Use .get with defaults for safety
+              tts_start_topic = TOPICS.get('tts_start', 'tts_start')
+              tts_done_topic = TOPICS.get('tts_done', 'tts_done')
+              on_start_cb = lambda text: self.post_event(tts_start_topic, {'text': text})
+              on_done_cb = lambda text: self.post_event(tts_done_topic, {'text': text})
               try: 
                   self.tts.set_callbacks(on_start=on_start_cb, on_done=on_done_cb)
                   self.logger.debug("Set TTS start/done callbacks using keywords.")
@@ -333,10 +341,14 @@ class EVEOrchestrator:
 
     def _internal_wake_word_callback(self):
         """Internal callback from SpeechRecognizer for wake word."""
-        self.post_event(TOPICS['WAKE_WORD_DETECTED'])
+        # Use .get with defaults for safety
+        wake_topic = TOPICS.get('wake_word_detected', 'wake_word_detected')
+        self.post_event(wake_topic)
 
     def _internal_command_callback(self, text: str, confidence: float):
         """Internal callback from SpeechRecognizer for command."""
+        # Use .get with defaults for safety
+        rec_topic = TOPICS.get('speech_recognized', 'speech_recognized')
         self.post_event(TOPICS['SPEECH_RECOGNIZED'], {'text': text, 'confidence': confidence})
 
     def _process_event_queue_loop(self) -> None:
