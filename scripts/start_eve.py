@@ -14,6 +14,17 @@ import pygame
 from pathlib import Path
 from eve.orchestrator import EVEOrchestrator
 from eve.config.display import Emotion
+from eve.config import SystemConfig, load_config
+from eve.utils import logging_utils
+from eve.vision.camera import Camera
+from eve.vision.face_detector import FaceDetector
+from eve.vision.emotion_analyzer import EmotionAnalyzer
+from eve.vision.object_detector import ObjectDetector
+from eve.vision.display_window import VisionDisplay
+from eve.speech.audio_capture import AudioCapture
+from eve.speech.speech_recognizer import SpeechRecognizer
+from eve.speech.llm_processor import LLMProcessor
+from eve.speech.text_to_speech import TextToSpeech
 
 # Add the project root to the Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -27,6 +38,45 @@ os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logging.basicConfig(level=logging.INFO, format=log_format)
 logger = logging.getLogger(__name__)
+
+# Adjust path to import from eve module
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PARENT_DIR = os.path.dirname(SCRIPT_DIR)
+sys.path.append(PARENT_DIR)
+
+# Import necessary components from the refactored config and subsystems
+from eve.config import SystemConfig, load_config # Use new config loading
+from eve.utils import logging_utils
+from eve.vision.camera import Camera
+from eve.vision.face_detector import FaceDetector
+from eve.vision.emotion_analyzer import EmotionAnalyzer
+from eve.vision.object_detector import ObjectDetector
+from eve.vision.display_window import VisionDisplay # Or LCDController if preferred
+from eve.speech.audio_capture import AudioCapture
+from eve.speech.speech_recognizer import SpeechRecognizer
+from eve.speech.llm_processor import LLMProcessor
+from eve.speech.text_to_speech import TextToSpeech
+# Import the Orchestrator itself
+from eve.orchestrator import EVEOrchestrator
+
+# Setup basic logging early
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# --- Copied setup_logging function from orchestrator.py --- 
+# TODO: Consider moving this to eve.utils.logging_utils if not already there
+def setup_logging(log_config: Any): # Use specific LoggingConfig type hint if available
+    """Configures logging based on the config object."""
+    level = getattr(log_config, 'level', 'INFO').upper()
+    log_file = getattr(log_config, 'file', None)
+    max_bytes = getattr(log_config, 'max_size_mb', 10) * 1024 * 1024
+    backup_count = getattr(log_config, 'backup_count', 3)
+    log_to_console = getattr(log_config, 'console', True)
+    log_format = getattr(log_config, 'format', "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    date_format = getattr(log_config, 'date_format', "%Y-%m-%d %H:%M:%S")
+    # Assuming logging_utils exists and has setup_logging
+    logging_utils.setup_logging(level, log_file, max_bytes, backup_count, log_to_console, log_format, date_format)
+# --------------------------------------------------------
 
 class EVEApplication:
     """Manages the main application lifecycle."""
@@ -51,41 +101,123 @@ class EVEApplication:
     def run(self):
         """Initializes orchestrator and runs the main application loop."""
         
-        # --- Configuration ---
-        # Consider loading from a file (e.g., YAML, JSON) instead of hardcoding
-        config = {
-            'display': {
-                'WINDOW_SIZE': (800, 480),
-                'FPS': 30,
-                'DEFAULT_EMOTION': Emotion.NEUTRAL,
-                'DEFAULT_BACKGROUND_COLOR': 'black',
-                'DEFAULT_EYE_COLOR': (0, 255, 255)
-            },
-            'speech': {
-                'SPEECH_RECOGNITION_MODEL': 'google',
-                'TTS_ENGINE': 'pyttsx3',
-                'WAKE_WORD_PHRASE': 'hey eve',
-                'AUDIO_SAMPLE_RATE': 16000,
-                'NOISE_THRESHOLD': 0.05
-            }
-        }
-
+        logger.info("--- Starting EVE Main Application ---")
         try:
-            # Initialize orchestrator within a context manager
-            with EVEOrchestrator(config) as self.orchestrator:
-                logger.info("EVE system started. Press Ctrl+C to exit.")
-                self._main_loop()
+            # 1. Load Configuration
+            config = load_config() 
+
+            # 2. Setup Logging (using loaded config)
+            setup_logging(config.logging)
+            logger.info("Logging configured.")
+            logger.info(f"Loaded configuration: {config!r}")
+
+            # 3. Initialize Subsystems (Copied/Adapted from orchestrator.main)
+            camera = None
+            face_detector = None
+            object_detector = None
+            emotion_analyzer = None
+            audio_capture = None
+            speech_recognizer = None
+            llm_processor = None
+            tts = None
+            display_controller = None
+
+            if config.hardware.camera_enabled:
+                try:
+                    camera = Camera(config)
+                    if not camera.is_open():
+                         logger.warning("Camera failed to initialize or is disabled.")
+                         camera = None
+                except Exception as e:
+                    logger.error(f"Failed to initialize Camera: {e}", exc_info=True)
+                    camera = None
+            else:
+                logger.info("Camera subsystem disabled by config.")
+
+            if camera:
+                if config.vision.face_detection_enabled:
+                     try: face_detector = FaceDetector(config, camera)
+                     except Exception as e: logger.error(f"Failed FaceDetector init: {e}", exc_info=True)
+                else: logger.info("Face Detector disabled.")
+                
+                if config.vision.object_detection_enabled:
+                     try: object_detector = ObjectDetector(config=config)
+                     except Exception as e: logger.error(f"Failed ObjectDetector init: {e}", exc_info=True)
+                else: logger.info("Object Detector disabled.")
+
+                if config.vision.emotion_detection_enabled:
+                     try: emotion_analyzer = EmotionAnalyzer(config)
+                     except Exception as e: logger.error(f"Failed EmotionAnalyzer init: {e}", exc_info=True)
+                else: logger.info("Emotion Analyzer disabled.")
+
+            if config.hardware.display_enabled:
+                try:
+                    # Use VisionDisplay or LCDController based on preference/availability
+                    display_controller = VisionDisplay(config, camera, face_detector, object_detector)
+                except Exception as e: 
+                    logger.error(f"Failed VisionDisplay init: {e}", exc_info=True)
+                    display_controller = None
+            else: logger.info("Display disabled by config.")
+
+            if config.hardware.audio_input_enabled:
+                try: audio_capture = AudioCapture(config.speech)
+                except Exception as e: logger.error(f"Failed AudioCapture init: {e}", exc_info=True)
+            else: logger.info("Audio Input disabled.")
+
+            if audio_capture and config.speech.recognition_enabled:
+                try: speech_recognizer = SpeechRecognizer(config.speech)
+                except Exception as e: logger.error(f"Failed SpeechRecognizer init: {e}", exc_info=True)
+            elif not audio_capture: logger.warning("Cannot init Recognizer: AudioCapture failed/disabled.")
+            else: logger.info("Speech Recognition disabled.")
+
+            if config.speech.tts_enabled:
+                try: tts = TextToSpeech(config.speech)
+                except Exception as e: logger.error(f"Failed TextToSpeech init: {e}", exc_info=True)
+            else: logger.info("TextToSpeech disabled.")
+
+            if config.speech.llm_enabled:
+                try: llm_processor = LLMProcessor(config.speech)
+                except Exception as e: logger.error(f"Failed LLMProcessor init: {e}", exc_info=True)
+            else: logger.info("LLM Processor disabled.")
+
+            # 4. Create and Run Orchestrator (Pass initialized subsystems)
+            logger.info("Creating EVE Orchestrator...")
+            # Use context manager for automatic stop/cleanup
+            with EVEOrchestrator(
+                config=config,
+                camera=camera, # Pass initialized camera
+                face_detector=face_detector,
+                object_detector=object_detector,
+                emotion_analyzer=emotion_analyzer,
+                audio_capture=audio_capture,
+                speech_recognizer=speech_recognizer,
+                llm_processor=llm_processor,
+                tts=tts,
+                display_controller=display_controller
+            ) as self.orchestrator:
+                
+                logger.info("Starting Orchestrator...")
+                self.orchestrator.start() # Start the orchestrator's internal threads/loops
+
+                # 5. Keep the main thread alive (e.g., wait for events or sleep)
+                logger.info("EVE application running. Press Ctrl+C to exit.")
+                while self.orchestrator._running: # Check orchestrator state
+                    # Main thread can optionally do some work or just sleep
+                    # orchestrator.update() might be called internally by its own thread
+                    # or called here if it doesn't manage its own loop fully.
+                    # Let's assume orchestrator manages its core loops.
+                    time.sleep(1) 
 
         except Exception as e:
             logger.critical(f"Fatal error during EVE initialization or runtime: {e}", exc_info=True)
-            # Cleanup might have already been called by __exit__, but call again just in case.
-            self.cleanup() 
-            sys.exit(1) # Exit with error code
-
+            # Ensure cleanup if orchestrator was partially created
+            if self.orchestrator and hasattr(self.orchestrator, 'stop'):
+                 try: self.orchestrator.stop()
+                 except Exception as stop_err:
+                      logger.error(f"Error during final cleanup attempt: {stop_err}")
+            sys.exit(1)
         finally:
-            # Ensure cleanup happens even if context manager fails somehow
-            self.cleanup() 
-            logger.info("EVE application has shut down.")
+            logger.info("--- EVE Main Application Shutdown Complete ---")
 
     def _main_loop(self):
         """The main application loop handling events and updates."""
