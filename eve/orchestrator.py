@@ -418,24 +418,31 @@ class EVEOrchestrator:
     def _audio_processing_loop(self):
         """Dedicated thread for processing audio input."""
         logger.info("Audio loop running...")
+        # Start of the main try block for the loop
         try:
             while self._running:
+                # Check if audio_capture exists
                 if hasattr(self, 'audio_capture'):
                      self.last_audio_rms = self.audio_capture.get_last_rms()
-                     
+
+                     # Check for new audio data
                      if self.audio_capture.has_new_audio():
                         audio_data = self.audio_capture.get_audio_data()
-                        
+
+                        # Double check running flag before processing
                         if not self._running:
                             logger.debug("_running flag is False, breaking audio loop before processing chunk.")
                             break
-                        
+
+                        # Process audio data if available
                         if audio_data:
                             if hasattr(self, 'speech_recognizer') and self.speech_recognizer:
+                                # Determine if we should listen for commands
                                 listen_for_command = self._is_listening
                                 if self.current_debug_view == 'AUDIO' and self.audio_debug_listen_always:
                                      listen_for_command = True
-                                     
+
+                                # Process the chunk
                                 self.speech_recognizer.process_audio_chunk(
                                      audio_data,
                                      listen_for_command=listen_for_command,
@@ -444,19 +451,36 @@ class EVEOrchestrator:
                                 )
                             else:
                                  logger.warning("SpeechRecognizer not available, skipping audio processing.")
+                        # No audio data, check running flag and sleep briefly
+                        else:
+                             if not self._running:
+                                  break
+                             time.sleep(0.01) # Sleep if no audio data came back
+                     # No new audio available, check running flag and sleep briefly
                      else:
                           if not self._running:
                                break
-                          time.sleep(0.01)
+                          time.sleep(0.01) # Sleep if audio capture has no new data
+                # Audio capture subsystem not available
                 else:
+                    # Check running flag and sleep longer
                     if not self._running:
                          break
-                    time.sleep(0.05)
-            except Exception as e:
-                logger.error(f"Error in audio processing loop: {e}", exc_info=True)
-            time.sleep(1.0) # Add a sleep to prevent tight loop on error
+                    time.sleep(0.05) # Sleep if audio_capture doesn't exist
+
+        # CORRECTED INDENTATION LEVEL FOR except
+        # Must align with the 'try' block above
+        except Exception as e:
+            # Indented logger call inside except
+            logger.error(f"Error in audio processing loop: {e}", exc_info=True)
+            # Indented sleep inside except
+            time.sleep(1.0)
+
+        # CORRECTED INDENTATION LEVEL FOR finally
+        # Must align with the 'try' block above
         finally:
-        logger.info("Audio processing loop stopped.")
+            # Indented logger call inside finally
+            logger.info("Audio processing loop stopped.")
 
     def _handle_wake_word_detected(self, event: Event):
         """Handles WAKE_WORD_DETECTED event."""
