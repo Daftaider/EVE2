@@ -1,279 +1,203 @@
 import cv2
 import numpy as np
 import threading
-import queue
 import logging
 import os
 from pathlib import Path
 import time
-import face_recognition
 import signal
-from eve.vision.camera_utils import CameraManager
+from typing import List, Dict, Optional, Tuple, Any
+
+# Import EVE components and config
+from eve.config import SystemConfig
+from eve.vision.camera import Camera
+from eve.vision.face_detector import FaceDetector
 from eve.vision.object_detector import ObjectDetector
-from eve.config.vision import OBJECT_DETECTION_ENABLED, OBJECT_DETECTION_MODEL, OBJECT_DETECTION_CONFIDENCE
+
+logger = logging.getLogger(__name__)
 
 class VisionDisplay:
-    def __init__(self, config):
+    \"\"\"Handles displaying the vision processing output in an OpenCV window.\"\"\"
+
+    # Corrected __init__ signature and implementation
+    def __init__(self, 
+                 config: SystemConfig, 
+                 camera: Camera, 
+                 face_detector: Optional[FaceDetector] = None, 
+                 object_detector: Optional[ObjectDetector] = None):
+        \"\"\"
+        Initialize the Vision Display.
+
+        Args:
+            config: The main SystemConfig object.
+            camera: The initialized Camera instance.
+            face_detector: Optional initialized FaceDetector instance.
+            object_detector: Optional initialized ObjectDetector instance.
+        \"\"\"
         self.logger = logging.getLogger(__name__)
         self.config = config
-        
-        # Force X11 backend and disable Qt
-        os.environ['QT_QPA_PLATFORM'] = 'xcb'
-        os.environ['OPENCV_VIDEOIO_PRIORITY_MSMF'] = '0'
-        os.environ['OPENCV_VIDEOIO_PRIORITY_INTEL_MFX'] = '0'
-        os.environ['OPENCV_VIDEOIO_PRIORITY_GSTREAMER'] = '1'  # Prefer GStreamer
-        
-        # Initialize flags
-        self.running = False
-        self.initialized = False
-        
-        # Initialize queues
-        self.frame_queue = queue.Queue(maxsize=10)
-        self.display_thread = None
-        self.capture_thread = None
-        
-        # Get vision settings
-        vision_config = getattr(config.VISION, 'VISION', {})
-        self.frame_width = getattr(vision_config, 'FRAME_WIDTH', 640)
-        self.frame_height = getattr(vision_config, 'FRAME_HEIGHT', 480)
-        self.fps = getattr(vision_config, 'FPS', 30)
-        
-        # Initialize camera
-        self.camera = CameraManager(
-            width=self.frame_width,
-            height=self.frame_height,
-            fps=self.fps
-        )
-        self.camera.initialize()
-        
-        # Face recognition settings
-        default_faces_dir = os.path.join('data', 'known_faces')
-        self.known_faces_dir = Path(getattr(vision_config, 'KNOWN_FACES_DIR', default_faces_dir))
-        self.known_faces_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Recognition state
-        self.known_face_encodings = []
-        self.known_face_names = []
-        self.learning_face = False
-        self.current_learning_name = None
-        self.learning_faces_count = 0
-        self.temp_face_encodings = []
-        
-        # Initialize object detector if enabled
-        self.object_detector = None
-        if OBJECT_DETECTION_ENABLED:
-            try:
-                self.object_detector = ObjectDetector(
-                    model_path=OBJECT_DETECTION_MODEL,
-                    confidence_threshold=OBJECT_DETECTION_CONFIDENCE
-                )
-                self.logger.info("Object detector initialized successfully")
-            except Exception as e:
-                self.logger.error(f"Failed to initialize object detector: {e}")
-        
-        # Set up signal handler
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-        
-        self.logger.info("Vision display initialized")
+        self.camera = camera
+        self.face_detector = face_detector
+        self.object_detector = object_detector
 
-    def _signal_handler(self, signum, frame):
-        """Handle shutdown signals"""
-        self.logger.info(f"Received signal {signum}, shutting down...")
-        self.stop()
+        self.logger.info("VisionDisplay: OpenCV backend hints can be set via env vars (commented out).")
 
-    def _capture_loop(self):
-        """Camera capture loop"""
-        last_object_detection_time = 0
+        self.window_name = "EVE Vision"
+        self.display_resolution = config.hardware.display_resolution
+        self.fullscreen = config.hardware.fullscreen
         
-        while self.running:
-            try:
-                ret, frame = self.camera.read_frame()
-                if ret and frame is not None:
-                    # Process frame for face detection
-                    processed_frame = self.process_frame(frame)
-                    
-                    # Run object detection if enabled and interval has passed
-                    if (self.object_detector is not None and 
-                        time.time() - last_object_detection_time >= self.config.OBJECT_DETECTION_INTERVAL):
-                        detections = self.object_detector.detect(frame)
-                        processed_frame = self.object_detector.draw_detections(processed_frame, detections)
-                        last_object_detection_time = time.time()
-                    
-                    # Update display queue
-                    if not self.frame_queue.full():
-                        self.frame_queue.put(processed_frame, timeout=0.1)
-                
-                time.sleep(1.0 / self.fps)  # Control frame rate
-                
-            except Exception as e:
-                self.logger.error(f"Error in capture loop: {e}")
-                time.sleep(0.1)
+        self._running = False
+        self._display_thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+        self._last_frame: Optional[np.ndarray] = None
+        self._frame_lock = threading.Lock()
+
+        self.logger.info("Vision Display initialized.")
 
     def start(self):
-        """Start the vision system"""
-        if self.running:
+        """Start the display thread."""
+        if self._running:
+            self.logger.warning("Vision display thread already running.")
             return
-        
-        self.running = True
-        
-        # Start capture thread
-        self.capture_thread = threading.Thread(target=self._capture_loop)
-        self.capture_thread.daemon = True
-        self.capture_thread.start()
-        
-        # Start display thread
-        self.display_thread = threading.Thread(target=self._display_loop)
-        self.display_thread.daemon = True
-        self.display_thread.start()
-        
-        self.logger.info("Vision system started")
+            
+        if not self.camera or not self.camera.is_open():
+             self.logger.error("Cannot start VisionDisplay: Camera is not available or not open.")
+             return
+             
+        self.logger.info("Starting vision display thread...")
+        self._stop_event.clear()
+        self._running = True
+        self._display_thread = threading.Thread(target=self._display_loop, daemon=True)
+        self._display_thread.start()
+        self.logger.info("Vision display thread started.")
 
     def stop(self):
-        """Stop the vision system"""
-        self.running = False
-        
-        # Stop threads
-        if self.capture_thread:
-            self.capture_thread.join(timeout=1.0)
-        if self.display_thread:
-            self.display_thread.join(timeout=1.0)
-        
-        # Release camera
-        if self.camera:
-            self.camera.release()
-        
-        # Close windows
-        cv2.destroyAllWindows()
-        
-        self.logger.info("Vision system stopped")
+        """Stop the display thread and close windows."""
+        self.logger.info("Stopping vision display...")
+        self._stop_event.set()
+        if self._display_thread:
+            self._display_thread.join(timeout=2.0)
+            if self._display_thread.is_alive():
+                 self.logger.warning("Display thread did not stop gracefully.")
+            self._display_thread = None
+            
+        try:
+            cv2.destroyWindow(self.window_name)
+            for _ in range(3): cv2.waitKey(1) 
+        except Exception as e:
+             self.logger.warning(f"Error destroying OpenCV window '{self.window_name}': {e}")
+             
+        self._running = False
+        self.logger.info("Vision display stopped.")
 
     def _display_loop(self):
-        """Display loop"""
+        """Display loop: Reads frames, gets detection results, shows window."""
+        self.logger.info("Display loop started.")
         window_created = False
-        
-        while self.running:
+
+        while not self._stop_event.is_set():
+            start_time = time.perf_counter()
             try:
+                ret, frame = self.camera.read()
+                if not ret or frame is None:
+                    time.sleep(0.05)
+                    continue 
+                    
+                display_frame = frame.copy() 
+                
+                # --- Get Detection Results & Draw --- 
+                # Face Detection/Recognition Drawing
+                if self.face_detector and self.face_detector.debug_mode:
+                     debug_face_frame = self.face_detector.get_debug_frame()
+                     if debug_face_frame is not None:
+                          if debug_face_frame.shape == display_frame.shape:
+                              display_frame = debug_face_frame
+                          else:
+                              pass # Needs drawing logic if shapes differ
+                          
+                # Object Detection Drawing
+                if self.object_detector and self.config.vision.object_detection_enabled:
+                    try:
+                         # Runs synchronously in display loop - consider async pattern
+                         detections = self.object_detector.detect(display_frame) 
+                         display_frame = self.object_detector.draw_detections(display_frame, detections)
+                    except Exception as od_err:
+                         self.logger.error(f"Error during object detection/drawing: {od_err}", exc_info=False) 
+
+                # --- Display Frame --- 
                 if not window_created:
-                    cv2.namedWindow('EVE Vision', cv2.WINDOW_NORMAL)
+                    cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+                    if self.fullscreen:
+                         cv2.setWindowProperty(self.window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+                    cv2.resizeWindow(self.window_name, self.display_resolution[0], self.display_resolution[1])
                     window_created = True
                 
-                try:
-                    frame = self.frame_queue.get(timeout=0.1)
-                except queue.Empty:
-                    continue
+                # Resize frame to fit display window if needed 
+                h, w = display_frame.shape[:2]
+                disp_w, disp_h = self.display_resolution
+                canvas = display_frame # Default to original frame
+                if w != disp_w or h != disp_h:
+                     scale = min(disp_w / w, disp_h / h)
+                     resized_frame = cv2.resize(display_frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+                     # Create black canvas and place resized frame in center
+                     canvas = np.zeros((disp_h, disp_w, 3), dtype=np.uint8)
+                     rh, rw = resized_frame.shape[:2]
+                     x_offset = (disp_w - rw) // 2
+                     y_offset = (disp_h - rh) // 2
+                     canvas[y_offset:y_offset+rh, x_offset:x_offset+rw] = resized_frame
+                                      
+                cv2.imshow(self.window_name, canvas)
                 
-                if frame is not None:
-                    cv2.imshow('EVE Vision', frame)
-                    
-                    # Process key events
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == 27:  # ESC
-                        self.running = False
-                        break
+                # --- Store Last Frame --- 
+                with self._frame_lock:
+                     self._last_frame = display_frame 
+                     
+                # --- Handle Window Events --- 
+                key = cv2.waitKey(1) & 0xFF
+                if key == 27:  # ESC
+                    self.logger.info("ESC key pressed, stopping display.")
+                    self._stop_event.set()
+                    break 
+                
+                try:
+                    if window_created and cv2.getWindowProperty(self.window_name, cv2.WND_PROP_VISIBLE) < 1:
+                         self.logger.info(f"Window '{self.window_name}' closed, stopping display.")
+                         self._stop_event.set()
+                         break
+                except cv2.error: 
+                     self.logger.info(f"Window '{self.window_name}' likely closed abruptly.")
+                     self._stop_event.set()
+                     break
+                     
+                # --- Loop Rate Control --- 
+                loop_duration = time.perf_counter() - start_time
+                target_interval = 1.0 / self.config.hardware.display_fps
+                sleep_time = target_interval - loop_duration
+                if sleep_time > 0:
+                     time.sleep(sleep_time)
                     
             except Exception as e:
-                self.logger.error(f"Error in display loop: {e}")
-                time.sleep(0.1)
-
-    def process_frame(self, frame):
-        """Process frame for face detection and recognition"""
-        try:
-            # Create a copy of the frame
-            display_frame = frame.copy()
-            
-            # Convert to RGB for face_recognition library
-            rgb_frame = frame[:, :, ::-1]
-            
-            # Detect faces
-            face_locations = face_recognition.face_locations(rgb_frame)
-            face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
-            
-            # Process each face
-            for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-                # Draw box around face
-                cv2.rectangle(display_frame, (left, top), (right, bottom), (0, 255, 0), 2)
+                self.logger.error(f"Error in display loop: {e}", exc_info=True)
+                time.sleep(0.5) 
                 
-                # Try to recognize face
-                name = "Unknown"
-                if len(self.known_face_encodings) > 0:
-                    matches = face_recognition.compare_faces(
-                        self.known_face_encodings, 
-                        face_encoding
-                    )
-                    if True in matches:
-                        name = self.known_face_names[matches.index(True)]
-                
-                # Draw name
-                cv2.putText(display_frame, name, (left, top - 10),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
-            
-            return display_frame
-            
-        except Exception as e:
-            self.logger.error(f"Error processing frame: {e}")
-            return frame
+        self.logger.info("Display loop finished.")
+        if window_created:
+             try:
+                  cv2.destroyWindow(self.window_name)
+                  for _ in range(3): cv2.waitKey(1)
+             except Exception:
+                  pass 
+        self._running = False
+        
+    def get_last_displayed_frame(self) -> Optional[np.ndarray]:
+        """Returns a copy of the last frame shown in the display window (thread-safe)."""
+        with self._frame_lock:
+            if self._last_frame is not None:
+                return self._last_frame.copy()
+            return None
 
-    def load_known_faces(self):
-        """Load known face encodings"""
-        try:
-            for person_dir in self.known_faces_dir.iterdir():
-                if person_dir.is_dir():
-                    encodings_file = person_dir / "encodings.npy"
-                    if encodings_file.exists():
-                        encodings = np.load(str(encodings_file))
-                        self.known_face_encodings.extend(encodings)
-                        self.known_face_names.extend([person_dir.name] * len(encodings))
-            
-            self.logger.info(f"Loaded {len(self.known_face_encodings)} face encodings")
-            
-        except Exception as e:
-            self.logger.error(f"Error loading known faces: {e}")
+    # Removed process_frame, load_known_faces, start_learning_face, _save_learned_face, _init_display_fallback
 
-    def start_learning_face(self, name):
-        """Start the face learning process"""
-        self.learning_face = True
-        self.current_learning_name = name
-        self.learning_faces_count = 0
-        self.temp_face_encodings = []
-        self.logger.info(f"Started learning face for: {name}")
+    # Removed _signal_handler, assuming main app/orchestrator handles signals.
 
-    def _save_learned_face(self):
-        """Save the learned face encodings"""
-        try:
-            person_dir = self.known_faces_dir / self.current_learning_name
-            person_dir.mkdir(exist_ok=True)
-            
-            # Save encodings
-            encodings_file = person_dir / "encodings.npy"
-            np.save(str(encodings_file), np.array(self.temp_face_encodings))
-            
-            # Update known faces
-            self.known_face_encodings.extend(self.temp_face_encodings)
-            self.known_face_names.extend([self.current_learning_name] * len(self.temp_face_encodings))
-            
-            self.learning_face = False
-            self.current_learning_name = None
-            self.temp_face_encodings = []
-            self.learning_faces_count = 0
-            
-            self.logger.info(f"Saved face encodings for: {self.current_learning_name}")
-            
-        except Exception as e:
-            self.logger.error(f"Error saving learned face: {e}")
-
-    def _init_display_fallback(self):
-        """Initialize fallback display mode using basic window creation"""
-        try:
-            # Disable all GUI backends
-            os.environ['OPENCV_VIDEOIO_PRIORITY_MSMF'] = '0'
-            os.environ['OPENCV_VIDEOIO_PRIORITY_INTEL_MFX'] = '0'
-            os.environ['OPENCV_VIDEOIO_PRIORITY_GSTREAMER'] = '0'
-            
-            # Create a basic window
-            cv2.namedWindow('EVE Vision', cv2.WINDOW_NORMAL)
-            self.initialized = True
-            
-        except Exception as e:
-            self.logger.error(f"Failed to initialize display: {e}")
-            raise 
+    # Removed _capture_loop - Frame capture is handled by Camera, detection by detectors.

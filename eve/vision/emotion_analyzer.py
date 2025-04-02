@@ -1,7 +1,7 @@
 """
 Emotion analysis module.
 
-This module analyzes facial expressions to detect emotions.
+Uses the FER (Face Emotion Recognition) library to detect emotions.
 """
 import logging
 from typing import Dict, Optional, List, Union, Any
@@ -9,296 +9,251 @@ from typing import Dict, Optional, List, Union, Any
 import cv2
 import numpy as np
 
-from eve import config
-from eve.config.display import Emotion
+# Use the main config object
+from eve.config import SystemConfig, VisionConfig 
+# Removed unused Emotion import from display config
 
-import sys
-import types
-import random
-import importlib
+# Removed dependency mocking setup and sys imports
 
-# Set up logger first, before using it
 logger = logging.getLogger(__name__)
 
-# Define the setup_dependency_mocks function that was missing
-def setup_dependency_mocks():
-    """Set up mock implementations for dependencies like moviepy and tensorflow"""
-    # Create moviepy mock
-    if 'moviepy' not in sys.modules:
-        moviepy_module = types.ModuleType('moviepy')
-        sys.modules['moviepy'] = moviepy_module
-    
-        editor_module = types.ModuleType('moviepy.editor')
-        sys.modules['moviepy.editor'] = editor_module
-        sys.modules['moviepy'].editor = editor_module
-        
-        class MockVideoFileClip:
-            def __init__(self, *args, **kwargs):
-                pass
-            def close(self):
-                pass
-            def subclip(self, *args, **kwargs):
-                return self
-            def resize(self, *args, **kwargs):
-                return self
-        
-        editor_module.VideoFileClip = MockVideoFileClip
-        editor_module.__all__ = ['VideoFileClip']
-    
-    # Create tensorflow mock
-    if 'tensorflow' not in sys.modules:
-        tf_module = types.ModuleType('tensorflow')
-        keras_module = types.ModuleType('tensorflow.keras')
-        models_module = types.ModuleType('tensorflow.keras.models')
-        
-        # Create class with make_predict_function method
-        class MockModel:
-            def __init__(self):
-                self.input_shape = (1, 48, 48, 1)  # Add input_shape attribute
-                self.output_shape = (1, 7)
-            
-            def make_predict_function(self):
-                pass
-                
-            def predict(self, *args, **kwargs):
-                return np.zeros((1, 7))  # Return empty emotion predictions
-        
-        def load_model(*args, **kwargs):
-            return MockModel()
-        
-        models_module.load_model = load_model
-        sys.modules['tensorflow'] = tf_module
-        sys.modules['tensorflow.keras'] = keras_module
-        sys.modules['tensorflow.keras.models'] = models_module
-        tf_module.keras = keras_module
-        keras_module.models = models_module
-    
-    logger.info("Mock dependencies set up successfully")
-
-# Call the function to set up mocks
-setup_dependency_mocks()
-
-# Now try to import FER
+# Attempt to import FER - let it fail naturally if deps aren't met
+FER_AVAILABLE = False
+FER = None
 try:
     from fer import FER
-    logger.info("Successfully imported FER")
-    USE_FER = True
+    # Optionally check specific dependencies like tensorflow if FER doesn't fail gracefully
+    # import tensorflow
+    FER_AVAILABLE = True
+    logger.info("Successfully imported FER library.")
+except ImportError as e:
+    logger.warning(f"Could not import FER library: {e}. Emotion analysis via FER disabled.")
 except Exception as e:
-    logger.error(f"Error importing FER: {e}")
-    USE_FER = False
+    logger.error(f"Error during FER library import (check dependencies like TensorFlow/Keras?): {e}", exc_info=True)
+
 
 class EmotionAnalyzer:
     """
-    Facial expression analysis class.
-    
-    This class uses the FER library to detect emotions from facial images.
+    Analyzes facial images to detect emotions using the FER library (if available).
+    Provides a fallback mechanism if FER is unavailable.
     """
     
-    def __init__(self, confidence_threshold=0.5, detection_interval=1.0, model_type=None):
+    def __init__(self, config: SystemConfig):
         """
-        Initialize emotion analyzer
+        Initialize emotion analyzer.
         
         Args:
-            confidence_threshold (float): Minimum confidence threshold for emotions (0.0-1.0)
-            detection_interval (float): Time between emotion detections in seconds
-            model_type (str): Type of emotion detection model to use
+            config: The main SystemConfig object.
         """
-        self.confidence_threshold = confidence_threshold
-        self.detection_interval = detection_interval
-        self.model_type = model_type
-        self.emotions = ["neutral", "happy", "sad", "surprise", "angry"]
-        self.detector = None
+        self.logger = logging.getLogger(__name__)
+        self.config = config.vision # Use the vision sub-config
+        self.display_config = config.display # Needed for mapping
         
-        logger.info(f"Initializing EmotionAnalyzer with confidence threshold: {confidence_threshold}")
+        self.confidence_threshold = self.config.emotion_confidence_threshold
+        self.configured_emotions = self.config.emotions # List of emotions system uses/maps to
+        self.default_display_emotion = self.display_config.default_emotion
         
-        try:
-            self.detector = FER()
-            logger.info("Successfully initialized FER detector")
-        except Exception as e:
-            logger.error(f"Failed to initialize FER detector: {e}")
-            logger.info("Using fallback emotion detection")
-            self.detector = None
-    
-    def detect_emotions(self, frame):
-        """Detect emotions in the given frame"""
-        if self.detector is not None:
+        self.detector: Optional[FER] = None
+        self.fer_initialized: bool = False
+        
+        if not self.config.emotion_enabled:
+            self.logger.info("Emotion analysis disabled in configuration.")
+            return # Don't initialize detector if disabled
+            
+        logger.info(f"Initializing EmotionAnalyzer (FER Available: {FER_AVAILABLE}). Confidence threshold: {self.confidence_threshold}")
+        
+        if FER_AVAILABLE and FER is not None:
             try:
-                return self.detector.detect_emotions(frame)
+                # Initialize FER. mtcnn=True might be more accurate but adds dependency.
+                # Default uses OpenCV Haar cascade for face detection within FER.
+                self.detector = FER(mtcnn=False) 
+                self.fer_initialized = True
+                logger.info("Successfully initialized FER detector.")
             except Exception as e:
-                logger.error(f"Error using FER: {e}")
-                return self._fallback_detection(frame)
+                self.logger.error(f"Failed to initialize FER detector instance: {e}", exc_info=True)
+                self.detector = None # Ensure detector is None on failure
         else:
-            return self._fallback_detection(frame)
-    
-    def _fallback_detection(self, frame):
-        """Simple fallback implementation that returns basic emotion data"""
-        import random
-        height, width = frame.shape[:2]
-        
-        face_box = [width//4, height//4, width//2, height//2]
-        emotion_dict = {emotion: random.random() for emotion in self.emotions}
-        # Normalize probabilities
-        total = sum(emotion_dict.values())
-        emotion_dict = {k: v/total for k, v in emotion_dict.items()}
-        
-        return [{'box': face_box, 'emotions': emotion_dict}]
-    
+             self.logger.warning("FER library not available or failed import. Using fallback emotion detection.")
+
     def analyze(self, face_image: np.ndarray) -> Optional[str]:
         """
-        Analyze the emotion in a face image.
+        Analyze the primary emotion in a single pre-cropped face image.
         
         Args:
-            face_image: A cropped image of a face (numpy array)
+            face_image: A cropped image of a face (numpy array, BGR format).
             
         Returns:
-            The most probable emotion as a string, or None if no emotion is detected
-            with sufficient confidence
+            The most probable emotion string (from configured list) if confidence threshold is met,
+            otherwise None.
         """
-        if self.detector is None:
-            logger.warning("Emotion analyzer not initialized")
-            return None
-        
+        if not self.config.emotion_enabled:
+            return None # Disabled
+            
         if face_image is None or face_image.size == 0:
-            logger.warning("Empty face image provided")
+            # self.logger.debug("Empty face image provided to analyze.")
             return None
-        
-        try:
-            # Ensure the image is in the correct format (BGR for OpenCV)
-            if len(face_image.shape) != 3 or face_image.shape[2] != 3:
-                logger.warning("Invalid face image format")
-                return None
-            
-            # Resize image if too small for the model
-            min_size = 48  # Minimum size expected by most emotion models
-            height, width = face_image.shape[:2]
-            if height < min_size or width < min_size:
-                scale = max(min_size / height, min_size / width)
-                face_image = cv2.resize(
-                    face_image, 
-                    (int(width * scale), int(height * scale)),
-                    interpolation=cv2.INTER_CUBIC
-                )
-            
-            # Detect emotions in the face image
-            emotions = self.detect_emotions(face_image)
-            
-            # Check if any faces were detected
-            if not emotions or len(emotions) == 0:
-                logger.debug("No faces detected in the image")
-                return None
-            
-            # Get the emotions for the first (and likely only) face
-            emotion_scores = emotions[0]["emotions"]
-            
-            # Find the emotion with the highest score
-            max_emotion = max(emotion_scores.items(), key=lambda x: x[1])
-            emotion, score = max_emotion
-            
-            # Check if the confidence exceeds the threshold
-            if score < self.confidence_threshold:
-                logger.debug(f"Emotion confidence ({score:.2f}) below threshold ({self.confidence_threshold})")
-                return None
-            
-            logger.debug(f"Detected emotion: {emotion} with confidence: {score:.2f}")
-            
-            # Map the FER emotion to our configured emotions
-            return self._map_emotion(emotion)
-            
-        except Exception as e:
-            logger.error(f"Error analyzing emotion: {e}")
-            return None
-    
-    def _map_emotion(self, fer_emotion: str) -> str:
+
+        # Use FER if available and initialized
+        if self.detector and self.fer_initialized:
+            try:
+                # FER expects BGR format by default when using OpenCV cascade
+                # Verify input format
+                if len(face_image.shape) != 3 or face_image.shape[2] != 3:
+                    self.logger.warning(f"Invalid face image format for FER: shape={face_image.shape}")
+                    return None
+                
+                # Resize image if too small for the internal model
+                # FER models typically need at least 48x48
+                min_size = 48 
+                height, width = face_image.shape[:2]
+                if height < min_size or width < min_size:
+                    scale = max(min_size / height, min_size / width)
+                    face_image_resized = cv2.resize(
+                        face_image, 
+                        (int(width * scale), int(height * scale)),
+                        interpolation=cv2.INTER_CUBIC
+                    )
+                else:
+                     face_image_resized = face_image
+                
+                # --- Call FER for emotion detection --- 
+                # result is a list of dictionaries, one per face found in the image.
+                # Since we pass a cropped face, we expect a list with zero or one elements.
+                result = self.detector.detect_emotions(face_image_resized)
+                # ----------------------------------------
+                
+                if not result: # No face detected by FER's internal detector
+                    # self.logger.debug("FER did not detect a face in the provided image.")
+                    return None
+                
+                # Get the primary (likely only) face's emotion scores
+                emotion_scores = result[0].get("emotions")
+                if not emotion_scores:
+                     self.logger.warning("FER result missing 'emotions' dictionary.")
+                     return None
+
+                # Find the highest scoring emotion from FER's output
+                if not emotion_scores:
+                     return None # Handle case where FER returns empty scores
+                fer_emotion = max(emotion_scores, key=emotion_scores.get)
+                fer_score = emotion_scores[fer_emotion]
+                
+                # Check confidence threshold
+                if fer_score < self.confidence_threshold:
+                    # self.logger.debug(f"Emotion '{fer_emotion}' confidence ({fer_score:.2f}) below threshold ({self.confidence_threshold})")
+                    return None
+                
+                # Map FER emotion to configured system emotion
+                mapped_emotion = self._map_emotion(fer_emotion)
+                self.logger.debug(f"Analyzed emotion: '{mapped_emotion}' (from FER: '{fer_emotion}' @ {fer_score:.2f})")
+                return mapped_emotion
+                
+            except Exception as e:
+                self.logger.error(f"Error during FER emotion analysis: {e}", exc_info=True)
+                # Fallback or return None on error?
+                # return self._fallback_analyze(face_image) # Optional fallback
+                return None 
+        else:
+            # Use fallback if FER not available/initialized
+            return self._fallback_analyze(face_image)
+
+    def get_emotion_confidences(self, face_image: np.ndarray) -> Dict[str, float]:
         """
-        Map the FER emotion to one of our configured emotions.
+        Get confidence scores for all configured emotions for a single face image.
         
         Args:
-            fer_emotion: The emotion detected by FER
+            face_image: A cropped image of a face (numpy array, BGR format).
             
         Returns:
-            The mapped emotion from our configuration
+            Dictionary mapping configured emotion names to confidence scores (0.0-1.0).
+            Returns empty dict if analysis fails or is disabled.
         """
-        # Define mapping from FER emotions to our configured emotions
+        if not self.config.emotion_enabled:
+            return {}
+            
+        if face_image is None or face_image.size == 0:
+            return {}
+
+        # Use FER if available and initialized
+        if self.detector and self.fer_initialized:
+            try:
+                # Similar preprocessing as in analyze()
+                if len(face_image.shape) != 3 or face_image.shape[2] != 3: return {}
+                min_size = 48 
+                height, width = face_image.shape[:2]
+                if height < min_size or width < min_size:
+                    scale = max(min_size / height, min_size / width)
+                    face_image_resized = cv2.resize(face_image, (int(width * scale), int(height * scale)), interpolation=cv2.INTER_CUBIC)
+                else:
+                     face_image_resized = face_image
+                
+                result = self.detector.detect_emotions(face_image_resized)
+                
+                if not result: return {}
+                
+                fer_emotion_scores = result[0].get("emotions")
+                if not fer_emotion_scores: return {}
+
+                # Map FER scores to our configured emotions
+                mapped_scores: Dict[str, float] = {emo: 0.0 for emo in self.configured_emotions}
+                for fer_emotion, fer_score in fer_emotion_scores.items():
+                    mapped_emotion = self._map_emotion(fer_emotion)
+                    if mapped_emotion in mapped_scores:
+                        # If multiple FER emotions map to the same configured one (e.g., disgust -> confused?),
+                        # take the max score for that target emotion.
+                        mapped_scores[mapped_emotion] = max(mapped_scores[mapped_emotion], fer_score)
+                
+                return mapped_scores
+                
+            except Exception as e:
+                self.logger.error(f"Error getting FER emotion confidences: {e}", exc_info=True)
+                return {} # Return empty on error
+        else:
+            # Use fallback if FER not available
+            return self._fallback_confidences(face_image)
+            
+    def _map_emotion(self, fer_emotion: str) -> str:
+        """Maps an emotion name from FER library to configured emotion names."""
+        # Mapping from FER default output keys
         emotion_mapping = {
             "angry": "angry",
-            "disgust": "disgusted",
-            "fear": "fearful",
+            "disgust": "disgusted", # Map disgust if needed
+            "fear": "fearful",     # Map fear if needed
             "happy": "happy",
             "sad": "sad",
             "surprise": "surprised",
             "neutral": "neutral"
         }
         
-        # Get the mapped emotion or default to neutral
-        mapped_emotion = emotion_mapping.get(fer_emotion.lower(), "neutral")
+        mapped = emotion_mapping.get(fer_emotion.lower(), "neutral")
         
-        # Ensure the mapped emotion is in our configured emotions list
-        if mapped_emotion not in config.display.EMOTIONS:
-            logger.warning(f"Mapped emotion '{mapped_emotion}' not in configured emotions")
-            mapped_emotion = config.display.DEFAULT_EMOTION
-        
-        return mapped_emotion
-    
-    def get_emotion_confidence(self, face_image: np.ndarray) -> Dict[str, float]:
-        """
-        Get confidence scores for all emotions.
-        
-        Args:
-            face_image: A cropped image of a face (numpy array)
+        # Ensure the result is one of the emotions the system actually uses/displays
+        if mapped not in self.configured_emotions:
+            self.logger.debug(f"Mapped emotion '{mapped}' from FER '{fer_emotion}' is not in configured list: {self.configured_emotions}. Defaulting.")
+            # Fallback to the configured default display emotion
+            return self.default_display_emotion 
             
-        Returns:
-            Dictionary mapping emotion names to confidence scores
-        """
-        if self.detector is None:
-            logger.warning("Emotion analyzer not initialized")
-            return {}
-        
-        try:
-            # Detect emotions in the face image
-            emotions = self.detect_emotions(face_image)
-            
-            # Check if any faces were detected
-            if not emotions or len(emotions) == 0:
-                logger.debug("No faces detected in the image")
-                return {}
-            
-            # Get the emotions for the first (and likely only) face
-            emotion_scores = emotions[0]["emotions"]
-            
-            # Map the emotions to our configured emotions
-            mapped_scores = {}
-            for emotion, score in emotion_scores.items():
-                mapped_emotion = self._map_emotion(emotion)
-                # If multiple FER emotions map to the same configured emotion,
-                # take the maximum score
-                mapped_scores[mapped_emotion] = max(
-                    mapped_scores.get(mapped_emotion, 0.0),
-                    score
-                )
-            
-            return mapped_scores
-            
-        except Exception as e:
-            logger.error(f"Error getting emotion confidence: {e}")
-            return {}
+        return mapped
 
-    def analyze_frame(self, frame) -> Optional[Emotion]:
-        """
-        Analyze a frame and return the detected emotion.
-        In mock mode, just return the current emotion.
-        """
-        # Mock implementation - in real implementation this would analyze the frame
-        return self._current_emotion
+    def _fallback_analyze(self, face_image: np.ndarray) -> Optional[str]:
+        """Fallback: Returns a random configured emotion (low confidence simulation)."""
+        self.logger.debug("Using fallback emotion analysis.")
+        # Simulate low confidence by only sometimes returning an emotion
+        if random.random() < 0.3: # 30% chance of returning *any* emotion
+             return random.choice(self.configured_emotions)
+        else:
+             return None # Simulate confidence below threshold
 
-    def get_current_emotion(self) -> Emotion:
-        """Get the current emotion state."""
-        return self._current_emotion
+    def _fallback_confidences(self, face_image: np.ndarray) -> Dict[str, float]:
+         """Fallback: Returns roughly normalized random scores for configured emotions."""
+         self.logger.debug("Using fallback emotion confidences.")
+         scores = {emo: random.random() for emo in self.configured_emotions}
+         total = sum(scores.values())
+         if total > 0:
+              normalized_scores = {emo: score / total for emo, score in scores.items()}
+         else:
+              normalized_scores = {emo: 1.0 / len(scores) for emo in self.configured_emotions}
+         return normalized_scores
 
-    def set_emotion(self, emotion: Emotion) -> None:
-        """Set the current emotion state."""
-        if not isinstance(emotion, Emotion):
-            raise ValueError(f"Expected Emotion enum, got {type(emotion)}")
-        self._current_emotion = emotion
-
-if 'eve.communication' in sys.modules:
-    importlib.reload(sys.modules['eve.communication']) 
+# Removed unused/mock methods: analyze_frame, get_current_emotion, set_emotion
+# Removed importlib.reload call at the end 
