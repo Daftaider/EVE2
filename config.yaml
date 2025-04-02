@@ -1,93 +1,192 @@
-# EVE2 System Configuration
+# Default Configuration for EVE2
 
-# Hardware settings
+# Top-level settings
+project_name: EVE2
+version: 2.0.0
+debug: False # Overarching debug flag, set True for more verbose logging globally
+
+# --- Hardware Configuration ---
 hardware:
-  # Camera settings
-  camera_enabled: true
-  camera_index: 0
-  camera_resolution: [640, 480]
-  camera_fps: 15
-  
-  # Display settings
-  display_enabled: true
-  display_resolution: [800, 480]
-  display_fps: 30
-  fullscreen: false
-  
-  # Audio settings
-  audio_input_enabled: true
-  audio_output_enabled: true
-  audio_input_device: null  # null uses default device
-  audio_output_device: null  # null uses default device
-  audio_sample_rate: 16000
-  
-  # Network settings (for distributed mode)
-  master_ip: "127.0.0.1"
-  master_port: 5000
+  display_enabled: True
+  camera_enabled: True
+  audio_input_enabled: True
+  audio_output_enabled: True
+  gpio_enabled: True # Set False if not using GPIO
 
-# Vision module settings
-vision:
-  # Face detection settings
-  detection_model: "hog"  # 'hog' (faster) or 'cnn' (more accurate)
-  recognition_enabled: true
-  recognition_tolerance: 0.6
-  known_faces_dir: "data/known_faces"
-  
-  # Emotion detection settings
-  emotion_enabled: true
-  emotion_confidence_threshold: 0.4
-  emotions:
-    - "neutral"
-    - "happy"
-    - "sad"
-    - "angry"
-    - "surprised"
-    - "confused"
+  # Display Specific
+  display_resolution: [800, 480] # Width, Height
+  fullscreen: False
+  display_type: lcd # Options: lcd, oled, hdmi, none
+  display_rotation: 0 # Options: 0, 90, 180, 270
 
-# Display module settings
-display:
-  assets_dir: "assets/emotions"
-  default_emotion: "neutral"
-  background_color: [0, 0, 0]  # RGB
-  eye_color: [0, 191, 255]  # RGB (DeepSkyBlue)
-  blink_interval_min_sec: 2.0
-  blink_interval_max_sec: 8.0
-  blink_duration_sec: 0.2
-  emotion_transition_time_ms: 500
+  # Camera Specific
+  camera_type: picamera # Options: picamera, opencv
+  camera_index: 0 # Used if camera_type is opencv
+  camera_rotation: 0 # Options: 0, 90, 180, 270
+  camera_resolution: [640, 480] # Width, Height
+  camera_framerate: 30
 
-# Speech module settings
-speech:
-  # Speech recognition settings
-  recognition_model: "models/whisper-small.en.gguf"
-  recognition_threshold: 0.5
-  language: "en"
-  
-  # LLM settings
-  llm_model: "models/tinyllama-1.1b-chat-v1.0.Q5_K_M.gguf"
-  llm_context_length: 2048
-  llm_max_tokens: 256
-  llm_temperature: 0.7
-  
-  # Text-to-speech settings
-  tts_model: "models/tts-piper-en"
-  tts_voice: "en_US/lessac_medium"
-  tts_speaking_rate: 1.0
+  # Audio Specific
+  audio_input_device: default # Name or index (use 'default' or specific name like 'USB PnP Audio Device')
+  audio_output_device: default # Name or index
+  audio_volume: 80 # percentage (0-100)
 
-# Communication module settings
-communication:
-  queue_max_size: 1000
-  distributed: false
-  role: "standalone"  # standalone, master, vision, speech, display
-  api_host: "0.0.0.0"
-  api_port: 5000
-  connection_timeout_sec: 5
+  # Power Management (Optional)
+  enable_power_management: False # Set True if using power management features
+  low_power_mode: False
+  battery_monitor_enabled: False
 
-# Logging settings
+# --- Logging Configuration ---
 logging:
-  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-  file: "logs/eve.log"
-  max_size_mb: 10
-  backup_count: 3
-  console: true
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  date_format: "%Y-%m-%d %H:%M:%S" 
+  level: INFO # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  date_format: '%Y-%m-%d %H:%M:%S'
+  console: True # Log to console
+  file: logs/eve.log # Path relative to project root, set null to disable file logging
+  max_size_mb: 10 # Max size in MB before rotation
+  backup_count: 3 # Number of backup files to keep
+  debug: False # Specific debug flag for logging module itself
+
+# --- Vision Configuration ---
+vision:
+  enabled: True
+  debug: True # Enable debug overlays and logging for vision components
+  overlay: True # Draw detection boxes etc. on the display stream
+  processing_interval_sec: 0.1 # How often to run general vision processing
+
+  # Face Detection
+  face_detection_enabled: True
+  face_detection_interval_sec: 0.5 # How often to run face detection
+  face_detection_model: haarcascade # Options: haarcascade, dnn, ssd, mtcnn (ensure models exist)
+  face_detection_confidence: 0.5 # Min confidence for detection
+  face_detection_min_size: [30, 30] # Min face size in pixels
+
+  # Face Recognition
+  face_recognition_enabled: False # Set True to enable face recognition
+  face_recognition_model: facenet # Ensure model is installed/available
+  face_recognition_tolerance: 0.6 # Lower = stricter matching
+  known_faces_dir: data/known_faces # Directory for known face encodings/images
+  face_recognition_interval_sec: 1.0 # How often to attempt recognition
+
+  # Emotion Detection
+  emotion_detection_enabled: True
+  emotion_detection_model: fer # Ensure model is available
+  emotion_detection_interval_sec: 1.0 # How often to run emotion detection
+  emotion_confidence_threshold: 0.5 # Min confidence for detected emotion
+
+  # Object Detection
+  object_detection_enabled: True
+  object_detection_model: yolov8n.pt # Ensure model file exists in models_dir
+  object_detection_confidence: 0.5 # Min confidence for detected objects
+  object_detection_interval_sec: 0.2 # How often to run object detection
+  object_detection_classes: [person, cat, dog, bird, car, bicycle, motorcycle, bus, truck] # Filter specific classes
+
+# --- Speech Configuration ---
+speech:
+  enabled: True
+  debug: False # Enable debug logging for speech components
+
+  # Audio Capture
+  audio_device_index: null # Use null for default, or specify index (int)
+  sample_rate: 16000
+  channels: 1
+  chunk_size: 1024
+  energy_threshold: 300 # Threshold for detecting speech vs silence/noise
+  noise_reduction_enabled: True # Enable basic noise reduction
+  vad_enabled: True # Enable Voice Activity Detection
+  vad_mode: 3 # VAD aggressiveness (0=least, 3=most)
+
+  # Speech Recognition
+  recognition_enabled: True
+  recognition_model: google # Options: google, vosk, whisper, deepspeech
+  recognition_language: en-US
+  recognition_timeout_sec: 5.0 # Max time to wait for speech after wake word
+  # Model Paths (only needed if using non-cloud models)
+  vosk_model_path: models/vosk/vosk-model-small-en-us
+  whisper_model_name: tiny # Options: tiny, base, small, medium, large
+  deepspeech_model_path: models/deepspeech/deepspeech-0.9.3-models.pbmm
+  deepspeech_scorer_path: models/deepspeech/deepspeech-0.9.3-models.scorer
+
+  # Wake Word
+  wake_word_enabled: True
+  wake_word_phrase: 'hey eve' # The phrase to listen for
+  wake_word_sensitivity: 0.7 # Sensitivity (0.0 to 1.0)
+  wake_word_model: porcupine # Options: porcupine, snowboy, custom
+  wake_word_model_path: null # Path to porcupine .ppn file if using custom word
+
+  # Text-to-Speech (TTS)
+  tts_enabled: True
+  tts_engine: pyttsx3 # Options: pyttsx3, espeak, google, coqui (ensure installed)
+  tts_voice: null # Engine-specific voice name/ID (null uses engine default)
+  tts_rate: 1.0 # Speed multiplier (1.0 = normal)
+  tts_pitch: 1.0 # Pitch multiplier (1.0 = normal)
+  tts_volume: 1.0 # Volume multiplier (0.0 to 1.0)
+  # Model Paths (only needed for specific engines like Coqui)
+  coqui_model_path: null
+
+  # LLM Processing (Optional)
+  llm_enabled: False # Set True to enable LLM processing
+  llm_model_type: simple # Options: simple, openai, etc.
+  llm_model_path: models/llm/simple_model.json # Path for simple JSON-based model
+  llm_api_key: null # API key if using cloud service like OpenAI
+  llm_max_tokens: 100 # Max response length
+  llm_temperature: 0.7 # Response creativity (0.0 to 1.0)
+  llm_model_name: text-davinci-003 # Model name for cloud services
+  llm_system_prompt: You are EVE, an intelligent assistant.
+  llm_context_length: 512 # Context window size for LLM
+
+# --- System Configuration (Internal) ---
+system:
+  mode: normal # Options: normal, debug, demo, test
+  debug_mode: False # Specific debug flag for system module
+  main_loop_interval_sec: 0.1 # Target interval for orchestrator loop
+  worker_threads: 4 # Number of general-purpose worker threads
+  enable_resource_monitoring: True # Monitor CPU/memory usage
+  resource_check_interval_sec: 60 # How often to check resources
+  # File paths (relative to project root)
+  data_dir: data/
+  cache_dir: cache/
+  log_dir: logs/
+  models_dir: models/
+  # Update/Maintenance
+  auto_update_enabled: False
+  backup_enabled: False # Set True to enable periodic backups
+  # Performance
+  performance_logging: False # Log performance metrics
+  optimize_for_raspberry_pi: True # Apply Pi-specific optimizations if any
+  # Security
+  secure_mode: False # Enable stricter security measures if needed
+
+# --- Communication Configuration ---
+communication:
+  # API Server (for external control/interaction)
+  api_enabled: False # Set True to enable the Flask API server
+  api_host: 0.0.0.0
+  api_port: 5000
+  api_debug: False # Run Flask in debug mode
+  api_token_required: False # Require a token for API access
+  api_token: eve2_default_token # The token to use if required
+
+  # WebSocket Server (for real-time updates to clients)
+  websocket_enabled: False # Set True to enable the WebSocket server
+  websocket_port: 5001
+  websocket_host: 0.0.0.0
+  websocket_path: /ws
+
+# --- Display Configuration (Visual Appearance) ---
+display: # Corresponds to DisplayConfig dataclass
+  WINDOW_SIZE: [800, 480]
+  FPS: 30
+  FULLSCREEN: False
+  DEFAULT_EMOTION: neutral # Initial emotion
+  ASSET_DIR: assets/emotions # Path to emotion images
+  TRANSITION_SPEED: 0.5 # Speed of emotion transitions
+  BACKGROUND_COLOR: [0, 0, 0] # RGB for background
+  TEXT_COLOR: [255, 255, 255] # RGB for text overlays
+  EYE_COLOR: [0, 191, 255] # RGB for default eye color
+  BLINK_INTERVAL_SEC: 3.0 # Average time between blinks
+  ENABLE_BLINKING: True
+  ENABLE_EMOTIONS: True # Enable emotion display changes
+  EMOTION_TRANSITION_TIME_MS: 500 # Duration of emotion transition animation
+  FONT_NAME: Arial # Font for text overlays
+  FONT_SIZE: 24 # Size of font 

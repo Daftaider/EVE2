@@ -1371,16 +1371,178 @@ def create_orchestrator():
         logging.getLogger(__name__).error(f"Error creating orchestrator: {e}")
         raise
 
+def setup_logging(log_config: Any): # Use LoggingConfig type hint if possible
+    """Configures logging based on the config object."""
+    # Adjusted to use attributes from LoggingConfig dataclass
+    level = getattr(log_config, 'level', 'INFO').upper()
+    log_file = getattr(log_config, 'file', None)
+    max_bytes = getattr(log_config, 'max_size_mb', 10) * 1024 * 1024
+    backup_count = getattr(log_config, 'backup_count', 3)
+    log_to_console = getattr(log_config, 'console', True)
+    log_format = getattr(log_config, 'format', "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    date_format = getattr(log_config, 'date_format', "%Y-%m-%d %H:%M:%S")
+
+    logging_utils.setup_logging(level, log_file, max_bytes, backup_count, log_to_console, log_format, date_format)
+
+def main():
+    """Main function to initialize and run the EVE Orchestrator."""
+
+    # 1. Load Configuration using the new load_config function
+    config = load_config() # Load from default config.yaml path
+
+    # 2. Setup Logging (using the loaded config.logging section)
+    # Pass the logging section of the SystemConfig object
+    setup_logging(config.logging) 
+    logger.info("--- EVE System Starting ---")
+    # Use repr for potentially cleaner logging of the dataclass structure
+    logger.info(f"Loaded configuration: {config!r}") 
+
+    # 3. Initialize Subsystems (using loaded config sections)
+    #    Use try/except blocks for non-critical subsystems
+    camera = None
+    face_detector = None
+    object_detector = None
+    emotion_analyzer = None
+    audio_capture = None
+    speech_recognizer = None
+    llm_processor = None
+    tts = None
+    display_controller = None
+
+    # Initialize Camera (needs hardware and vision config sections?)
+    if config.hardware.camera_enabled:
+        try:
+            # Assuming Camera now takes the SystemConfig object directly
+            camera = Camera(config)
+            if not camera.is_open():
+                 logger.warning("Camera failed to initialize or is disabled. Vision features may be limited.")
+                 camera = None # Ensure camera is None if not opened
+        except Exception as e:
+            logger.error(f"Failed to initialize Camera: {e}", exc_info=True)
+            camera = None # Ensure camera is None on error
+    else:
+        logger.info("Camera subsystem disabled by config.")
+
+    # Initialize Vision Subsystems only if camera is available
+    if camera: 
+        if config.vision.face_detection_enabled:
+             try:
+                  # FaceDetector likely needs the main SystemConfig
+                  face_detector = FaceDetector(config, camera) # Pass full config and camera instance
+             except Exception as e: logger.error(f"Failed FaceDetector init: {e}", exc_info=True)
+        else:
+             logger.info("Face Detector disabled by config.")
+
+        if config.vision.object_detection_enabled:
+             try:
+                  # ObjectDetector likely needs the main SystemConfig
+                  object_detector = ObjectDetector(config=config) # Pass full config
+             except Exception as e: logger.error(f"Failed ObjectDetector init: {e}", exc_info=True)
+        else:
+            logger.info("Object Detector disabled by config.")
+
+        if config.vision.emotion_detection_enabled:
+             try:
+                  # EmotionAnalyzer likely needs the main SystemConfig
+                  emotion_analyzer = EmotionAnalyzer(config)
+             except Exception as e: logger.error(f"Failed EmotionAnalyzer init: {e}", exc_info=True)
+        else:
+            logger.info("Emotion Analyzer disabled by config.")
+
+    # Initialize VisionDisplay if display is enabled
+    if config.hardware.display_enabled:
+        try:
+            # VisionDisplay needs the full config and initialized components
+            display_controller = VisionDisplay(config, camera, face_detector, object_detector)
+        except Exception as e: 
+            logger.error(f"Failed VisionDisplay init: {e}", exc_info=True)
+            display_controller = None # Ensure None on error
+    else:
+         logger.info("VisionDisplay disabled by config.")
+
+    # Initialize Speech Subsystems
+    if config.hardware.audio_input_enabled:
+        try:
+            # AudioCapture likely needs the speech config section
+            audio_capture = AudioCapture(config.speech) 
+        except Exception as e: logger.error(f"Failed AudioCapture init: {e}", exc_info=True)
+    else:
+        logger.info("Audio Input disabled by config.")
+
+    # Dependent speech components
+    if audio_capture and config.speech.recognition_enabled: 
+        try:
+            # SpeechRecognizer likely needs the speech config section
+            speech_recognizer = SpeechRecognizer(config.speech)
+        except Exception as e: logger.error(f"Failed SpeechRecognizer init: {e}", exc_info=True)
+    elif not audio_capture:
+        logger.warning("Cannot initialize SpeechRecognizer: AudioCapture failed or disabled.")
+    else: # audio_capture exists but recognition disabled
+        logger.info("Speech Recognition disabled by config.")
+
+    if config.speech.tts_enabled:
+        try: 
+             # TTS likely needs the speech config section
+             tts = TextToSpeech(config.speech)
+        except Exception as e: logger.error(f"Failed TextToSpeech init: {e}", exc_info=True)
+    else:
+        logger.info("TextToSpeech disabled by config.")
+
+    if config.speech.llm_enabled:
+        try: 
+             # LLMProcessor likely needs the speech config section
+             llm_processor = LLMProcessor(config.speech)
+        except Exception as e: logger.error(f"Failed LLMProcessor init: {e}", exc_info=True)
+    else:
+        logger.info("LLM Processor disabled by config.")
+
+    # Initialize non-vision display (e.g., LCD) if not using VisionDisplay
+    # Example: Assuming an LCDController exists and uses config.display
+    # if config.hardware.display_enabled and not display_controller:
+    #      try:
+    #           from eve.display.lcd_controller import LCDController # Import here if not at top
+    #           display_controller = LCDController(config.display) 
+    #      except Exception as e: logger.error(f"Failed LCDController init: {e}", exc_info=True)
+    # elif not config.hardware.display_enabled:
+    #      logger.info("Display hardware disabled by config.")
+
+    # 4. Create Orchestrator with Injected Subsystems
+    try:
+        orchestrator = EVEOrchestrator(
+            config=config, # Pass the loaded SystemConfig
+            camera=camera,
+            face_detector=face_detector,
+            object_detector=object_detector,
+            emotion_analyzer=emotion_analyzer,
+            audio_capture=audio_capture,
+            speech_recognizer=speech_recognizer,
+            llm_processor=llm_processor,
+            tts=tts,
+            display_controller=display_controller
+            # post_event_callback= # Add if using external message queue
+        )
+    except Exception as e:
+        logger.critical(f"Fatal error creating Orchestrator: {e}", exc_info=True)
+        sys.exit(1) # Exit if orchestrator fails
+
+    # 5. Start Orchestrator and Main Loop
+    try:
+        orchestrator.start() # Start subsystem threads/loops
+
+        # --- Main Application Loop ---
+        while orchestrator._running: # Check orchestrator running flag
+            orchestrator.update()
+            time.sleep(0.05) # Example: ~20 FPS loop rate
+
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received. Shutting down...")
+    except Exception as e:
+        logger.critical(f"Unhandled exception in main loop: {e}", exc_info=True)
+    finally:
+        logger.info("Cleaning up orchestrator...")
+        if 'orchestrator' in locals():
+             orchestrator.stop() # Ensure stop is called
+        logger.info("--- EVE System Shutdown Complete ---")
 
 if __name__ == "__main__":
-    # If run directly, create and start the orchestrator
-    orchestrator = create_orchestrator()
-    orchestrator.start()
-    
-    try:
-        # Keep the main thread alive
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        # Handle keyboard interrupt
-        orchestrator.cleanup() 
+    main() 
