@@ -289,21 +289,21 @@ class EVEOrchestrator:
         """Maps event topics to handler methods within the orchestrator."""
         handlers = {
             # --- Vision Events ---
-            TOPICS.FACE_DETECTED: self._handle_face_detected,
-            TOPICS.FACE_RECOGNIZED: self._handle_face_recognized,
-            TOPICS.FACE_LEARNED: self._handle_face_learned,
-            TOPICS.FACE_LOST: self._handle_face_lost,
-            TOPICS.EMOTION_DETECTED: self._handle_emotion_detected,
-            TOPICS.OBJECT_DETECTED: self._handle_object_detected, # Requires OD to post events
+            TOPICS['FACE_DETECTED']: self._handle_face_detected,
+            TOPICS['FACE_RECOGNIZED']: self._handle_face_recognized,
+            TOPICS['FACE_LEARNED']: self._handle_face_learned,
+            TOPICS['FACE_LOST']: self._handle_face_lost,
+            TOPICS['EMOTION_DETECTED']: self._handle_emotion_detected,
+            TOPICS['OBJECT_DETECTED']: self._handle_object_detected, 
              # --- Speech Events ---
-            TOPICS.WAKE_WORD_DETECTED: self._handle_wake_word_detected,
-            TOPICS.SPEECH_RECOGNIZED: self._handle_speech_recognized,
-            TOPICS.TTS_START: self._handle_tts_start,
-            TOPICS.TTS_DONE: self._handle_tts_done,
+            TOPICS['WAKE_WORD_DETECTED']: self._handle_wake_word_detected,
+            TOPICS['SPEECH_RECOGNIZED']: self._handle_speech_recognized,
+            TOPICS['TTS_START']: self._handle_tts_start,
+            TOPICS['TTS_DONE']: self._handle_tts_done,
             # --- System Events ---
-            TOPICS.SYSTEM_ERROR: self._handle_system_error,
-            TOPICS.SYSTEM_LEARNING_STARTED: self._handle_learning_started,
-            TOPICS.SYSTEM_LEARNING_CANCELLED: self._handle_learning_cancelled,
+            TOPICS['SYSTEM_ERROR']: self._handle_system_error,
+            TOPICS['SYSTEM_LEARNING_STARTED']: self._handle_learning_started,
+            TOPICS['SYSTEM_LEARNING_CANCELLED']: self._handle_learning_cancelled,
         }
         self.logger.info(f"Registered {len(handlers)} event handlers.")
         return handlers
@@ -318,17 +318,14 @@ class EVEOrchestrator:
               self.speech_recognizer.wake_word_callback = self._internal_wake_word_callback
               self.speech_recognizer.command_callback = self._internal_command_callback
               self.logger.debug("Set wake_word/command callbacks for SpeechRecognizer.")
-        if self.tts and hasattr(self.tts, 'set_callbacks'): # Assuming set_callbacks exists
-              # Define simple lambda callbacks here
-              on_start_cb = lambda text: self.post_event(TOPICS.TTS_START, {'text': text})
-              on_done_cb = lambda text: self.post_event(TOPICS.TTS_DONE, {'text': text})
-              # Check if set_callbacks takes keyword arguments or positional
+        if self.tts and hasattr(self.tts, 'set_callbacks'): 
+              on_start_cb = lambda text: self.post_event(TOPICS['TTS_START'], {'text': text})
+              on_done_cb = lambda text: self.post_event(TOPICS['TTS_DONE'], {'text': text})
               try: 
                   self.tts.set_callbacks(on_start=on_start_cb, on_done=on_done_cb)
                   self.logger.debug("Set TTS start/done callbacks using keywords.")
-              except TypeError: # Fallback if positional args are needed
+              except TypeError: 
                   try: 
-                      # Assuming the order is on_start, on_done
                       self.tts.set_callbacks(on_start_cb, on_done_cb)
                       self.logger.debug("Set TTS start/done callbacks using positional args.")
                   except Exception as cb_err:
@@ -336,11 +333,11 @@ class EVEOrchestrator:
 
     def _internal_wake_word_callback(self):
         """Internal callback from SpeechRecognizer for wake word."""
-        self.post_event(TOPICS.WAKE_WORD_DETECTED)
+        self.post_event(TOPICS['WAKE_WORD_DETECTED'])
 
     def _internal_command_callback(self, text: str, confidence: float):
         """Internal callback from SpeechRecognizer for command."""
-        self.post_event(TOPICS.SPEECH_RECOGNIZED, {'text': text, 'confidence': confidence})
+        self.post_event(TOPICS['SPEECH_RECOGNIZED'], {'text': text, 'confidence': confidence})
 
     def _process_event_queue_loop(self) -> None:
         """Dedicated thread to process events from the internal queue."""

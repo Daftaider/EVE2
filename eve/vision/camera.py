@@ -48,9 +48,11 @@ class Camera:
         self.camera_backend: Optional[str] = None # 'picamera2' or 'opencv'
         self.mock_mode: bool = False
         self.is_running: bool = False
-        self.resolution: Tuple[int, int] = config.hardware.camera_resolution or DEFAULT_RESOLUTION
-        self.target_fps: int = config.hardware.camera_fps or DEFAULT_FPS
-        self.rotation: int = config.hardware.camera_rotation # 0, 90, 180, 270
+        self.width: int = config.hardware.camera_resolution[0]
+        self.height: int = config.hardware.camera_resolution[1]
+        self.target_fps: int = config.hardware.camera_framerate or DEFAULT_FPS
+        self.rotation: int = config.hardware.camera_rotation or 0
+        self.backend_preference: str = config.hardware.camera_type.lower() # 'picamera', 'opencv'
         
         self._frame_lock = threading.Lock() # Lock for accessing frame and related stats
         self._current_frame: Optional[np.ndarray] = None
@@ -116,7 +118,7 @@ class Camera:
             # Configure for desired resolution and format
             # Need BGR format for OpenCV compatibility downstream
             config_data = picam2.create_video_configuration(
-                 main={"size": self.resolution, "format": "BGR888"},
+                 main={"size": (self.width, self.height), "format": "BGR888"},
                  controls={
                       "FrameRate": float(self.target_fps),
                       # Add other controls if needed (e.g., exposure, awb)
@@ -190,8 +192,8 @@ class Camera:
                 self.logger.info(f"OpenCV: Successfully opened index {index}.")
                 try:
                     # Set desired properties
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
                     cap.set(cv2.CAP_PROP_FPS, float(self.target_fps)) # FPS might need float
                     
                     # Verify by reading a frame
@@ -204,9 +206,10 @@ class Camera:
                         actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                         actual_fps = cap.get(cv2.CAP_PROP_FPS)
                         self.logger.info(f"OpenCV: Initialization successful for index {index}.")
-                        self.logger.info(f"OpenCV: Actual Res: {actual_w}x{actual_h}, FPS: {actual_fps:.2f} (Requested: {self.resolution[0]}x{self.resolution[1]} @ {self.target_fps} FPS)")
+                        self.logger.info(f"OpenCV: Actual Res: {actual_w}x{actual_h}, FPS: {actual_fps:.2f} (Requested: {self.width}x{self.height} @ {self.target_fps} FPS)")
                         # Update internal resolution if camera forced a different one
-                        self.resolution = (actual_w, actual_h)
+                        self.width = actual_w
+                        self.height = actual_h
                         return True
                     else:
                         self.logger.warning(f"OpenCV: Opened index {index} but failed to read valid frame.")
@@ -227,7 +230,7 @@ class Camera:
         self.mock_mode = True
         self.camera_backend = 'mock'
         self._mock_patterns = []
-        width, height = self.resolution
+        width, height = self.width, self.height
         
         # Create 3 different mock face patterns
         for i in range(3):
@@ -481,7 +484,7 @@ class Camera:
     def get_resolution(self) -> Tuple[int, int]:
         """Get current resolution (might differ from config if camera forced it)."""
         # Read resolution thread-safe? Unlikely to change after init.
-        return self.resolution
+        return (self.width, self.height)
 
     def release(self):
         """Release camera hardware resources (called by stop)."""
