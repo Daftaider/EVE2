@@ -4,7 +4,7 @@ Contains all global configuration settings for EVE2
 """
 
 # Import all configuration submodules
-from . import display
+# from . import display # Deprecated
 from . import logging
 from . import vision
 from . import speech
@@ -12,8 +12,19 @@ from . import system
 from . import communication
 from . import hardware
 
-# Import the new config structures
-from .config import SystemConfig, load_config
+# Import the new config structures and loading function
+from .config import (
+    SystemConfig, 
+    load_config,
+    # Also expose nested config types for type hinting
+    DisplayConfig,
+    LoggingConfig,
+    VisionConfig,
+    SpeechConfig,
+    SystemSubConfig,
+    CommunicationConfig,
+    HardwareConfig
+)
 
 # Global configuration constants - directly accessible at config level
 DEBUG = True
