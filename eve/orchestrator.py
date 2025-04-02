@@ -427,6 +427,7 @@ class EVEOrchestrator:
                     time.sleep(0.05)
             except Exception as e:
                 logger.error(f"Error in audio processing loop: {e}", exc_info=True)
+            time.sleep(1.0) # Add a sleep to prevent tight loop on error
         finally:
         logger.info("Audio processing loop stopped.")
 
@@ -440,7 +441,7 @@ class EVEOrchestrator:
                 # TODO: Add a timer here to automatically exit listening state after N seconds of silence/no command?
             else:
                  logger.debug("Wake word detected while already listening.")
-                 
+
     def _handle_command_recognized(self, text: str, confidence: float):
         # Store last recognized text for debug display
         self.last_recognized_text = text 

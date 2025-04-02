@@ -239,14 +239,14 @@ class LCDController:
         if not debug_menu_active:
         if emotion is not None:
             self._current_emotion = emotion
-            try:
-                self.screen.fill(self.background_color)
-                if self._current_emotion in self.emotion_images:
-                    self.screen.blit(self.emotion_images[self._current_emotion], (0, 0))
-                pygame.display.flip()
-            except Exception as e:
-                logging.error(f"Error updating display (normal mode): {e}")
-            return # Exit early
+                try:
+                    self.screen.fill(self.background_color)
+                    if self._current_emotion in self.emotion_images:
+                        self.screen.blit(self.emotion_images[self._current_emotion], (0, 0))
+                    pygame.display.flip()
+                except Exception as e:
+                    logging.error(f"Error updating display (normal mode): {e}")
+                return # Exit early
             
         # --- Debug Mode Active --- 
         try:
