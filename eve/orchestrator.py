@@ -20,62 +20,48 @@ import json
 import sounddevice as sd
 from enum import Enum # Import Enum
 
-from eve import config
+# --- Corrected Config Import --- 
+# Import the main SystemConfig and potentially needed nested types directly
+from eve.config import (
+    SystemConfig, 
+    load_config, 
+    DisplayConfig, 
+    SpeechConfig, 
+    # Add others if specifically needed for type hints within this file
+)
+# from eve import config # Keep specific imports
+# ------------------------------- 
+
 from eve.utils import logging_utils
-from eve.vision import face_detector, emotion_analyzer
-from eve.display import lcd_controller
-from eve.speech import speech_recorder, speech_recognizer, llm_processor, text_to_speech
-from eve.communication import message_queue
-# Create a mock api module
+# Removed direct submodule imports, rely on SystemConfig
+# from eve.vision import face_detector, emotion_analyzer 
+# from eve.display import lcd_controller
+# from eve.speech import speech_recorder, speech_recognizer, llm_processor, text_to_speech
+from eve.communication import message_queue # Keep if used directly
+
+# Create a mock api module (If needed, otherwise remove)
 import types
 api = types.SimpleNamespace()
 api.initialize = lambda: None
 
-from eve.config.communication import TOPICS
-from eve.speech.speech_recorder import AudioCapture
+from eve.config.communication import TOPICS # Keep if TOPICS defined here
+
+# --- Subsystem Imports --- (Ensure these are correct)
+from eve.speech.audio_capture import AudioCapture # Corrected from speech_recorder
 from eve.speech.speech_recognizer import SpeechRecognizer
 from eve.speech.text_to_speech import TextToSpeech
 from eve.speech.llm_processor import LLMProcessor
-from eve.display.lcd_controller import LCDController
+from eve.display.lcd_controller import LCDController # Assuming still used
 from eve.vision.face_detector import FaceDetector
 from eve.vision.emotion_analyzer import EmotionAnalyzer
 from eve.vision.display_window import VisionDisplay
-from eve.config.display import Emotion, DisplayConfig
-from eve.config.speech import SpeechConfig
+from eve.vision.camera import Camera # Added Camera import
+# ------------------------
 
-# Import config modules directly
-try:
-    from eve.config import speech as speech_config
-except ImportError:
-    # Create fallback speech config
-    class speech_config:
-        SAMPLE_RATE = 16000
-        CHANNELS = 1
-        CHUNK_SIZE = 1024
-        THRESHOLD = 0.01
-        MODEL_TYPE = "google"
-        MIN_CONFIDENCE = 0.6
-
-try:
-    from eve.config import display as display_config
-except ImportError:
-    # Create fallback display config
-    class display_config:
-        WIDTH = 800
-        HEIGHT = 480
-        FPS = 30
-        DEFAULT_EMOTION = "neutral"
-        BACKGROUND_COLOR = (0, 0, 0)
-        EYE_COLOR = (0, 191, 255)
-
-try:
-    from eve.config import vision as vision_config
-except ImportError:
-    # Create fallback vision config
-    class vision_config:
-        CAMERA_INDEX = 0
-        RESOLUTION = (640, 480)
-        FPS = 30
+# Removed fallback config class definitions
+# try:
+#     from eve.config import speech as speech_config
+# ... etc ...
 
 # Explicitly manage sys.path for system dependencies
 dist_packages_path = '/usr/lib/python3/dist-packages'
@@ -121,6 +107,8 @@ CORRECTIONS_DIR = Path(__file__).parent.parent / "assets" / "data"
 CORRECTIONS_PATH = CORRECTIONS_DIR / "object_corrections.json"
 
 # Define Emotion Enum based on config
+# Note: If DisplayConfig defines Emotion, import it instead of redefining
+# from eve.config import Emotion # Try importing first
 class Emotion(Enum):
     NEUTRAL = "neutral"
     HAPPY = "happy"
@@ -130,9 +118,8 @@ class Emotion(Enum):
     CONFUSED = "confused"
     DISGUSTED = "disgusted"
     FEARFUL = "fearful"
-    # Add any other potential emotions used internally, like ATTENTIVE?
     ATTENTIVE = "attentive" 
-    TALKING = "talking" # If needed for TTS state
+    TALKING = "talking"
 
     @classmethod
     def from_value(cls, value: Union[str, 'Emotion']) -> 'Emotion':
@@ -164,8 +151,8 @@ class EVEOrchestrator:
     """
     # CORRECTED __init__ method using Dependency Injection
     def __init__(self,
-                 config: SystemConfig, # Expect the loaded SystemConfig object
-                 camera: Camera,
+                 config: SystemConfig, # Type hint should work now
+                 camera: Camera, # Type hint added
                  # Inject optional subsystems
                  face_detector: Optional[FaceDetector] = None,
                  object_detector: Optional[ObjectDetector] = None,
