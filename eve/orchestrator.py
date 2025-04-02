@@ -56,6 +56,7 @@ from eve.vision.face_detector import FaceDetector
 from eve.vision.emotion_analyzer import EmotionAnalyzer
 from eve.vision.display_window import VisionDisplay
 from eve.vision.camera import Camera # Added Camera import
+from eve.vision.object_detector import ObjectDetector # Added ObjectDetector import
 # ------------------------
 
 # Removed fallback config class definitions
