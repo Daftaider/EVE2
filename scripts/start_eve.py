@@ -25,6 +25,7 @@ from eve.speech.audio_capture import AudioCapture
 from eve.speech.speech_recognizer import SpeechRecognizer
 from eve.speech.llm_processor import LLMProcessor
 from eve.speech.text_to_speech import TextToSpeech
+from typing import Any # Import Any for type hinting
 
 # Add the project root to the Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
