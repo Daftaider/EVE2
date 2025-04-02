@@ -53,17 +53,30 @@ logger = logging.getLogger(__name__)
 class ObjectDetector:
     """Object detection class using YOLOv8 with optional Hailo-8 acceleration"""
     
-    def __init__(self, model_path: Optional[str] = None, confidence_threshold: Optional[float] = None):
+    def __init__(self, config: SystemConfig, model_path: Optional[str] = None, confidence_threshold: Optional[float] = None):
         """Initialize the object detector
         
         Attempts to use Hailo-8 if configured and available, otherwise falls back to CPU YOLOv8.
         
         Args:
+            config: The main SystemConfig object.
             model_path: Path to the primary model file (ignored if using config).
             confidence_threshold: Minimum confidence threshold (ignored if using config).
         """
-        self.logger = logging.getLogger(__name__)
-        self.confidence_threshold = confidence_threshold if confidence_threshold is not None else config.DETECTION_CONFIDENCE
+        self.config = config # Store the main config
+        self.logger = logging.getLogger(__name__) # Initialize logger first
+        
+        # Extract relevant sub-configs or values
+        # Example: Assuming object detection config is under vision
+        vision_config = config.vision
+        hardware_config = config.hardware
+        
+        # Determine confidence threshold: Use constructor arg > config > default
+        if confidence_threshold is not None:
+            self.confidence_threshold = confidence_threshold
+        else:
+            self.confidence_threshold = vision_config.object_confidence_threshold # Use config value
+            
         self.hailo_enabled = False
         self.hailo_target = None # VDevice or Device
         self.hailo_hef = None
@@ -75,13 +88,15 @@ class ObjectDetector:
         self.hailo_network_group_active = False # Track activation state
 
         # 1. Check configuration and Hailo availability
-        # Make sure _HAILO_AVAILABLE check happens before accessing HailoFormatType
-        if config.USE_HAILO and _HAILO_AVAILABLE and HailoFormatType is not None:
+        use_hailo = hardware_config.accelerator == 'hailo'
+        hailo_hef_path = hardware_config.hailo_hef_path
+        hailo_network_name = hardware_config.hailo_network_name # Get from hardware config
+        
+        if use_hailo and _HAILO_AVAILABLE and HailoFormatType is not None:
             self.logger.info("Hailo usage requested and HailoRT library is available.")
-            hailo_hef_path = config.HAILO_HEF_PATH
             
-            if not os.path.exists(hailo_hef_path):
-                self.logger.warning(f"Hailo HEF file not found: {hailo_hef_path}. Falling back to CPU.")
+            if not hailo_hef_path or not os.path.exists(hailo_hef_path):
+                self.logger.warning(f"Hailo HEF file not found or path not specified: {hailo_hef_path}. Falling back to CPU.")
             else:
                 try:
                     devices = Device.scan()
@@ -98,8 +113,8 @@ class ObjectDetector:
                         self.logger.info(f"Successfully loaded HEF. Network groups: {network_group_names}")
                         
                         # Determine network group name
-                        if config.HAILO_NETWORK_NAME and config.HAILO_NETWORK_NAME in network_group_names:
-                             network_group_name = config.HAILO_NETWORK_NAME
+                        if hailo_network_name and hailo_network_name in network_group_names:
+                             network_group_name = hailo_network_name
                         elif network_group_names:
                              network_group_name = network_group_names[0]
                              self.logger.info(f"Using first available network group: {network_group_name}")
@@ -162,7 +177,7 @@ class ObjectDetector:
                     self.hailo_input_vstreams = None
                     self.hailo_output_vstreams = None
         else:
-            if not config.USE_HAILO:
+            if not use_hailo:
                  self.logger.info("Hailo usage is disabled in configuration. Using CPU YOLOv8.")
             elif not _HAILO_AVAILABLE:
                  self.logger.warning("Hailo usage requested, but HailoRT library not found or failed to import. Using CPU YOLOv8.")
@@ -171,15 +186,9 @@ class ObjectDetector:
 
         # 2. Fallback to CPU YOLOv8
         if not self.hailo_enabled:
-            cpu_model_path = model_path if model_path is not None else config.CPU_MODEL_PATH
-            self.logger.info(f"Loading CPU YOLOv8 model from {cpu_model_path}")
-            try:
-                self.yolo_model = YOLO(cpu_model_path)
-                self.logger.info(f"Successfully loaded CPU YOLOv8 model from {cpu_model_path}")
-                self.logger.info(f"CPU Model classes: {self.yolo_model.names}")
-            except Exception as e:
-                self.logger.error(f"Failed to load CPU YOLOv8 model: {e}", exc_info=True)
-                raise RuntimeError(f"Failed to initialize any detection model (Hailo or CPU): {e}")
+            # Use model path from constructor arg OR config
+            cpu_model_path = model_path if model_path is not None else vision_config.object_model_path
+            self._load_cpu_model(cpu_model_path) # Pass path to helper
 
     def _get_network_group_name(self, available_groups: List[str]) -> Optional[str]:
         """Determines the network group name to use."""
@@ -194,9 +203,15 @@ class ObjectDetector:
             self.logger.error("No network groups found in the HEF.")
             return None
 
-    def _load_cpu_model(self, model_path: Optional[str]):
+    def _load_cpu_model(self, cpu_model_path: Optional[str]):
          """Loads the CPU YOLOv8 model."""
-         cpu_model_path = model_path if model_path is not None else config.CPU_MODEL_PATH
+         if not cpu_model_path:
+             self.logger.error("No CPU model path specified. Cannot load CPU model.")
+             # If Hailo also failed, we need to raise an error
+             if not self.hailo_enabled:
+                 raise ValueError("Neither Hailo nor CPU model could be initialized: No CPU model path provided.")
+             return # If Hailo worked, maybe CPU fallback isn't critical
+         
          self.logger.info(f"Loading CPU YOLOv8 model from {cpu_model_path}")
          try:
              self.yolo_model = YOLO(cpu_model_path)
@@ -555,8 +570,9 @@ class ObjectDetector:
         return display_frame
 
     def __del__(self):
-        """Clean up Hailo resources on object deletion."""
-        self.logger.info("ObjectDetector destructor called. Cleaning up resources.")
+        # Ensure logger exists before trying to use it
+        if hasattr(self, 'logger') and self.logger:
+            self.logger.info("ObjectDetector destructor called. Cleaning up resources.")
         self._cleanup_hailo_resources()
 
 # Ensure necessary imports are present at the top

@@ -45,18 +45,25 @@ class EmotionAnalyzer:
         Args:
             config: The main SystemConfig object.
         """
+        self.config = config
         self.logger = logging.getLogger(__name__)
-        self.config = config.vision # Use the vision sub-config
+        self.vision_config: VisionConfig = self.config.vision # Store vision sub-config
+        self.post_event = post_event_callback
+
+        # --- Configuration ---
+        self.enabled = self.vision_config.emotion_analysis_enabled
+        self.model_name = self.vision_config.emotion_analysis_model.lower()
+        self.confidence_threshold = self.vision_config.emotion_confidence_threshold
+        # Correctly access emotions via vision config
+        self.configured_emotions = self.vision_config.emotions # List of emotions system uses/maps to
         self.display_config = config.display # Needed for mapping
         
-        self.confidence_threshold = self.config.emotion_confidence_threshold
-        self.configured_emotions = self.config.emotions # List of emotions system uses/maps to
         self.default_display_emotion = self.display_config.default_emotion
         
         self.detector: Optional[FER] = None
         self.fer_initialized: bool = False
         
-        if not self.config.emotion_enabled:
+        if not self.enabled:
             self.logger.info("Emotion analysis disabled in configuration.")
             return # Don't initialize detector if disabled
             
@@ -86,7 +93,7 @@ class EmotionAnalyzer:
             The most probable emotion string (from configured list) if confidence threshold is met,
             otherwise None.
         """
-        if not self.config.emotion_enabled:
+        if not self.enabled:
             return None # Disabled
             
         if face_image is None or face_image.size == 0:
@@ -168,7 +175,7 @@ class EmotionAnalyzer:
             Dictionary mapping configured emotion names to confidence scores (0.0-1.0).
             Returns empty dict if analysis fails or is disabled.
         """
-        if not self.config.emotion_enabled:
+        if not self.enabled:
             return {}
             
         if face_image is None or face_image.size == 0:

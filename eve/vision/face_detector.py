@@ -48,7 +48,7 @@ class FaceDetector:
             post_event_callback: Callback function for posting events (e.g., orchestrator.post_event).
         """
         self.logger = logging.getLogger(__name__)
-        self.config = config.vision # Use the vision sub-config
+        self.config = config
         self.camera = camera
         self.post_event = post_event_callback
         
@@ -58,18 +58,19 @@ class FaceDetector:
         self._lock = threading.Lock() # Lock for shared resources
 
         # Face Detection Model
-        self.detection_model = self.config.face_detection_model.lower()
+        self.vision_config: VisionConfig = self.config.vision
+        self.model_name = self.vision_config.face_detection_model
         self.face_cascade = None
-        if self.detection_model == 'haar':
+        if self.model_name == 'haar':
             self._load_haar_cascade()
-        elif self.detection_model not in ['hog', 'cnn']:
-             self.logger.warning(f"Invalid face_detection_model '{self.config.face_detection_model}'. Defaulting to 'hog'.")
-             self.detection_model = 'hog'
+        elif self.model_name not in ['hog', 'cnn']:
+             self.logger.warning(f"Invalid face_detection_model '{self.model_name}'. Defaulting to 'hog'.")
+             self.model_name = 'hog'
 
         # Face Recognition State
-        self.recognition_enabled = self.config.face_recognition_enabled
-        self.known_faces_dir = Path(self.config.known_faces_dir)
-        self.comparison_tolerance = self.config.face_recognition_tolerance
+        self.recognition_enabled = self.vision_config.face_recognition_enabled
+        self.known_faces_dir = Path(self.vision_config.known_faces_dir)
+        self.comparison_tolerance = self.vision_config.face_recognition_tolerance
         self.known_face_encodings: List[np.ndarray] = []
         self.known_face_names: List[str] = []
         self._load_known_faces() # Load on init
@@ -81,10 +82,10 @@ class FaceDetector:
         self._learning_temp_encodings: List[np.ndarray] = []
 
         # Debugging
-        self.debug_mode = self.config.vision_debug_mode
+        self.debug_mode = self.vision_config.vision_debug_mode
         self._current_debug_frame: Optional[np.ndarray] = None
 
-        self.logger.info(f"FaceDetector initialized. Detection Model: {self.detection_model}, Recognition Enabled: {self.recognition_enabled}")
+        self.logger.info(f"FaceDetector initialized. Detection Model: {self.model_name}, Recognition Enabled: {self.recognition_enabled}")
 
     def _load_haar_cascade(self):
         """Loads the Haar Cascade classifier if needed."""
@@ -113,13 +114,13 @@ class FaceDetector:
             self.logger.error(f"Error loading Haar cascade: {e}. Face detection model 'haar' will not work.")
             self.face_cascade = None # Ensure it's None on failure
             # Consider falling back to HOG if Haar fails?
-            # self.detection_model = 'hog' 
+            # self.model_name = 'hog' 
 
     def _detect_faces(self, frame: np.ndarray) -> List[Tuple[int, int, int, int]]:
         """Detects faces based on the configured model."""
         face_locations = []
         try:
-            if self.detection_model == 'haar':
+            if self.model_name == 'haar':
                 if self.face_cascade is None or self.face_cascade.empty():
                      self.logger.error("Haar cascade not loaded, cannot detect faces.")
                      return []
@@ -127,23 +128,23 @@ class FaceDetector:
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 faces = self.face_cascade.detectMultiScale(
                     gray,
-                    scaleFactor=self.config.haar_scale_factor,
-                    minNeighbors=self.config.haar_min_neighbors,
-                    minSize=self.config.haar_min_face_size
+                    scaleFactor=self.vision_config.haar_scale_factor,
+                    minNeighbors=self.vision_config.haar_min_neighbors,
+                    minSize=self.vision_config.haar_min_face_size
                 )
                 # Convert (x, y, w, h) to (top, right, bottom, left) format
                 for (x, y, w, h) in faces:
                     face_locations.append((y, x + w, y + h, x))
             
-            elif self.detection_model in ['hog', 'cnn']:
+            elif self.model_name in ['hog', 'cnn']:
                  # face_recognition library expects RGB
                  rgb_frame = frame[:, :, ::-1] 
                  # number_of_times_to_upsample=1 can help find smaller faces
-                 face_locations = face_recognition.face_locations(rgb_frame, model=self.detection_model)
+                 face_locations = face_recognition.face_locations(rgb_frame, model=self.model_name)
                  # Returns list of (top, right, bottom, left) tuples
             
         except Exception as e:
-            self.logger.error(f"Error detecting faces using model '{self.detection_model}': {e}", exc_info=True)
+            self.logger.error(f"Error detecting faces using model '{self.model_name}': {e}", exc_info=True)
             return [] # Return empty list on error
             
         return face_locations
@@ -195,7 +196,7 @@ class FaceDetector:
 
     def _detection_loop(self):
         """Main face detection and recognition loop running in a separate thread."""
-        self.logger.info(f"FaceDetector loop started. Using model: {self.detection_model}")
+        self.logger.info(f"FaceDetector loop started. Using model: {self.model_name}")
         frame_count = 0
         empty_frame_count = 0
         last_log_time = time.time()

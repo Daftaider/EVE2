@@ -228,8 +228,18 @@ class EVEOrchestrator:
         self.last_audio_rms: float = 0.0
         # Store sensitivity state if needed by UI - get initial from config
         # Ensure wake_word_sensitivity exists and is not empty
-        sens_list = getattr(config.speech, 'wake_word_sensitivity', [0.5])
+        sens_config = getattr(config.speech, 'porcupine_sensitivity', [0.5])
+        # Ensure it's treated as a list
+        if isinstance(sens_config, float):
+            sens_list = [sens_config]
+        elif isinstance(sens_config, list):
+            sens_list = sens_config
+        else:
+            self.logger.warning(f"Invalid Porcupine sensitivity config: {sens_config}. Using default [0.5].")
+            sens_list = [0.5]
+            
         self.current_porcupine_sensitivity: float = sens_list[0] if sens_list else 0.5
+        self.logger.info(f"Orchestrator initialized. Sensitivity set to {self.current_porcupine_sensitivity}.")
 
         # Initialization Steps
         # Removed: self._load_corrections() - Called above now
