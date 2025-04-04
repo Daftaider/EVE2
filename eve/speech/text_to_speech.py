@@ -173,7 +173,8 @@ class TextToSpeech:
                 self.engine.runAndWait()
                 return True
             elif self.engine_type in ('espeak', 'espeak-ng') and self.engine:
-                subprocess.run([self.engine, text], check=True) # Use stored command
+                # Add timeout to prevent hangs
+                subprocess.run([self.engine, text], check=True, timeout=30.0)
                 return True
             elif self.engine_type == 'piper' and self.engine and self.model_available:
                 audio_data = self._synthesize_speech_piper(text)
@@ -282,7 +283,8 @@ class TextToSpeech:
                         self.engine.runAndWait()
                         success = True
                     elif self.engine_type in ('espeak', 'espeak-ng') and self.engine:
-                        subprocess.run([self.engine, text], check=True)
+                        # Add timeout to prevent hangs
+                        subprocess.run([self.engine, text], check=True, timeout=30.0)
                         success = True
                     elif self.engine_type == 'piper' and self.engine and self.model_available:
                         audio_data = self._synthesize_speech_piper(text)
@@ -374,7 +376,15 @@ class TextToSpeech:
                 encoding='utf-8' # Ensure correct encoding
             )
 
-            stdout, stderr = process.communicate(text)
+            # Add timeout to communicate
+            try:
+                stdout, stderr = process.communicate(text, timeout=30.0)
+            except subprocess.TimeoutExpired:
+                 self.logger.error(f"Piper process timed out after 30s.")
+                 process.kill()
+                 stdout, stderr = process.communicate() # Get any output after kill
+                 if os.path.exists(output_path): os.unlink(output_path)
+                 return None
 
             if process.returncode != 0:
                 self.logger.error(f"Piper TTS failed (RC {process.returncode}): {stderr.strip()}")
