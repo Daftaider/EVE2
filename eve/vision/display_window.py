@@ -116,8 +116,10 @@ class VisionDisplay:
                 start_time = time.perf_counter()
                 try:
                     ret, frame = self.camera.read()
+                    # Check stop event immediately after potentially blocking camera read
+                    if self._stop_event.is_set(): break
+
                     if not ret or frame is None:
-                        # If camera stops providing frames, exit loop?
                         if hasattr(self.camera, 'is_running') and not self.camera.is_running():
                              self.logger.warning("Camera is not running, stopping display loop.")
                              break
@@ -171,6 +173,8 @@ class VisionDisplay:
                          canvas[y_offset:y_offset+rh, x_offset:x_offset+rw] = resized_frame
                                       
                     cv2.imshow(self.window_name, canvas)
+                    # Check stop event immediately after potentially blocking imshow
+                    if self._stop_event.is_set(): break
                     
                     # --- Store Last Frame --- 
                     with self._frame_lock:
@@ -178,6 +182,10 @@ class VisionDisplay:
                      
                     # --- Handle Window Events & Exit Conditions --- 
                     key = cv2.waitKey(1) & 0xFF # Essential!
+                    # Check stop event immediately after potentially blocking waitKey
+                    if self._stop_event.is_set(): break
+
+                    # 1. Check for ESC key press
                     if key == 27:  # ESC
                         self.logger.info("ESC key pressed, stopping display loop.")
                         break # Exit while loop
