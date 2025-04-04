@@ -10,6 +10,7 @@ import platform
 import os
 import time # Ensure time is imported
 from eve.config.config import SystemConfig
+from pathlib import Path
 
 # Attempt to import HailoRT libraries
 _HAILO_AVAILABLE = False
@@ -188,9 +189,36 @@ class ObjectDetector:
 
         # 2. Fallback to CPU YOLOv8
         if not self.hailo_enabled:
-            # Use model path from constructor arg OR config
-            cpu_model_path = model_path if model_path is not None else vision_config.object_model_path
-            self._load_cpu_model(cpu_model_path) # Pass path to helper
+            self.logger.info("Initializing Object Detector on CPU using YOLOv8...")
+            # Determine model path: constructor arg > config > default
+            cpu_model_path = model_path if model_path is not None else vision_config.object_detection_model # Corrected attribute name
+            if not cpu_model_path:
+                 self.logger.error("CPU Object detection model path not specified in args or config. Cannot initialize.")
+                 return # Cannot proceed without a model path
+
+            # Ensure model path exists (handle relative/absolute? Assume relative for now)
+            if not os.path.isabs(cpu_model_path):
+                # Construct path relative to project root or a specific models dir
+                # Assuming project root for now
+                project_root = Path(__file__).parent.parent.parent
+                potential_path = project_root / cpu_model_path
+                if potential_path.exists():
+                    cpu_model_path = str(potential_path)
+                else:
+                    # Check in default models dir as fallback
+                    models_dir = project_root / config.system.models_dir # Use path from system config
+                    potential_path_alt = models_dir / cpu_model_path
+                    if potential_path_alt.exists():
+                         cpu_model_path = str(potential_path_alt)
+                    else:
+                         self.logger.error(f"CPU YOLO model file not found at relative path '{cpu_model_path}' or in models dir '{models_dir}'.")
+                         return # Cannot proceed
+            elif not os.path.exists(cpu_model_path):
+                 self.logger.error(f"CPU YOLO model file not found at absolute path: {cpu_model_path}")
+                 return
+
+            self.yolo_model = YOLO(cpu_model_path)
+            self.logger.info(f"Successfully loaded CPU YOLOv8 model: {self.yolo_model.names}")
 
     def _get_network_group_name(self, available_groups: List[str]) -> Optional[str]:
         """Determines the network group name to use."""
