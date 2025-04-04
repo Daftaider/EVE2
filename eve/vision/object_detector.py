@@ -9,6 +9,7 @@ from typing import List, Tuple, Dict, Optional, Any
 import platform
 import os
 import time # Ensure time is imported
+from eve.config.system_config import SystemConfig
 
 # Attempt to import HailoRT libraries
 _HAILO_AVAILABLE = False
