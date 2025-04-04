@@ -139,7 +139,9 @@ class VisionDisplay:
                     if self.object_detector and self.config.vision.object_detection_enabled:
                         try:
                              # WARNING: Synchronous call, potential hang point
+                             self.logger.debug("Calling object_detector.detect()...")
                              detections = self.object_detector.detect(display_frame)
+                             self.logger.debug("Finished object_detector.detect().")
                              display_frame = self.object_detector.draw_detections(display_frame, detections)
                         except Exception as od_err:
                              self.logger.error(f"Error during object detection/drawing: {od_err}", exc_info=False)
