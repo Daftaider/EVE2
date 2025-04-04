@@ -212,7 +212,8 @@ class VisionDisplay:
             if self._window_created:
                  try:
                       cv2.destroyWindow(self.window_name)
-                      cv2.waitKey(1) # Process GUI events for cleanup
+                      # Add waitKey here to process destroy event
+                      cv2.waitKey(1)
                       self.logger.info(f"OpenCV window '{self.window_name}' destroyed by display loop.")
                  except Exception as destroy_err:
                       self.logger.warning(f"Error destroying OpenCV window '{self.window_name}' in display loop cleanup: {destroy_err}")

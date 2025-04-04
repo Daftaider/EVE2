@@ -223,7 +223,15 @@ class EVEApplication:
                       logger.error(f"Error during final cleanup attempt: {stop_err}")
             sys.exit(1)
         finally:
+            # This block executes after the 'with' block finishes (orchestrator.stop() called by __exit__)
+            # or after an exception escapes the try block (after orchestrator.stop() is attempted).
             logger.info("--- EVE Main Application Shutdown Complete ---")
+            # Try calling pygame.quit() here to isolate hangs
+            try:
+                 pygame.quit()
+                 logger.info("Pygame quit called from run() finally block.")
+            except Exception as e:
+                 logger.error(f"Error during pygame quit in run() finally: {e}")
 
     def _main_loop(self):
         """The main application loop handling events and updates."""
@@ -329,19 +337,28 @@ class EVEApplication:
     def cleanup(self):
         """Explicit cleanup call, mainly for safety."""
         logger.debug("EVEApplication cleanup called.")
-        # Orchestrator cleanup is handled by its __exit__ method
-        # Pygame quit is crucial here if not handled elsewhere reliably
-        try:
-            pygame.quit()
-            logger.info("Pygame shut down.")
-        except Exception as e:
-            logger.error(f"Error during pygame quit: {e}")
+        # Pygame quit is now called earlier in run() finally.
+        # This method might become redundant or just log.
+        # try:
+        #     pygame.quit()
+        #     logger.info("Pygame shut down.")
+        # except Exception as e:
+        #     logger.error(f"Error during pygame quit: {e}")
 
 
 def main():
     """Entry point for the EVE application."""
     app = EVEApplication()
-    app.run()
+    # The run() method's finally block now handles pygame.quit()
+    # The main() finally block calling app.cleanup() may no longer be needed
+    # for pygame.quit(), but can be kept for other potential cleanup.
+    try:
+        app.run()
+    finally:
+        # Optionally call app.cleanup() for any other future cleanup tasks
+        # app.cleanup()
+        logger.info("Application main() finished.")
+
 
 if __name__ == "__main__":
     main() 
