@@ -128,11 +128,12 @@ class FaceDetector:
                      return []
                 # Convert to grayscale for Haar
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                # Use default values for scaleFactor and minNeighbors, get minSize from config
                 faces = self.face_cascade.detectMultiScale(
                     gray,
-                    scaleFactor=self.vision_config.haar_scale_factor,
-                    minNeighbors=self.vision_config.haar_min_neighbors,
-                    minSize=self.vision_config.haar_min_face_size
+                    scaleFactor=1.1, # Default value
+                    minNeighbors=5,  # Default value
+                    minSize=self.vision_config.face_detection_min_size # Get from config
                 )
                 # Convert (x, y, w, h) to (top, right, bottom, left) format
                 for (x, y, w, h) in faces:
