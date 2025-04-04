@@ -94,6 +94,14 @@ class VisionDisplay:
                  self.logger.debug("Display thread joined successfully.")
             self._display_thread = None
 
+            # Explicitly destroy all OpenCV windows after thread join attempt
+            try:
+                cv2.destroyAllWindows()
+                cv2.waitKey(1) # Allow time for cleanup
+                self.logger.info("Explicit cv2.destroyAllWindows() called in stop().")
+            except Exception as e:
+                self.logger.warning(f"Error during explicit cv2.destroyAllWindows() in stop(): {e}")
+
         self._running = False
         self.logger.info("Vision display stopped.")
 
