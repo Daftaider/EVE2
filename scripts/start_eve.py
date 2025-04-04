@@ -227,11 +227,12 @@ class EVEApplication:
             # or after an exception escapes the try block (after orchestrator.stop() is attempted).
             logger.info("--- EVE Main Application Shutdown Complete ---")
             # Try calling pygame.quit() here to isolate hangs
-            try:
-                 pygame.quit()
-                 logger.info("Pygame quit called from run() finally block.")
-            except Exception as e:
-                 logger.error(f"Error during pygame quit in run() finally: {e}")
+            # try:
+            #      pygame.quit()
+            #      logger.info("Pygame quit called from run() finally block.")
+            # except Exception as e:
+            #      logger.error(f"Error during pygame quit in run() finally: {e}")
+            logger.info("Skipping pygame.quit() for testing hang...")
 
     def _main_loop(self):
         """The main application loop handling events and updates."""

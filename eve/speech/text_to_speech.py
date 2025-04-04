@@ -242,8 +242,8 @@ class TextToSpeech:
         self.is_running = True
         self.stop_event.clear()
 
-        # Start the processing thread
-        self.process_thread = threading.Thread(target=self._process_loop, daemon=True)
+        # Start the processing thread as non-daemon
+        self.process_thread = threading.Thread(target=self._process_loop, daemon=False)
         self.process_thread.start()
 
         logger.info("TTS processor thread started")
