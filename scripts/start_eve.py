@@ -117,17 +117,17 @@ class EVEApplication:
             setup_logging(self.config.logging, self.args.debug)
             logger.debug(f"Loaded configuration: {self.config!r}")
 
-            # 3. Initialize Pygame (if display enabled) - DISABLED FOR TESTING HANG
+            # 3. Initialize Pygame (if display enabled) - RE-ENABLING FOR TESTING
             pygame_initialized = False
-            # if self.config.hardware.display_enabled:
-            #     logger.info("Initializing Pygame...")
-            #     try:
-            #         pygame.init()
-            #         pygame_initialized = True
-            #         logger.info("Pygame initialized.")
-            #     except Exception as pg_err:
-            #         logger.error(f"Pygame initialization failed: {pg_err}. Display might not work.")
-            logger.warning("Pygame initialization explicitly disabled for shutdown hang test.")
+            if self.config.hardware.display_enabled:
+                logger.info("Initializing Pygame...")
+                try:
+                    pygame.init()
+                    pygame_initialized = True
+                    logger.info("Pygame initialized.")
+                except Exception as pg_err:
+                    logger.error(f"Pygame initialization failed: {pg_err}. Display might not work.")
+            # logger.warning("Pygame initialization explicitly disabled for shutdown hang test.")
 
             # 4. Initialize Subsystems
             camera = Camera(self.config) if self.config.hardware.camera_enabled else None
@@ -197,7 +197,7 @@ class EVEApplication:
             logger.info(f"--- EVE Application Run Method Reached Finally Block (Exit Code Hint: {exit_code}) ---")
             # Orchestrator stop is handled by 'with' statement's __exit__
             # Pygame quit should happen here if initialized
-            if pygame_initialized: # This will now be false
+            if pygame_initialized: # This should now be true if display enabled
                 logger.info("Attempting Pygame quit...")
                 try:
                      pygame.quit()
