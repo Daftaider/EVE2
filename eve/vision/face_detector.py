@@ -59,12 +59,14 @@ class FaceDetector:
 
         # Face Detection Model
         self.vision_config: VisionConfig = self.config.vision
-        self.model_name = self.vision_config.face_detection_model
+        self.model_name = self.vision_config.face_detection_model.lower() # Use lowercase for consistent checking
         self.face_cascade = None
-        if self.model_name == 'haar':
+        # Accept 'haar' or 'haarcascade' for the Haar model
+        if self.model_name in ['haar', 'haarcascade']:
+            self.model_name = 'haar' # Standardize internal name to 'haar'
             self._load_haar_cascade()
         elif self.model_name not in ['hog', 'cnn']:
-             self.logger.warning(f"Invalid face_detection_model '{self.model_name}'. Defaulting to 'hog'.")
+             self.logger.warning(f"Invalid face_detection_model '{self.model_name}'. Supported: haar, haarcascade, hog, cnn. Defaulting to 'hog'.")
              self.model_name = 'hog'
 
         # Face Recognition State
