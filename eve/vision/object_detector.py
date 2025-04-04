@@ -190,35 +190,34 @@ class ObjectDetector:
         # 2. Fallback to CPU YOLOv8
         if not self.hailo_enabled:
             self.logger.info("Initializing Object Detector on CPU using YOLOv8...")
-            # Determine model path: constructor arg > config > default
-            cpu_model_path = model_path if model_path is not None else vision_config.object_detection_model # Corrected attribute name
-            if not cpu_model_path:
-                 self.logger.error("CPU Object detection model path not specified in args or config. Cannot initialize.")
-                 return # Cannot proceed without a model path
+            # Get model name from config (e.g., 'yolov8n.pt')
+            cpu_model_name = vision_config.object_detection_model
+            if not cpu_model_name:
+                 self.logger.error("CPU Object detection model name not specified in config. Cannot initialize.")
+                 return # Cannot proceed without a model name
 
-            # Ensure model path exists (handle relative/absolute? Assume relative for now)
-            if not os.path.isabs(cpu_model_path):
-                # Construct path relative to project root or a specific models dir
-                # Assuming project root for now
-                project_root = Path(__file__).parent.parent.parent
-                potential_path = project_root / cpu_model_path
-                if potential_path.exists():
-                    cpu_model_path = str(potential_path)
-                else:
-                    # Check in default models dir as fallback
-                    models_dir = project_root / config.system.models_dir # Use path from system config
-                    potential_path_alt = models_dir / cpu_model_path
-                    if potential_path_alt.exists():
-                         cpu_model_path = str(potential_path_alt)
-                    else:
-                         self.logger.error(f"CPU YOLO model file not found at relative path '{cpu_model_path}' or in models dir '{models_dir}'.")
-                         return # Cannot proceed
-            elif not os.path.exists(cpu_model_path):
-                 self.logger.error(f"CPU YOLO model file not found at absolute path: {cpu_model_path}")
+            try:
+                # Initialize YOLO - Ultralytics library should handle download if needed
+                self.logger.info(f"Loading/Downloading YOLO model: {cpu_model_name}")
+                self.yolo_model = YOLO(cpu_model_name)
+                # Check if model loading actually worked (simple check)
+                if not hasattr(self.yolo_model, 'names') or not self.yolo_model.names:
+                     raise RuntimeError("YOLO model loaded but appears invalid (missing class names).")
+                self.logger.info(f"Successfully loaded CPU YOLOv8 model. Classes: {len(self.yolo_model.names)}")
+
+            except ImportError:
+                 self.logger.error("Ultralytics YOLO library not found. Please install it (`pip install ultralytics`). Cannot initialize CPU detector.")
+                 self.yolo_model = None
+                 return
+            except Exception as e:
+                 self.logger.error(f"Failed to load or download CPU YOLO model '{cpu_model_name}': {e}", exc_info=True)
+                 self.yolo_model = None # Ensure model is None on failure
+                 # Consider not returning here if fallback behavior is desired, 
+                 # but for now, object detection won't work.
                  return
 
-            self.yolo_model = YOLO(cpu_model_path)
-            self.logger.info(f"Successfully loaded CPU YOLOv8 model: {self.yolo_model.names}")
+        # Initialize last detection time
+        self.last_detection_time = 0
 
     def _get_network_group_name(self, available_groups: List[str]) -> Optional[str]:
         """Determines the network group name to use."""
