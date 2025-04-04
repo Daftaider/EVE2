@@ -52,8 +52,8 @@ class EmotionAnalyzer:
         self.post_event = post_event_callback # Store the callback
 
         # --- Configuration ---
-        self.enabled = self.vision_config.emotion_analysis_enabled
-        self.model_name = self.vision_config.emotion_analysis_model.lower()
+        self.enabled = self.vision_config.emotion_detection_enabled
+        self.model_name = self.vision_config.emotion_detection_model.lower()
         self.confidence_threshold = self.vision_config.emotion_confidence_threshold
         # Correctly access emotions via vision config
         self.configured_emotions = self.vision_config.emotions # List of emotions system uses/maps to
