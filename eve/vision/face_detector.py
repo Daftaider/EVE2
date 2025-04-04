@@ -82,7 +82,7 @@ class FaceDetector:
         self._learning_temp_encodings: List[np.ndarray] = []
 
         # Debugging
-        self.debug_mode = self.vision_config.vision_debug_mode
+        self.debug_mode = self.vision_config.debug
         self._current_debug_frame: Optional[np.ndarray] = None
 
         self.logger.info(f"FaceDetector initialized. Detection Model: {self.model_name}, Recognition Enabled: {self.recognition_enabled}")

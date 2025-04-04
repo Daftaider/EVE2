@@ -76,7 +76,7 @@ class ObjectDetector:
         if confidence_threshold is not None:
             self.confidence_threshold = confidence_threshold
         else:
-            self.confidence_threshold = vision_config.object_confidence_threshold # Use config value
+            self.confidence_threshold = vision_config.object_detection_confidence # Use config value
             
         self.hailo_enabled = False
         self.hailo_target = None # VDevice or Device

@@ -4,7 +4,7 @@ Emotion analysis module.
 Uses the FER (Face Emotion Recognition) library to detect emotions.
 """
 import logging
-from typing import Dict, Optional, List, Union, Any
+from typing import Dict, Optional, List, Union, Any, Callable
 
 import cv2
 import numpy as np
@@ -38,17 +38,18 @@ class EmotionAnalyzer:
     Provides a fallback mechanism if FER is unavailable.
     """
     
-    def __init__(self, config: SystemConfig):
+    def __init__(self, config: SystemConfig, post_event_callback: Optional[Callable] = None):
         """
         Initialize emotion analyzer.
         
         Args:
             config: The main SystemConfig object.
+            post_event_callback: Optional callback function to post events.
         """
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.vision_config: VisionConfig = self.config.vision # Store vision sub-config
-        self.post_event = post_event_callback
+        self.post_event = post_event_callback # Store the callback
 
         # --- Configuration ---
         self.enabled = self.vision_config.emotion_analysis_enabled
