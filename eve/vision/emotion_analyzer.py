@@ -63,7 +63,7 @@ class EmotionAnalyzer:
         self.valid_emotion_names: List[str] = [e.value for e in Emotion]
         self.display_config = config.display # Needed for mapping fallback
         
-        self.default_display_emotion = self.display_config.default_emotion
+        self.default_display_emotion = self.display_config.DEFAULT_EMOTION
         
         self.detector: Optional[FER] = None
         self.fer_initialized: bool = False
