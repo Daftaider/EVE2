@@ -95,9 +95,14 @@ class EVEApplication:
         signal.signal(signal.SIGTERM, self._signal_handler)
 
     def _signal_handler(self, signum, frame):
-        """Sets the running flag to False on receiving SIGINT or SIGTERM."""
-        logger.info(f"Received signal {signum}. Initiating shutdown...")
-        self._running = False
+        """Sets the running flag to False and attempts graceful shutdown."""
+        if self._running: # Prevent multiple shutdowns
+             logger.info(f"Received signal {signum}. Initiating shutdown...")
+             self._running = False
+             # Directly signal the orchestrator to stop if it exists
+             if self.orchestrator:
+                  logger.info("Signaling orchestrator to stop...")
+                  self.orchestrator.stop()
 
     def run(self):
         """Initializes orchestrator and runs the main application loop."""

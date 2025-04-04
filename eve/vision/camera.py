@@ -378,6 +378,10 @@ class Camera:
                 #         time.sleep(delay)
                 
             except Exception as e:
+                # Avoid logging errors during normal shutdown
+                if self._stop_event.is_set():
+                     self.logger.info("Capture loop interrupted by stop event.")
+                     break
                 self.logger.error(f"Exception in camera capture loop ({self.camera_backend}): {e}", exc_info=True)
                 consecutive_error_count += 1
                 if consecutive_error_count >= max_consecutive_errors:
@@ -386,6 +390,7 @@ class Camera:
                 time.sleep(1.0) # Wait after error
                 
         self.logger.info("Capture thread finished.")
+        # Mark as not running AFTER loop exit
         self.is_running = False
         
     def start(self) -> bool:
@@ -400,24 +405,34 @@ class Camera:
              
         self.logger.info("Starting camera capture thread...")
         self._stop_event.clear()
-        self._capture_thread = threading.Thread(target=self._capture_loop_internal, daemon=True)
+        # Use non-daemon thread for explicit join
+        self._capture_thread = threading.Thread(target=self._capture_loop_internal, daemon=False) # Changed daemon=False
         self._capture_thread.start()
         self.is_running = True
         return True
 
     def stop(self):
         """Stops the camera capture thread and releases resources."""
+        if not self.is_running and self._capture_thread is None:
+            self.logger.debug("Camera stop called but already stopped/not started.")
+            return
+
         self.logger.info("Stopping camera...")
         self._stop_event.set() # Signal thread to stop
-        if self._capture_thread is not None:
+
+        if self._capture_thread is not None and self._capture_thread.is_alive():
             self.logger.debug("Joining capture thread...")
-            self._capture_thread.join(timeout=2.0) # Wait for thread to exit
+            # Use a slightly longer timeout for camera thread join
+            self._capture_thread.join(timeout=5.0) # Increased timeout
             if self._capture_thread.is_alive():
-                 self.logger.warning("Capture thread did not stop gracefully.")
+                 self.logger.error("Capture thread did not stop gracefully after timeout!")
+            else:
+                 self.logger.debug("Capture thread joined successfully.")
             self._capture_thread = None
-            
-        self.release() # Release camera hardware resources
-        self.is_running = False
+
+        # Release hardware resources AFTER thread has been joined (or timed out)
+        self.release()
+        self.is_running = False # Set running state false after cleanup
         self.logger.info("Camera stopped and resources released.")
 
     def read(self) -> Tuple[bool, Optional[np.ndarray]]:
@@ -490,6 +505,7 @@ class Camera:
     def release(self):
         """Release camera hardware resources (called by stop)."""
         self.logger.debug(f"Releasing camera hardware ({self.camera_backend})...")
+        # Ensure release happens even if thread join timed out
         if self.camera_instance:
             try:
                 if self.camera_backend == 'picamera2' and hasattr(self.camera_instance, 'close'):
@@ -500,12 +516,14 @@ class Camera:
                     self.logger.info("OpenCV VideoCapture released.")
             except Exception as e:
                  self.logger.error(f"Exception during camera release/close: {e}")
-        self.camera_instance = None
-        # Don't reset backend/mock_mode here, keep info about last state
+            finally:
+                 self.camera_instance = None # Ensure instance is cleared
 
     def __enter__(self):
-        self.start()
+        # Optional: Start automatically when used as context manager
+        # self.start() # Prefer explicit start
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """Ensures stop is called when exiting context manager."""
         self.stop() 

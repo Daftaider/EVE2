@@ -196,30 +196,21 @@ class FaceDetector:
 
     def _detection_loop(self):
         """Main face detection and recognition loop running in a separate thread."""
-        self.logger.info(f"FaceDetector loop started. Using model: {self.model_name}")
-        frame_count = 0
-        empty_frame_count = 0
-        last_log_time = time.time()
-        
+        self.logger.info("FaceDetector loop started.")
         while not self._stop_event.is_set():
             try:
-                ret, frame = self.camera.read() # Read from the injected camera instance
-                frame_count += 1
-                
+                if not self.camera or not self.camera.is_open(): # Added check
+                    self.logger.warning("Camera not available or closed, stopping detection loop.")
+                    break # Exit loop if camera is gone
+
+                ret, frame = self.camera.read() # Potential blocking call
+
                 if not ret or frame is None:
-                    empty_frame_count += 1
-                    if time.time() - last_log_time > 5.0:
-                        self.logger.warning(f"Received invalid/empty frame from camera ({empty_frame_count}/{frame_count} empty). Thread still alive: {self.camera._capture_thread.is_alive() if hasattr(self.camera, '_capture_thread') else 'N/A'}")
-                        last_log_time = time.time()
-                    time.sleep(0.1) # Avoid busy-waiting on camera errors
+                    # Avoid busy-waiting if camera read fails temporarily
+                    time.sleep(0.1)
                     continue
-                
-                # Reset counter on valid frame
-                if empty_frame_count > 0: 
-                    self.logger.info(f"Camera stream recovered after {empty_frame_count} empty frames.")
-                    empty_frame_count = 0
-                
-                # --- Face Detection --- 
+
+                # --- Face Detection ---
                 face_locations = self._detect_faces(frame)
                 
                 face_encodings = []
@@ -301,10 +292,16 @@ class FaceDetector:
                     with self._lock:
                         self._current_debug_frame = debug_frame
                 
-                # Control loop rate (optional, camera might control FPS)
-                # time.sleep(0.01) 
-                
+                # Short sleep to prevent hogging CPU if camera read is very fast
+                # Adjust based on actual performance needs
+                time.sleep(0.01)
+
             except Exception as e:
+                # Check if the exception is due to the stop event being set
+                # to avoid logging errors during normal shutdown.
+                if self._stop_event.is_set():
+                    self.logger.info("FaceDetector loop interrupted by stop event.")
+                    break
                 self.logger.error(f"Error in face detection loop: {e}", exc_info=True)
                 time.sleep(1.0) # Avoid tight loop on critical error
 
@@ -321,27 +318,40 @@ class FaceDetector:
              return False
              
         self.logger.info("Starting FaceDetector thread...")
-        self._stop_event.clear()
-        self._detection_thread = threading.Thread(target=self._detection_loop, daemon=True)
+        self._stop_event.clear() # Ensure event is clear before starting
+        # Make thread non-daemon for explicit join on stop
+        self._detection_thread = threading.Thread(target=self._detection_loop, daemon=False) # Changed daemon=False
         self._running = True
         self._detection_thread.start()
         return True
 
     def stop(self):
         """Stop face detection thread."""
+        if not self._running:
+            self.logger.debug("FaceDetector stop called but not running.")
+            return
+
         self.logger.info("Stopping FaceDetector thread...")
-        self._stop_event.set()
-        if self._detection_thread is not None:
-            self._detection_thread.join(timeout=2.0)
+        self._stop_event.set() # Signal the loop to stop
+
+        if self._detection_thread is not None and self._detection_thread.is_alive():
+            self.logger.debug("Joining FaceDetector thread...")
+            self._detection_thread.join(timeout=5.0) # Increased timeout
             if self._detection_thread.is_alive():
-                 self.logger.warning("Face detector thread did not stop gracefully.")
+                 # This is a potential hang point
+                 self.logger.error("Face detector thread did not stop gracefully after timeout!")
+                 # Consider if any forceful termination is needed/possible, though generally avoided
+            else:
+                 self.logger.debug("FaceDetector thread joined successfully.")
             self._detection_thread = None
+
         self._running = False
         # Don't release camera here, camera lifecycle managed externally
         self.logger.info("Face detector stopped.")
 
     def is_running(self) -> bool:
         """Check if detector thread is running."""
+        # Check thread existence and liveness
         return self._running and self._detection_thread is not None and self._detection_thread.is_alive()
 
     def get_debug_frame(self) -> Optional[np.ndarray]:

@@ -618,10 +618,9 @@ class EVEOrchestrator:
         if self.speech_recognizer and hasattr(self.speech_recognizer, 'stop'):
              self.logger.debug("Stopping Speech Recognizer...")
              self.speech_recognizer.stop()
-        if self.audio_capture and hasattr(self.audio_capture, 'stop_recording'): # Use correct method name
+        if self.audio_capture and hasattr(self.audio_capture, 'stop'): 
             self.logger.debug("Stopping Audio Capture...")
-            self.audio_capture.stop_recording()
-            if hasattr(self.audio_capture, 'cleanup'): self.audio_capture.cleanup()
+            self.audio_capture.stop()
         if self.tts and hasattr(self.tts, 'stop'):
              self.logger.debug("Stopping TTS...")
              self.tts.stop()
