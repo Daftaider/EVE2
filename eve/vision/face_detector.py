@@ -75,7 +75,11 @@ class FaceDetector:
         self.comparison_tolerance = self.vision_config.face_recognition_tolerance
         self.known_face_encodings: List[np.ndarray] = []
         self.known_face_names: List[str] = []
-        self._load_known_faces() # Load on init
+        # Only load known faces if recognition is enabled
+        if self.recognition_enabled:
+            self._load_known_faces()
+        else:
+            self.logger.info("Face recognition disabled, skipping loading of known faces.")
 
         # Face Learning State
         self._learning_face_active: bool = False
