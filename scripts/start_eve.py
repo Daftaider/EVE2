@@ -117,19 +117,19 @@ class EVEApplication:
             setup_logging(self.config.logging, self.args.debug)
             logger.debug(f"Loaded configuration: {self.config!r}")
 
-            # 3. Initialize Pygame (if display enabled)
+            # 3. Initialize Pygame (if display enabled) - DISABLED FOR TESTING HANG
             pygame_initialized = False
-            if self.config.hardware.display_enabled:
-                logger.info("Initializing Pygame...")
-                try:
-                    pygame.init()
-                    pygame_initialized = True
-                    logger.info("Pygame initialized.")
-                except Exception as pg_err:
-                    logger.error(f"Pygame initialization failed: {pg_err}. Display might not work.")
+            # if self.config.hardware.display_enabled:
+            #     logger.info("Initializing Pygame...")
+            #     try:
+            #         pygame.init()
+            #         pygame_initialized = True
+            #         logger.info("Pygame initialized.")
+            #     except Exception as pg_err:
+            #         logger.error(f"Pygame initialization failed: {pg_err}. Display might not work.")
+            logger.warning("Pygame initialization explicitly disabled for shutdown hang test.")
 
             # 4. Initialize Subsystems
-            # (Keep existing subsystem init logic - slightly simplified below)
             camera = Camera(self.config) if self.config.hardware.camera_enabled else None
             if camera and not camera.start(): camera = None # Start and check
 
@@ -141,8 +141,12 @@ class EVEApplication:
 
             emotion_analyzer = EmotionAnalyzer(self.config) if self.config.vision.emotion_detection_enabled else None
 
-            display_controller = VisionDisplay(self.config, camera, face_detector, object_detector) if pygame_initialized and camera else None
-            if display_controller and not display_controller.start(): display_controller = None # Start and check
+            # --- Disable VisionDisplay --- 
+            display_controller = None
+            logger.warning("VisionDisplay explicitly disabled for shutdown hang test.")
+            # display_controller = VisionDisplay(self.config, camera, face_detector, object_detector) if pygame_initialized and camera else None
+            # if display_controller and not display_controller.start(): display_controller = None # Start and check
+            # -----------------------------
 
             audio_capture = AudioCapture(self.config.speech) if self.config.hardware.audio_input_enabled else None
             if audio_capture: audio_capture.start_recording() # Start stream
@@ -193,7 +197,7 @@ class EVEApplication:
             logger.info(f"--- EVE Application Run Method Reached Finally Block (Exit Code Hint: {exit_code}) ---")
             # Orchestrator stop is handled by 'with' statement's __exit__
             # Pygame quit should happen here if initialized
-            if pygame_initialized:
+            if pygame_initialized: # This will now be false
                 logger.info("Attempting Pygame quit...")
                 try:
                      pygame.quit()
@@ -201,7 +205,7 @@ class EVEApplication:
                 except Exception as e:
                      logger.error(f"Error during pygame quit: {e}")
             else:
-                 logger.info("Pygame was not initialized, skipping quit.")
+                 logger.info("Pygame was not initialized (or disabled for test), skipping quit.")
 
             logger.info("--- EVE Main Application Shutdown Complete --- Returning from run() ---")
             # Return exit code to main()
