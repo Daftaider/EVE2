@@ -113,10 +113,13 @@ class VisionDisplay:
 
         try: # Wrap entire loop for robust cleanup
             while not self._stop_event.is_set():
+                loop_iter_start = time.perf_counter()
+                # self.logger.debug("Display Loop: Top of iteration")
                 start_time = time.perf_counter()
                 try:
+                    # self.logger.debug("Display Loop: Reading camera...")
                     ret, frame = self.camera.read()
-                    # Check stop event immediately after potentially blocking camera read
+                    # self.logger.debug(f"Display Loop: Camera read took {(time.perf_counter() - loop_iter_start)*1000:.1f} ms")
                     if self._stop_event.is_set(): break
 
                     if not ret or frame is None:
@@ -129,6 +132,7 @@ class VisionDisplay:
                     display_frame = frame.copy()
 
                     # --- Get Detection Results & Draw --- 
+                    detect_start = time.perf_counter()
                     # Face Detection/Recognition Drawing
                     if self.face_detector and self.face_detector.debug_mode:
                          debug_face_frame = self.face_detector.get_debug_frame()
@@ -140,15 +144,16 @@ class VisionDisplay:
                     # Object Detection Drawing
                     if self.object_detector and self.config.vision.object_detection_enabled:
                         try:
-                             # WARNING: Synchronous call, potential hang point
-                             self.logger.debug("Calling object_detector.detect()...")
+                             # self.logger.debug("Display Loop: Calling object_detector.detect()...")
                              detections = self.object_detector.detect(display_frame)
-                             self.logger.debug("Finished object_detector.detect().")
+                             # self.logger.debug("Display Loop: Finished object_detector.detect().")
                              display_frame = self.object_detector.draw_detections(display_frame, detections)
                         except Exception as od_err:
                              self.logger.error(f"Error during object detection/drawing: {od_err}", exc_info=False)
+                    # self.logger.debug(f"Display Loop: Detections took {(time.perf_counter() - detect_start)*1000:.1f} ms")
 
                     # --- Display Frame --- 
+                    display_start = time.perf_counter()
                     if not self._window_created:
                         # Create window only once
                         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
@@ -172,8 +177,9 @@ class VisionDisplay:
                          y_offset = (disp_h - rh) // 2
                          canvas[y_offset:y_offset+rh, x_offset:x_offset+rw] = resized_frame
                                       
+                    # self.logger.debug("Display Loop: Calling imshow...")
                     cv2.imshow(self.window_name, canvas)
-                    # Check stop event immediately after potentially blocking imshow
+                    # self.logger.debug(f"Display Loop: imshow took {(time.perf_counter() - display_start)*1000:.1f} ms")
                     if self._stop_event.is_set(): break
                     
                     # --- Store Last Frame --- 
@@ -181,8 +187,10 @@ class VisionDisplay:
                          self._last_frame = display_frame.copy()
                      
                     # --- Handle Window Events & Exit Conditions --- 
+                    waitkey_start = time.perf_counter()
+                    # self.logger.debug("Display Loop: Calling waitKey...")
                     key = cv2.waitKey(1) & 0xFF # Essential!
-                    # Check stop event immediately after potentially blocking waitKey
+                    # self.logger.debug(f"Display Loop: waitKey took {(time.perf_counter() - waitkey_start)*1000:.1f} ms")
                     if self._stop_event.is_set(): break
 
                     # 1. Check for ESC key press
