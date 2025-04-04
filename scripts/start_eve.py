@@ -141,11 +141,11 @@ class EVEApplication:
 
             emotion_analyzer = EmotionAnalyzer(self.config) if self.config.vision.emotion_detection_enabled else None
 
-            # --- Disable VisionDisplay --- 
-            display_controller = None
-            logger.warning("VisionDisplay explicitly disabled for shutdown hang test.")
-            # display_controller = VisionDisplay(self.config, camera, face_detector, object_detector) if pygame_initialized and camera else None
-            # if display_controller and not display_controller.start(): display_controller = None # Start and check
+            # --- RE-ENABLE VisionDisplay --- 
+            # display_controller = None
+            # logger.warning("VisionDisplay explicitly disabled for shutdown hang test.")
+            display_controller = VisionDisplay(self.config, camera, face_detector, object_detector) if pygame_initialized and camera else None
+            if display_controller and not display_controller.start(): display_controller = None # Start and check
             # -----------------------------
 
             audio_capture = AudioCapture(self.config.speech) if self.config.hardware.audio_input_enabled else None

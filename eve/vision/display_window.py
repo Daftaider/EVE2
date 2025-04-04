@@ -69,8 +69,9 @@ class VisionDisplay:
         self._stop_event.clear()
         self._running = True
         self._window_created = False # Reset flag on start
-        # Use non-daemon thread for explicit join
-        self._display_thread = threading.Thread(target=self._display_loop, daemon=False)
+        # Use non-daemon thread for explicit join --- REVERT TO DAEMON
+        # self._display_thread = threading.Thread(target=self._display_loop, daemon=False)
+        self._display_thread = threading.Thread(target=self._display_loop, daemon=True) # Revert to daemon
         self._display_thread.start()
         self.logger.info("Vision display thread started.")
 
