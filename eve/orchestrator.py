@@ -598,23 +598,27 @@ class EVEOrchestrator:
             if self._event_thread.is_alive(): self.logger.warning("Event thread did not stop.")
         self._event_thread = None
 
-        # Stop Display Controller
-        if self.display_controller and hasattr(self.display_controller, 'stop'):
-            self.logger.debug("Stopping Display Controller...")
-            self.display_controller.stop()
-
-        # Stop Vision Subsystems
+        # --- Stop Vision Subsystems FIRST (Detectors then Display then Camera) ---
+        # Stop detectors first, as display loop might call them
         if self.face_detector and hasattr(self.face_detector, 'stop'):
             self.logger.debug("Stopping Face Detector...")
             self.face_detector.stop()
         if self.object_detector and hasattr(self.object_detector, 'stop'):
             self.logger.debug("Stopping Object Detector...")
             self.object_detector.stop()
+
+        # Stop Display Controller AFTER detectors
+        if self.display_controller and hasattr(self.display_controller, 'stop'):
+            self.logger.debug("Stopping Display Controller...")
+            self.display_controller.stop()
+
+        # Stop Camera AFTER display (which uses it)
         if self.camera and hasattr(self.camera, 'stop'):
             self.logger.debug("Stopping Camera...")
             self.camera.stop()
+        # -------------------------------------------------------------------------
 
-        # Stop Speech Subsystems (Recognizer first, then capture)
+        # --- Stop Speech Subsystems --- 
         if self.speech_recognizer and hasattr(self.speech_recognizer, 'stop'):
              self.logger.debug("Stopping Speech Recognizer...")
              self.speech_recognizer.stop()
