@@ -8,9 +8,13 @@ from typing import Dict, Optional, List, Union, Any, Callable
 
 import cv2
 import numpy as np
+import random # Added for fallback
 
 # Use the main config object
-from eve.config import SystemConfig, VisionConfig 
+from eve.config import SystemConfig, VisionConfig
+# Import the canonical Emotion enum
+from eve.config.display import Emotion
+
 # Removed unused Emotion import from display config
 
 # Removed dependency mocking setup and sys imports
@@ -55,9 +59,9 @@ class EmotionAnalyzer:
         self.enabled = self.vision_config.emotion_detection_enabled
         self.model_name = self.vision_config.emotion_detection_model.lower()
         self.confidence_threshold = self.vision_config.emotion_confidence_threshold
-        # Correctly access emotions via vision config
-        self.configured_emotions = self.vision_config.emotions # List of emotions system uses/maps to
-        self.display_config = config.display # Needed for mapping
+        # Get the list of valid emotion names from the imported Emotion enum
+        self.valid_emotion_names: List[str] = [e.value for e in Emotion]
+        self.display_config = config.display # Needed for mapping fallback
         
         self.default_display_emotion = self.display_config.default_emotion
         
@@ -203,11 +207,12 @@ class EmotionAnalyzer:
                 if not fer_emotion_scores: return {}
 
                 # Map FER scores to our configured emotions
-                mapped_scores: Dict[str, float] = {emo: 0.0 for emo in self.configured_emotions}
+                # Use the list derived from the Emotion enum
+                mapped_scores: Dict[str, float] = {emo_name: 0.0 for emo_name in self.valid_emotion_names}
                 for fer_emotion, fer_score in fer_emotion_scores.items():
                     mapped_emotion = self._map_emotion(fer_emotion)
                     if mapped_emotion in mapped_scores:
-                        # If multiple FER emotions map to the same configured one (e.g., disgust -> confused?),
+                        # If multiple FER emotions map to the same configured one,
                         # take the max score for that target emotion.
                         mapped_scores[mapped_emotion] = max(mapped_scores[mapped_emotion], fer_score)
                 
@@ -236,11 +241,12 @@ class EmotionAnalyzer:
         mapped = emotion_mapping.get(fer_emotion.lower(), "neutral")
         
         # Ensure the result is one of the emotions the system actually uses/displays
-        if mapped not in self.configured_emotions:
-            self.logger.debug(f"Mapped emotion '{mapped}' from FER '{fer_emotion}' is not in configured list: {self.configured_emotions}. Defaulting.")
+        # Check against the list derived from the Emotion enum
+        if mapped not in self.valid_emotion_names:
+            self.logger.debug(f"Mapped emotion '{mapped}' from FER '{fer_emotion}' is not in configured list: {self.valid_emotion_names}. Defaulting.")
             # Fallback to the configured default display emotion
-            return self.default_display_emotion 
-            
+            return self.default_display_emotion
+
         return mapped
 
     def _fallback_analyze(self, face_image: np.ndarray) -> Optional[str]:
@@ -248,19 +254,21 @@ class EmotionAnalyzer:
         self.logger.debug("Using fallback emotion analysis.")
         # Simulate low confidence by only sometimes returning an emotion
         if random.random() < 0.3: # 30% chance of returning *any* emotion
-             return random.choice(self.configured_emotions)
+             # Choose from the list derived from the Emotion enum
+             return random.choice(self.valid_emotion_names)
         else:
              return None # Simulate confidence below threshold
 
     def _fallback_confidences(self, face_image: np.ndarray) -> Dict[str, float]:
          """Fallback: Returns roughly normalized random scores for configured emotions."""
          self.logger.debug("Using fallback emotion confidences.")
-         scores = {emo: random.random() for emo in self.configured_emotions}
+         # Use the list derived from the Emotion enum
+         scores = {emo_name: random.random() for emo_name in self.valid_emotion_names}
          total = sum(scores.values())
          if total > 0:
-              normalized_scores = {emo: score / total for emo, score in scores.items()}
+              normalized_scores = {emo_name: score / total for emo_name, score in scores.items()}
          else:
-              normalized_scores = {emo: 1.0 / len(scores) for emo in self.configured_emotions}
+              normalized_scores = {emo_name: 1.0 / len(scores) for emo_name in self.valid_emotion_names}
          return normalized_scores
 
 # Removed unused/mock methods: analyze_frame, get_current_emotion, set_emotion

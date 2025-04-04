@@ -82,22 +82,23 @@ class ObjectDetector:
         self.hailo_target = None # VDevice or Device
         self.hailo_hef = None
         self.hailo_network_group = None
-        self.hailo_input_vstream_info = {} # Store details for the input stream
-        self.hailo_output_details = [] # Store list of dicts for output streams
+        self.hailo_input_vstream_infos = None
+        self.hailo_output_vstream_infos = None
 
         self.yolo_model = None # For CPU fallback
         self.hailo_network_group_active = False # Track activation state
 
+        # Check for Hailo config (adjust attribute name if necessary)
+        hardware_config = config.hardware
+        # use_hailo = hardware_config.accelerator == 'hailo' # Attribute doesn't exist in HardwareConfig
+        use_hailo = False # Temporarily disable Hailo check until config is added
+
         # 1. Check configuration and Hailo availability
-        use_hailo = hardware_config.accelerator == 'hailo'
-        hailo_hef_path = hardware_config.hailo_hef_path
-        hailo_network_name = hardware_config.hailo_network_name # Get from hardware config
-        
         if use_hailo and _HAILO_AVAILABLE and HailoFormatType is not None:
             self.logger.info("Hailo usage requested and HailoRT library is available.")
             
-            if not hailo_hef_path or not os.path.exists(hailo_hef_path):
-                self.logger.warning(f"Hailo HEF file not found or path not specified: {hailo_hef_path}. Falling back to CPU.")
+            if not hardware_config.hailo_hef_path or not os.path.exists(hardware_config.hailo_hef_path):
+                self.logger.warning(f"Hailo HEF file not found or path not specified: {hardware_config.hailo_hef_path}. Falling back to CPU.")
             else:
                 try:
                     devices = Device.scan()
@@ -108,14 +109,14 @@ class ObjectDetector:
                         self.hailo_target = VDevice()
                         self.logger.info(f"Created Hailo VDevice target.")
 
-                        self.logger.info(f"Loading Hailo HEF from: {hailo_hef_path}")
-                        self.hailo_hef = self.hailo_target.load_hef(hailo_hef_path)
+                        self.logger.info(f"Loading Hailo HEF from: {hardware_config.hailo_hef_path}")
+                        self.hailo_hef = self.hailo_target.load_hef(hardware_config.hailo_hef_path)
                         network_group_names = self.hailo_hef.get_network_group_names()
                         self.logger.info(f"Successfully loaded HEF. Network groups: {network_group_names}")
                         
                         # Determine network group name
-                        if hailo_network_name and hailo_network_name in network_group_names:
-                             network_group_name = hailo_network_name
+                        if hardware_config.hailo_network_name and hardware_config.hailo_network_name in network_group_names:
+                             network_group_name = hardware_config.hailo_network_name
                         elif network_group_names:
                              network_group_name = network_group_names[0]
                              self.logger.info(f"Using first available network group: {network_group_name}")
@@ -138,18 +139,18 @@ class ObjectDetector:
                              
                         # Store input details
                         input_vstream = self.hailo_input_vstreams[0]
-                        self.hailo_input_vstream_info = {
+                        self.hailo_input_vstream_infos = {
                             'name': input_vstream.name,
                             'shape': input_vstream.shape,
                             'format_type': input_vstream.format.type,
                             'quant_info': input_vstream.get_quant_info()
                         }
-                        self.logger.info(f"Hailo Input Shape: {self.hailo_input_vstream_info['shape']}, Format: {self.hailo_input_vstream_info['format_type']}")
-                        if not (len(self.hailo_input_vstream_info['shape']) == 4 and self.hailo_input_vstream_info['shape'][3] == 3): 
-                             self.logger.warning(f"Hailo input shape {self.hailo_input_vstream_info['shape']} might not be standard N H W C image format.")
+                        self.logger.info(f"Hailo Input Shape: {self.hailo_input_vstream_infos['shape']}, Format: {self.hailo_input_vstream_infos['format_type']}")
+                        if not (len(self.hailo_input_vstream_infos['shape']) == 4 and self.hailo_input_vstream_infos['shape'][3] == 3): 
+                             self.logger.warning(f"Hailo input shape {self.hailo_input_vstream_infos['shape']} might not be standard N H W C image format.")
 
                         # Store output details (like names) if needed for postprocessing
-                        self.hailo_output_details = []
+                        self.hailo_output_vstream_infos = []
                         for ovs in self.hailo_output_vstreams:
                             details = {
                                 'name': ovs.name,
@@ -157,7 +158,7 @@ class ObjectDetector:
                                 'format_type': ovs.format.type,
                                 'quant_info': ovs.get_quant_info()
                             }
-                            self.hailo_output_details.append(details)
+                            self.hailo_output_vstream_infos.append(details)
                             self.logger.info(f"Hailo Output VStream Info: Name={details['name']}, Shape={details['shape']}, Format={details['format_type']}, Quant={details['quant_info']}")
 
                         self.hailo_network_group.activate()
@@ -250,19 +251,19 @@ class ObjectDetector:
                  
         self.hailo_target = None
         self.hailo_hef = None
-        self.hailo_input_vstream_info = {}
-        self.hailo_output_details = []
+        self.hailo_input_vstream_infos = None
+        self.hailo_output_vstream_infos = None
         self.hailo_enabled = False
         self.logger.debug("Finished Hailo resource cleanup.")
 
     def _preprocess_hailo(self, frame: np.ndarray) -> np.ndarray:
         """Preprocess frame for Hailo input requirements using stored info."""
-        if not self.hailo_input_vstream_info:
+        if not self.hailo_input_vstream_infos:
             raise RuntimeError("Hailo input vstream info not available for preprocessing.")
 
-        input_shape = self.hailo_input_vstream_info['shape']
-        input_format_type = self.hailo_input_vstream_info['format_type']
-        # quant_info = self.hailo_input_vstream_info['quant_info'] # Input quantization rarely needed
+        input_shape = self.hailo_input_vstream_infos['shape']
+        input_format_type = self.hailo_input_vstream_infos['format_type']
+        # quant_info = self.hailo_input_vstream_infos['quant_info'] # Input quantization rarely needed
 
         target_height, target_width = input_shape[1], input_shape[2]
         processed_frame = cv2.resize(frame, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
@@ -321,7 +322,7 @@ class ObjectDetector:
         """Postprocess Hailo output using stored vstream details (adaptive)."""
         detections = []
         original_height, original_width = original_shape
-        if not self.hailo_output_details or len(output_tensors) != len(self.hailo_output_details):
+        if not self.hailo_output_vstream_infos or len(output_tensors) != len(self.hailo_output_vstream_infos):
             self.logger.error("Output tensor count mismatch or missing details. Cannot postprocess.")
             return []
         
@@ -329,8 +330,8 @@ class ObjectDetector:
         # Strategy: Try to match known YOLO patterns based on tensor count and shapes.
         # Primarily supports single combined output tensor pattern for now.
         
-        if len(self.hailo_output_details) == 1:
-            details = self.hailo_output_details[0]
+        if len(self.hailo_output_vstream_infos) == 1:
+            details = self.hailo_output_vstream_infos[0]
             tensor = output_tensors[0]
             self.logger.debug(f"Processing single output tensor: Name={details['name']}, Shape={details['shape']}, Format={details['format_type']}")
             
@@ -378,7 +379,7 @@ class ObjectDetector:
                 boxes = []
                 scores = []
                 class_ids = []
-                input_height, input_width = self.hailo_input_vstream_info['shape'][1:3]
+                input_height, input_width = self.hailo_input_vstream_infos['shape'][1:3]
 
                 for i in range(num_proposals):
                     candidate = output_data[i]
@@ -440,13 +441,13 @@ class ObjectDetector:
             else:
                  self.logger.warning(f"Unsupported shape for single output tensor: {details['shape']}. Cannot parse.")
 
-        elif len(self.hailo_output_details) > 1:
+        elif len(self.hailo_output_vstream_infos) > 1:
             # Placeholder for handling multiple output tensors (e.g., separate box/score/class tensors)
             # Would need logic to identify tensor roles based on names/shapes/etc.
-            self.logger.warning(f"Postprocessing for {len(self.hailo_output_details)} output tensors is not implemented. Check HEF structure.")
+            self.logger.warning(f"Postprocessing for {len(self.hailo_output_vstream_infos)} output tensors is not implemented. Check HEF structure.")
             # Example: Find tensors named like 'boxes' and 'scores'
             # boxes_tensor, scores_tensor = None, None
-            # for i, details in enumerate(self.hailo_output_details):
+            # for i, details in enumerate(self.hailo_output_vstream_infos):
             #    if 'box' in details['name'].lower(): boxes_tensor = output_tensors[i]
             #    if 'score' in details['name'].lower(): scores_tensor = output_tensors[i]
             # ... then parse, dequantize, and apply NMS using these tensors ...
@@ -476,7 +477,7 @@ class ObjectDetector:
         if not self.hailo_network_group_active: # Check if group is active
              self.logger.error("Hailo network group is not active. Cannot run inference.")
              return []
-        if not self.hailo_output_details: # Check if output details were stored
+        if not self.hailo_output_vstream_infos: # Check if output details were stored
              self.logger.error("Hailo output details missing. Cannot run inference.")
              return []
              
