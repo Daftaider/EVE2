@@ -120,15 +120,31 @@ class AudioCapture:
                  logger.warning(f"Converting non-int16 audio data ({indata.dtype}) to int16 directly.")
                  int16_data = indata.astype(np.int16)
 
-            # --- Handle potential Stereo input when Mono was requested --- 
-            if int16_data.ndim == 2 and self.channels == 1:
-                 logger.warning(f"Received 2D audio data (shape: {int16_data.shape}) when 1 channel was requested. Taking first channel.")
-                 int16_data = int16_data[:, 0]
+            # --- Handle different input shapes, ensuring 1D mono output --- 
+            if int16_data.ndim == 1:
+                 pass # Already 1D mono, proceed
+            elif int16_data.ndim == 2:
+                 if int16_data.shape[1] == 1 and self.channels == 1:
+                     # Received (N, 1) shape for mono, squeeze to (N,)
+                     int16_data = np.squeeze(int16_data, axis=1)
+                 elif int16_data.shape[1] > 1 and self.channels == 1:
+                     # Received (N, M>1) shape for mono, warn and take first channel
+                     logger.warning(f"Received {int16_data.shape[1]} channels (shape: {int16_data.shape}) when 1 was requested. Taking first channel.")
+                     int16_data = int16_data[:, 0]
+                 else:
+                      # Received 2D data, but multiple channels might be expected
+                      # If self.channels > 1, this would require different handling (e.g., averaging)
+                      # For now, assuming we only process first channel if multichannel detected unexpectedly
+                      logger.warning(f"Received unexpected 2D audio data (shape: {int16_data.shape}), configured channels={self.channels}. Taking first channel.")
+                      int16_data = int16_data[:, 0] 
+            else:
+                 # Handle unexpected dimensions (ndim > 2 or 0)
+                 logger.error(f"Unexpected audio data dimensions: {int16_data.ndim}, expected 1 or 2. Skipping frame.")
+                 return
 
-            # --- VERIFY SHAPE (Now expecting 1D) --- 
-            # Check number of dimensions (should be 1 for mono raw audio frame)
+            # --- VERIFY SHAPE (Now MUST be 1D) --- 
             if int16_data.ndim != 1:
-                 logger.error(f"Unexpected audio data dimensions: {int16_data.ndim}, expected 1. Skipping frame.")
+                 logger.error(f"Audio data is not 1D after processing (shape: {int16_data.shape}). Skipping frame.")
                  return
             # Check number of samples
             if int16_data.shape[0] != self.chunk_size:
