@@ -35,4 +35,8 @@ black>=23.1.0
 isort>=5.12.0
 mypy>=1.0.0
 flake8>=6.0.0
-pylint>=2.16.0 
+pylint>=2.16.0
+
+# Added from the code block
+openwakeword>=0.5.0
+onnxruntime>=1.16.0 

@@ -116,17 +116,15 @@ class SpeechRecognizer:
     def process_audio_chunk(
         self,
         audio_data: bytes,
-        listen_for_command: bool,
-        wake_word_callback: Callable[[], None],
         command_callback: Callable[[str, float], None]
     ):
-        """Process a chunk of audio data using faster-whisper."""
+        """Process an audio chunk using faster-whisper for command recognition."""
         if not self.model:
              self.logger.error("Whisper model not loaded. Cannot process audio.")
              return
         if not audio_data:
             return
-             
+
         try:
             # Convert int16 bytes back to float32 numpy array
             # Ensure data length is multiple of sample width
@@ -155,25 +153,16 @@ class SpeechRecognizer:
                  self.logger.info(f"Whisper recognized: '{text}' (Lang: {info.language}, Prob: {info.language_probability:.2f})")
             else:
                  self.logger.debug("Whisper produced no text segments.")
-                 text = "" # Ensure text is defined
+                 return # No text, nothing to do
                  
             # --- Process recognized text --- 
             if text:
-                text_lower = text.lower()
-                # Use a placeholder confidence if Whisper doesn't provide one easily
+                # Always assume it's a command now, call the command callback
+                # Use a placeholder confidence if needed
                 confidence = 0.8 # Placeholder confidence
-                if listen_for_command:
-                     self.logger.debug(f"Calling command callback for: '{text}'")
-                     command_callback(text, confidence) 
-                else:
-                     # Check for wake word (case-insensitive)
-                     self.logger.debug(f"Checking for wake word '{self.wake_word}' in '{text_lower}'...")
-                     if self.wake_word in text_lower:
-                          self.logger.info(f"Wake word FOUND in text: '{text}'")
-                          wake_word_callback()
-                     else:
-                          self.logger.debug("Wake word NOT found in text.")
-                          
+                self.logger.debug(f"Calling command callback for: '{text}'")
+                command_callback(text, confidence)
+
         except Exception as e:
             self.logger.error(f"Unexpected error processing audio chunk with Whisper: {e}", exc_info=True)
 
@@ -200,7 +189,7 @@ class SpeechRecognizer:
             # Transcribe the audio file
             with open(file_path, "rb") as f:
                 audio_data = f.read()
-                text, confidence = self.process_audio_chunk(audio_data, False, lambda: None, lambda t, c: None)
+                text, confidence = self.process_audio_chunk(audio_data, lambda t, c: None)
                 text = text.strip()
                 
                 logger.info(f"Recognized from file: '{text}'")

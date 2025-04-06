@@ -3,7 +3,10 @@ import queue
 import threading
 import sounddevice as sd
 import numpy as np
-import pvporcupine
+# Remove pvporcupine import
+# import pvporcupine
+# Add OpenWakeWord import
+from openwakeword.model import Model as OpenWakeWordModel
 from typing import Optional, List, TYPE_CHECKING
 
 # Use TYPE_CHECKING to avoid circular import if SpeechConfig is complex
@@ -13,131 +16,59 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 class AudioCapture:
-    """Audio capture module for EVE using sounddevice."""
+    """Audio capture module using sounddevice and OpenWakeWord."""
     
     def __init__(self, speech_config: 'SpeechConfig'):
-        logger.info("Initializing audio capture")
+        logger.info("Initializing audio capture with OpenWakeWord")
         self.speech_config = speech_config
         self.sample_rate = getattr(self.speech_config, 'sample_rate', 16000)
         self.channels = getattr(self.speech_config, 'channels', 1)
         self.device_index = getattr(self.speech_config, 'audio_device_index', None)
+        self.wake_word_enabled = getattr(self.speech_config, 'wake_word_enabled', True)
+        self.wake_word_model_type = getattr(self.speech_config, 'wake_word_model', 'openwakeword').lower()
 
-        self.porcupine: Optional[pvporcupine.Porcupine] = None
-        self._init_porcupine() # Initializes Porcupine if enabled
+        # OpenWakeWord specific settings
+        self.oww_model: Optional[OpenWakeWordModel] = None
+        self.oww_inference_threshold = getattr(self.speech_config, 'openwakeword_inference_threshold', 0.7)
+        # OWW works on 16kHz mono audio, chunk size must be multiple of frame samples (e.g., 1280 for 80ms)
+        # Get frame_samples from model if available, otherwise use default (e.g., 1280)
+        # We initialize OWW first to get frame_samples if possible
+        self._init_openwakeword()
+        oww_frame_samples = self.oww_model.model_definition['ww_model_definition']['frame_samples'] if self.oww_model else 1280
+        # Ensure chunk size is a multiple of OWW frame samples for optimal processing
+        self.chunk_size = oww_frame_samples * 2 # Process 160ms chunks (adjust multiplier as needed)
 
-        # Set chunk size based on Porcupine or config
-        if self.porcupine:
-             self.chunk_size = self.porcupine.frame_length
-             logger.info(f"Using Porcupine frame length as chunk size: {self.chunk_size}")
-        else:
-             # Use chunk_size from config, fall back to 1024
-             self.chunk_size = getattr(self.speech_config, 'chunk_size', 1024)
-             logger.info(f"Using chunk size: {self.chunk_size}")
-
-        self.audio_queue = queue.Queue(maxsize=100) # Add a maxsize to prevent unbounded growth
+        self.audio_queue = queue.Queue(maxsize=100) # For main STT
+        self.wake_word_queue = queue.Queue(maxsize=20) # Separate small queue for wake word detection callbacks
         self.stream: Optional[sd.InputStream] = None
         self.is_recording = False
-        self._stop_event = threading.Event() # Use an event for signaling stop
-        self._lock = threading.Lock() # General purpose lock
+        self._stop_event = threading.Event()
+        self._lock = threading.Lock()
         self.last_rms: float = 0.0
 
-        logger.info(f"AudioCapture configured: Rate={self.sample_rate}, Channels={self.channels}, Chunk={self.chunk_size}, Device={self.device_index or 'Default'}")
+        logger.info(f"AudioCapture configured: Rate={self.sample_rate}, Channels={self.channels}, Chunk={self.chunk_size}, Device={self.device_index or 'Default'}, WW Enabled={self.wake_word_enabled}")
 
-    def _init_porcupine(self, sensitivities: Optional[List[float]] = None): # Accept optional sensitivities
-        """Initializes the Porcupine wake word engine if enabled in config."""
-        if not getattr(self.speech_config, 'wake_word_enabled', False):
-             logger.info("Porcupine wake word detection disabled in config.")
-             self.porcupine = None
-             return
+    def _init_openwakeword(self):
+        """Initialize the OpenWakeWord model."""
+        if not self.wake_word_enabled or self.wake_word_model_type != 'openwakeword':
+            logger.info("OpenWakeWord disabled or not selected.")
+            self.oww_model = None
+            return
 
-        # --- Delete existing instance if any ---
-        if self.porcupine:
-             try:
-                  self.porcupine.delete()
-                  logger.info("Deleted existing Porcupine instance before re-initialization.")
-                  self.porcupine = None
-             except Exception as e:
-                  logger.error(f"Error deleting existing Porcupine instance: {e}", exc_info=True)
-
-        logger.info(f"Initializing Porcupine with sensitivities: {sensitivities or 'default'} ...")
         try:
-            # Use the dedicated field for the access key
-            access_key = getattr(self.speech_config, 'picovoice_access_key', None)
-            if not access_key:
-                raise ValueError("picovoice_access_key not found in config.")
-
-            # Keyword setup
-            keyword_paths = getattr(self.speech_config, 'wake_word_model_path', None)
-            keywords = None
-            num_keywords = 0
-            if keyword_paths:
-                 if isinstance(keyword_paths, str): keyword_paths = [keyword_paths]
-                 num_keywords = len(keyword_paths)
-                 logger.info(f"Using Porcupine custom keyword paths: {keyword_paths}")
-            else:
-                 # Use wake_word_phrase from config as built-in keyword(s)
-                 wake_phrases = getattr(self.speech_config, 'wake_word_phrase', 'porcupine')
-                 if isinstance(wake_phrases, str): keywords = [wake_phrases.lower()] # Use lowercase standard
-                 elif isinstance(wake_phrases, list): keywords = [str(p).lower() for p in wake_phrases]
-                 else: keywords = ['porcupine'] # Fallback
-                 num_keywords = len(keywords)
-                 logger.info(f"Using Porcupine built-in keywords: {keywords}")
-
-            # --- Validate Sensitivities ---
-            final_sensitivities = sensitivities # Use passed-in value if provided
-            if final_sensitivities is None:
-                # Fallback to config value if not passed in
-                final_sensitivities = getattr(self.speech_config, 'wake_word_sensitivity', None)
-
-            # Ensure it's a list of the correct length
-            if isinstance(final_sensitivities, float):
-                 final_sensitivities = [final_sensitivities] * num_keywords
-            elif not isinstance(final_sensitivities, list):
-                 logger.warning(f"Sensitivities are not a list or float ({final_sensitivities}). Resetting to defaults.")
-                 final_sensitivities = [0.5] * num_keywords
-            elif len(final_sensitivities) != num_keywords:
-                 logger.warning(f"Number of sensitivities ({len(final_sensitivities)}) != number of keywords ({num_keywords}). Adjusting...")
-                 # Adjust list length: truncate or pad with last value
-                 if len(final_sensitivities) > num_keywords:
-                     final_sensitivities = final_sensitivities[:num_keywords]
-                 else:
-                     padding = [final_sensitivities[-1]] * (num_keywords - len(final_sensitivities))
-                     final_sensitivities.extend(padding)
-
-            # Clamp values and store
-            self.current_sensitivities = [max(0.0, min(1.0, s)) for s in final_sensitivities]
-            logger.info(f"Using final sensitivities: {self.current_sensitivities}")
-
-            # Picovoice paths
-            library_path = getattr(self.speech_config, 'porcupine_library_path', None) # Check config source name
-            model_path = getattr(self.speech_config, 'porcupine_model_path', None) # Check config source name
-
-            self.porcupine = pvporcupine.create(
-                access_key=access_key,
-                keyword_paths=keyword_paths,
-                keywords=keywords,
-                sensitivities=self.current_sensitivities,
-                library_path=library_path,
-                model_path=model_path
-            )
-            logger.info(f"Porcupine initialized. Frame length: {self.porcupine.frame_length}, Sample rate: {self.porcupine.sample_rate}, Version: {self.porcupine.version}")
-
-            # Verify expected sample rate
-            if self.porcupine.sample_rate != self.sample_rate:
-                 logger.warning(f"Porcupine expected sample rate {self.porcupine.sample_rate} differs from configured rate {self.sample_rate}. Audio may be processed incorrectly!")
-
-        except pvporcupine.PorcupineError as pe:
-             logger.error(f"Porcupine initialization error: {pe}", exc_info=True)
-             self.porcupine = None
+            logger.info("Initializing OpenWakeWord model...")
+            # Models are downloaded automatically on first use to a cache directory
+            # Specify custom models via `wakeword_models` argument if needed
+            self.oww_model = OpenWakeWordModel(inference_framework='onnx') # Use ONNX runtime
+            logger.info("OpenWakeWord model initialized successfully.")
         except Exception as e:
-             logger.error(f"Unexpected error initializing Porcupine: {e}", exc_info=True)
-             self.porcupine = None
+            logger.error(f"Error initializing OpenWakeWord model: {e}", exc_info=True)
+            self.oww_model = None
 
     def _audio_callback(self, indata: np.ndarray, frames: int, time_info, status: sd.CallbackFlags):
         """Callback function for sounddevice InputStream."""
         if status:
             logger.warning(f"Audio Callback Status: {status}")
-
         if self._stop_event.is_set() or not self.is_recording:
             return
 
@@ -148,29 +79,56 @@ class AudioCapture:
             elif indata.dtype == np.float32:
                  float_data = indata
             else:
-                 logger.warning(f"Unexpected audio dtype: {indata.dtype}. Skipping RMS calculation.")
                  float_data = None
-
             if float_data is not None:
                 rms = np.sqrt(np.mean(float_data**2))
                 with self._lock:
                     self.last_rms = float(rms)
         except Exception as e:
             logger.error(f"Error calculating RMS: {e}")
-            with self._lock:
-                 self.last_rms = 0.0
+            with self._lock: self.last_rms = 0.0
 
-        # --- Put data in queue ---
+        # Ensure audio is int16 for processing
+        if indata.dtype != np.int16:
+            logger.warning(f"Received non-int16 audio data ({indata.dtype}), attempting conversion.")
+            try:
+                # Assuming input range needs scaling if it was float
+                if np.issubdtype(indata.dtype, np.floating):
+                     indata = (indata * 32767).astype(np.int16)
+                else:
+                     indata = indata.astype(np.int16)
+            except Exception as conv_err:
+                 logger.error(f"Failed to convert audio to int16: {conv_err}")
+                 return # Skip processing if conversion fails
+
+        # --- Wake Word Detection (OpenWakeWord) --- 
+        if self.oww_model and self.wake_word_enabled:
+            try:
+                # Predict using the int16 numpy array
+                prediction = self.oww_model.predict(indata)
+                # Check scores against threshold for each ww model
+                # OWW returns scores per-model; we trigger if any exceed threshold
+                for ww_name, score in prediction.items():
+                    if score > self.oww_inference_threshold:
+                        logger.info(f"OpenWakeWord DETECTED: '{ww_name}' (Score: {score:.2f}) Threshold: {self.oww_inference_threshold}")
+                        # Put a simple signal or the name onto the wake word queue
+                        try:
+                            self.wake_word_queue.put_nowait(ww_name) 
+                        except queue.Full:
+                            logger.warning("Wake word queue full, detection missed.")
+                        # Optional: Stop processing further wake words in this chunk?
+                        break # Trigger on first detection in chunk
+            except Exception as oww_err:
+                logger.error(f"Error during OpenWakeWord prediction: {oww_err}", exc_info=False) # Reduce log spam
+
+        # --- Put data in main STT queue --- 
         try:
-            if indata.dtype != np.int16:
-                 logger.warning(f"Unexpected audio dtype {indata.dtype} in callback, expected int16.")
-                 return
             audio_bytes = indata.tobytes()
             self.audio_queue.put_nowait(audio_bytes)
         except queue.Full:
-             logger.warning("Audio queue is full. Discarding audio data.")
+             logger.warning("Audio (STT) queue is full. Discarding audio data.")
         except Exception as e:
-             logger.error(f"Error putting data into audio queue: {e}")
+             logger.error(f"Error putting data into STT audio queue: {e}")
 
     def get_last_rms(self) -> float:
          """Get the last calculated RMS value thread-safely."""
@@ -277,21 +235,18 @@ class AudioCapture:
         logger.debug("Audio queue cleared.")
 
     def stop(self): # Renamed from stop_recording
-        """Stops and closes the audio stream and cleans up Porcupine."""
+        """Stops and closes the audio stream and cleans up resources."""
         logger.info("Stopping and cleaning up AudioCapture...")
         self.stop_stream()
         self.close_stream()
-        porcupine_to_delete = None
-        with self._lock:
-            porcupine_to_delete = self.porcupine
-            self.porcupine = None
-        if porcupine_to_delete:
-            try:
-                logger.debug("Deleting Porcupine instance...")
-                porcupine_to_delete.delete()
-                logger.info("Porcupine instance deleted.")
-            except Exception as e:
-                logger.error(f"Error deleting Porcupine instance during cleanup: {e}")
+
+        # --- Clean up OpenWakeWord --- 
+        # OpenWakeWord models don't have an explicit delete/cleanup method in the same way
+        # as Porcupine. Python's garbage collection should handle the model object.
+        self.oww_model = None
+        logger.info("OpenWakeWord model reference cleared.")
+        # --------------------------
+
         logger.info("AudioCapture cleanup finished.")
 
     def has_new_audio(self) -> bool:
@@ -316,6 +271,12 @@ class AudioCapture:
                  break
         return bytes(data)
 
-    # ... (get/set porcupine sensitivity methods if needed) ...
+    # Add a method to check the wake word queue
+    def check_for_wake_word(self) -> Optional[str]:
+        """Checks the wake word queue non-blockingly."""
+        try:
+            return self.wake_word_queue.get_nowait()
+        except queue.Empty:
+            return None
 
 # Also update the __init__.py file if needed 

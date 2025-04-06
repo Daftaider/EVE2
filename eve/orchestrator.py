@@ -714,20 +714,28 @@ class EVEOrchestrator:
                         except Exception as tts_err: self.logger.warning(f"Error calling TTS during listening timeout: {tts_err}")
             current_emotion = self._current_emotion # Get current emotion under lock
 
-        # --- Process Pending Audio --- 
-        if self.audio_capture and self.speech_recognizer and self.audio_capture.has_new_audio():
-            # Retrieve all pending audio data
-            # Limit chunk size processed at once? Or let recognizer handle longer audio?
-            # For now, get all available data.
+        # --- Check for Wake Word Detection (from AudioCapture) ---
+        if self.audio_capture and not is_listening: # Only check if not already listening
+            detected_word = self.audio_capture.check_for_wake_word()
+            if detected_word:
+                 self.logger.info(f"Orchestrator received wake word: {detected_word}")
+                 self._handle_wake_word() # Call the handler
+                 # Update state immediately for next check
+                 is_listening = True 
+
+        # --- Process Pending Audio for STT (Speech-to-Text) ---
+        # Only process for STT if listening, or if wake word is disabled/not detected this cycle
+        should_process_stt = is_listening or not self.config.speech.wake_word_enabled 
+        if self.audio_capture and self.speech_recognizer and should_process_stt and self.audio_capture.has_new_audio():
             audio_data = self.audio_capture.get_audio_data()
             if audio_data:
-                 self.logger.debug(f"Processing {len(audio_data)} bytes of audio data...")
-                 # Process using the recognizer
+                 self.logger.debug(f"Processing {len(audio_data)} bytes of audio data for STT...")
                  try:
+                     # Pass only the command callback now
                      self.speech_recognizer.process_audio_chunk(
                          audio_data=audio_data,
-                         listen_for_command=is_listening, # Use state captured earlier
-                         wake_word_callback=self._handle_wake_word,
+                         # listen_for_command is implicitly True if we reach here while is_listening
+                         # wake_word_callback is no longer needed here
                          command_callback=self._handle_command
                      )
                  except Exception as sr_err:

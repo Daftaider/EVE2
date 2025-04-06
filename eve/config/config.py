@@ -178,14 +178,13 @@ class SpeechConfig:
 
     # Wake Word
     wake_word_enabled: bool = True
-    wake_word_phrase: str = "hey eve" # WAKE_WORD
-    wake_word_sensitivity: float = 0.7 # Simplified, assuming single value needed
-    # wake_word_sensitivity: List[float] = field(default_factory=lambda: [0.7]) # If list needed
-    wake_word_model: str = "porcupine"
-    # wake_word_keyword_paths: Optional[List[str]] = None # If multiple keywords needed
-    wake_word_model_path: Optional[str] = None # For porcupine/snowboy custom models
-    # Add field for Picovoice Access Key
-    picovoice_access_key: Optional[str] = None
+    wake_word_phrase: str = "hey eve" # Placeholder, actual model handles detection
+    # wake_word_sensitivity: float = 0.7 # OWW uses inference threshold
+    wake_word_model: str = "openwakeword" # Change default model type
+    # wake_word_model_path: Optional[str] = None # OWW models usually downloaded/cached
+    # picovoice_access_key: Optional[str] = None # Remove Picovoice key
+    # OpenWakeWord specific (optional, defaults are often okay)
+    openwakeword_inference_threshold: float = 0.7 # Confidence threshold for activation
 
     # Text-to-Speech (TTS)
     tts_enabled: bool = True
