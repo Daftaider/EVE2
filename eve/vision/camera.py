@@ -10,21 +10,21 @@ from typing import Optional, Tuple, List
 from eve.config import SystemConfig # Import the main config object type
 
 # Try to import picamera2, but don't fail if it's not available
+Picamera2 = None
+HAVE_PICAMERA = False
 try:
-    from picamera2 import Picamera2, Preview
-    # For configuration
-    from libcamera import controls, Transform 
+    import picamera2
+    Picamera2 = picamera2.Picamera2 # Assign the class
+    # For configuration (optional, import only if used directly here)
+    # from libcamera import controls, Transform
     HAVE_PICAMERA = True
-    logging.info("picamera2 library loaded successfully.")
-except ImportError:
-    Picamera2 = None
-    HAVE_PICAMERA = False
-    logging.warning("picamera2 library not found or unavailable. PiCamera features disabled.")
+    logging.info("picamera2 library imported successfully.")
+except ImportError as ie:
+    # Log the specific import error
+    logging.warning(f"picamera2 library import failed: {ie}. PiCamera features disabled.")
 except Exception as e:
     # Catch other potential import errors (like libcamera issues)
-    Picamera2 = None
-    HAVE_PICAMERA = False
-    logging.error(f"Error importing picamera2: {e}. PiCamera features disabled.", exc_info=True)
+    logging.error(f"Error importing or initializing picamera2: {e}. PiCamera features disabled.", exc_info=True)
 
 logger = logging.getLogger(__name__)
 
