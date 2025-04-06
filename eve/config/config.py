@@ -184,6 +184,8 @@ class SpeechConfig:
     wake_word_model: str = "porcupine"
     # wake_word_keyword_paths: Optional[List[str]] = None # If multiple keywords needed
     wake_word_model_path: Optional[str] = None # For porcupine/snowboy custom models
+    # Add field for Picovoice Access Key
+    picovoice_access_key: Optional[str] = None
 
     # Text-to-Speech (TTS)
     tts_enabled: bool = True

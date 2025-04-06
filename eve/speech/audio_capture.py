@@ -61,9 +61,10 @@ class AudioCapture:
 
         logger.info(f"Initializing Porcupine with sensitivities: {sensitivities or 'default'} ...")
         try:
-            access_key = getattr(self.speech_config, 'llm_api_key', None) # Reusing llm_api_key for Picovoice? Check config source.
+            # Use the dedicated field for the access key
+            access_key = getattr(self.speech_config, 'picovoice_access_key', None)
             if not access_key:
-                raise ValueError("PICOVOICE_ACCESS_KEY (or equivalent like llm_api_key) not found in config.")
+                raise ValueError("picovoice_access_key not found in config.")
 
             # Keyword setup
             keyword_paths = getattr(self.speech_config, 'wake_word_model_path', None)
