@@ -525,6 +525,32 @@ class EVEOrchestrator:
         self.logger.info("System event: Face learning cancelled.")
         pass # Add logic if needed
 
+    def _handle_wake_word(self):
+        """Handles the wake word detection."""
+        # Avoid triggering if already listening
+        with self._state_lock:
+            if self._is_listening:
+                self.logger.debug("Wake word detected, but already listening.")
+                return
+
+            self.logger.info("Wake word detected! Now listening for command.")
+            self._is_listening = True
+            self._last_interaction_time = time.time() # Reset listening timeout
+        
+        self.set_emotion(Emotion.ATTENTIVE) # Change emotion to show listening
+        
+        # Optional: Play an acknowledgement sound
+        if self.tts:
+             try:
+                 # Use async speak so it doesn't block command recognition
+                 self.tts.speak("Yes?") 
+             except Exception as e:
+                 self.logger.warning(f"Error playing wake word acknowledgement sound: {e}")
+
+    def _handle_command(self, text: str, confidence: float):
+        """Handles a recognized command."""
+        # ... existing _handle_command logic ...
+
     # --- Start / Stop / Cleanup --- 
     def start(self):
         # ... (Ensure correct indentation below)
