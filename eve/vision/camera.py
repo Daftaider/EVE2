@@ -80,13 +80,17 @@ class Camera:
     def _initialize_best_camera(self):
         """Tries to initialize PiCamera2 first, then falls back to OpenCV."""
         initialized = False
-        if HAVE_PICAMERA:
+        # Always TRY picamera2 first if the module object exists,
+        # regardless of the initial HAVE_PICAMERA flag, as it might resolve at runtime.
+        if Picamera2 is not None: # Check if the class object exists from the import attempt
             self.logger.info("Attempting to initialize camera using picamera2...")
             if self._try_initialize_picamera2():
                 self.camera_backend = 'picamera2'
                 initialized = True
             else:
                  self.logger.warning("Failed to initialize with picamera2, falling back to OpenCV.")
+        else:
+            self.logger.warning("picamera2 module object not found after import attempt, cannot try picamera2 backend.")
 
         if not initialized:
             self.logger.info("Attempting to initialize camera using OpenCV...")
