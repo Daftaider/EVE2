@@ -57,13 +57,19 @@ class AudioCapture:
 
         try:
             logger.info("Initializing OpenWakeWord model...")
-            # Models are downloaded automatically on first use to a cache directory
-            # Specify custom models via `wakeword_models` argument if needed
-            self.oww_model = OpenWakeWordModel(inference_framework='onnx') # Use ONNX runtime
-            logger.info("OpenWakeWord model initialized successfully.")
+            # Specify the desired model based on the wake word phrase
+            # Common mappings: "alexa", "hey google", "hey jarvis", "hey mycroft", "hey siri", "ok google"
+            # Find models at: https://github.com/dscripka/openWakeWord#available-models
+            # Assuming "hey eve" might map to "hey_eywa_v0.1"
+            target_model = "hey_eywa_v0.1" 
+            logger.info(f"Attempting to load specific OpenWakeWord model: {target_model}")
+            self.oww_model = OpenWakeWordModel(
+                inference_framework='onnx',
+                wakeword_models=[target_model] # Load ONLY this model
+            )
+            logger.info(f"OpenWakeWord model '{target_model}' initialized successfully.")
         except Exception as e:
             logger.error(f"Error initializing OpenWakeWord model: {e}", exc_info=True)
-            self.oww_model = None
 
     def _audio_callback(self, indata: np.ndarray, frames: int, time_info, status: sd.CallbackFlags):
         """Callback function for sounddevice InputStream."""

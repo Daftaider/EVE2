@@ -94,8 +94,7 @@ class SpeechRecognizer:
         self.model: Optional[WhisperModel] = None
         self._init_recognizer()
         
-        self.logger.info(f"Speech recognizer initialized. Wake Word='{self.wake_word}', Lang='{self.language}', Model='{self.model_size}'")
-        self.logger.warning("Current wake word detection uses text check after STT and is not efficient or reliable.")
+        self.logger.info(f"Speech recognizer initialized. Lang='{self.language}', Model='{self.model_size}'")
 
     def _init_recognizer(self):
         """Initialize the faster-whisper model."""
