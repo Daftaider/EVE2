@@ -210,7 +210,9 @@ class VisionDisplay:
 
                     # --- Loop Rate Control --- 
                     loop_duration = time.perf_counter() - start_time
-                    target_interval = 1.0 / self.config.hardware.display_fps if self.config.hardware.display_fps > 0 else 0.01
+                    # Use FPS setting from DisplayConfig
+                    target_fps = self.config.display.FPS 
+                    target_interval = 1.0 / target_fps if target_fps > 0 else 0.01
                     sleep_time = target_interval - loop_duration
                     if sleep_time > 0:
                          time.sleep(sleep_time)
