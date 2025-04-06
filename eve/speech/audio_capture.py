@@ -35,17 +35,13 @@ class AudioCapture:
         # We initialize OWW first to get frame_samples if possible
         self._init_openwakeword()
         # Correctly get the samples per chunk required by the OWW model
-        # Try accessing via the internal preprocessor object
-        oww_samples_per_chunk = self.oww_model.preprocessor.window_size if self.oww_model and hasattr(self.oww_model, 'preprocessor') else 1280
-        # Ensure chunk size is a multiple of OWW frame samples for optimal processing
-        # Using the exact samples_per_chunk might be sufficient if sounddevice allows it.
-        # Let's try using it directly first.
-        self.chunk_size = oww_samples_per_chunk
-        logger.debug(f"Using OpenWakeWord window_size: {oww_samples_per_chunk}")
-        # Old calculation based on wrong attribute:
+        # Attempts to dynamically read chunk size failed. Use the default 1280 (80ms @ 16kHz).
+        self.chunk_size = 1280
+        logger.debug(f"Using fixed chunk size for OpenWakeWord: {self.chunk_size}")
+        # Old attempts:
+        # oww_samples_per_chunk = self.oww_model.preprocessor.window_size if self.oww_model and hasattr(self.oww_model, 'preprocessor') else 1280
         # oww_samples_per_chunk = self.oww_model.samples_per_chunk if self.oww_model else 1280
         # oww_frame_samples = self.oww_model.model_definition['ww_model_definition']['frame_samples'] if self.oww_model else 1280
-        # self.chunk_size = oww_frame_samples * 2 # Process 160ms chunks (adjust multiplier as needed)
 
         self.audio_queue = queue.Queue(maxsize=100) # For main STT
         self.wake_word_queue = queue.Queue(maxsize=20) # Separate small queue for wake word detection callbacks
@@ -258,15 +254,50 @@ class AudioCapture:
     def stop(self): # Renamed from stop_recording
         """Stops and closes the audio stream and cleans up resources."""
         logger.info("Stopping and cleaning up AudioCapture...")
-        self.stop_stream()
-        self.close_stream()
 
-        # --- Clean up OpenWakeWord --- 
-        # OpenWakeWord models don't have an explicit delete/cleanup method in the same way
-        # as Porcupine. Python's garbage collection should handle the model object.
-        self.oww_model = None
-        logger.info("OpenWakeWord model reference cleared.")
-        # --------------------------
+        # 1. Signal the callback thread to stop processing
+        self._stop_event.set()
+        logger.debug("Stop event set for audio callback.")
+
+        # 2. Stop and close the stream object
+        stream_to_stop_and_close = None
+        with self._lock:
+             stream_to_stop_and_close = self.stream
+             self.stream = None # Prevent further access via self.stream
+             self.is_recording = False # Update state under lock
+
+        if stream_to_stop_and_close:
+            logger.debug("Attempting to stop and close sounddevice stream...")
+            try:
+                if stream_to_stop_and_close.active:
+                     stream_to_stop_and_close.stop(ignore_errors=True)
+                     logger.debug("Stream stop requested.")
+                if not stream_to_stop_and_close.closed:
+                     stream_to_stop_and_close.close(ignore_errors=True)
+                     logger.debug("Stream close requested.")
+            except Exception as e:
+                 logger.error(f"Error during stream stop/close: {e}", exc_info=True)
+        else:
+             logger.debug("No active stream object found during stop.")
+
+        # 3. Clear audio queue
+        logger.debug("Clearing audio queue...")
+        while not self.audio_queue.empty():
+            try: self.audio_queue.get_nowait()
+            except queue.Empty: break
+        logger.debug("Audio queue cleared.")
+        
+        # 4. Clear wake word queue
+        logger.debug("Clearing wake word queue...")
+        while not self.wake_word_queue.empty():
+            try: self.wake_word_queue.get_nowait()
+            except queue.Empty: break
+        logger.debug("Wake word queue cleared.")
+
+        # 5. Clear OWW model reference
+        if self.oww_model:
+             logger.info("Clearing OpenWakeWord model reference.")
+             self.oww_model = None
 
         logger.info("AudioCapture cleanup finished.")
 
