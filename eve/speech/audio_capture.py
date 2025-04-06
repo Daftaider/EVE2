@@ -34,9 +34,16 @@ class AudioCapture:
         # Get frame_samples from model if available, otherwise use default (e.g., 1280)
         # We initialize OWW first to get frame_samples if possible
         self._init_openwakeword()
-        oww_frame_samples = self.oww_model.model_definition['ww_model_definition']['frame_samples'] if self.oww_model else 1280
+        # Correctly get the samples per chunk required by the OWW model
+        oww_samples_per_chunk = self.oww_model.samples_per_chunk if self.oww_model else 1280 
         # Ensure chunk size is a multiple of OWW frame samples for optimal processing
-        self.chunk_size = oww_frame_samples * 2 # Process 160ms chunks (adjust multiplier as needed)
+        # Using the exact samples_per_chunk might be sufficient if sounddevice allows it.
+        # Let's try using it directly first.
+        self.chunk_size = oww_samples_per_chunk 
+        logger.debug(f"Using OpenWakeWord samples_per_chunk: {oww_samples_per_chunk}")
+        # Old calculation based on wrong attribute:
+        # oww_frame_samples = self.oww_model.model_definition['ww_model_definition']['frame_samples'] if self.oww_model else 1280
+        # self.chunk_size = oww_frame_samples * 2 # Process 160ms chunks (adjust multiplier as needed)
 
         self.audio_queue = queue.Queue(maxsize=100) # For main STT
         self.wake_word_queue = queue.Queue(maxsize=20) # Separate small queue for wake word detection callbacks
