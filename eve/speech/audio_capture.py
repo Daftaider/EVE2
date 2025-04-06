@@ -60,8 +60,9 @@ class AudioCapture:
             # Specify the desired model based on the wake word phrase
             # Common mappings: "alexa", "hey google", "hey jarvis", "hey mycroft", "hey siri", "ok google"
             # Find models at: https://github.com/dscripka/openWakeWord#available-models
-            # Assuming "hey eve" might map to "hey_eywa_v0.1"
-            target_model = "hey_eywa_v0.1" 
+            # Assuming "hey eve" might map to "hey_eywa_v0.1" -> This was wrong!
+            # Trying a known existing model instead:
+            target_model = "hey_mycroft_v0.1"
             logger.info(f"Attempting to load specific OpenWakeWord model: {target_model}")
             self.oww_model = OpenWakeWordModel(
                 inference_framework='onnx',
