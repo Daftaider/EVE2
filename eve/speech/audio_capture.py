@@ -66,7 +66,8 @@ class AudioCapture:
             logger.info(f"Attempting to load specific OpenWakeWord model: {target_model}")
             self.oww_model = OpenWakeWordModel(
                 inference_framework='onnx',
-                wakeword_models=[target_model] # Load ONLY this model
+                wakeword_models=[target_model], # Load ONLY this model
+                download_root=None # Explicitly use default cache/download behavior
             )
             logger.info(f"OpenWakeWord model '{target_model}' initialized successfully.")
         except Exception as e:
