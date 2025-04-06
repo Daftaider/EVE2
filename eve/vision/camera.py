@@ -198,7 +198,8 @@ class Camera:
                     cap.set(cv2.CAP_PROP_FPS, float(self.target_fps)) # FPS might need float
                     
                     # Verify by reading a frame
-                    time.sleep(0.5) # Allow buffer to fill
+                    # Increase delay to allow camera buffer to fill
+                    time.sleep(1.5)
                     ret, frame = cap.read()
                     if ret and frame is not None and frame.size > 0:
                         # Success!
