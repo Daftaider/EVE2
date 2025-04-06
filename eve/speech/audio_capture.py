@@ -56,14 +56,19 @@ class AudioCapture:
             return
 
         try:
-            logger.info("Initializing OpenWakeWord model...")
-            # Specify the desired model based on the wake word phrase
-            # Common mappings: "alexa", "hey google", "hey jarvis", "hey mycroft", "hey siri", "ok google"
-            # Find models at: https://github.com/dscripka/openWakeWord#available-models
-            # Assuming "hey eve" might map to "hey_eywa_v0.1" -> This was wrong!
-            # Trying a known existing model instead:
-            target_model = "hey_mycroft_v0.1"
-            logger.info(f"Attempting to load specific OpenWakeWord model: {target_model}")
+            # --- Explicitly attempt model download first --- 
+            from openwakeword.utils import download_models
+            target_model = "hey_mycroft_v0.1" # Keep using this known model for now
+            logger.info(f"Explicitly attempting download/cache check for model: {target_model}")
+            try:
+                download_models(model_names=[target_model])
+                logger.info(f"Download/cache check for {target_model} completed.")
+            except Exception as dl_err:
+                logger.error(f"Error during explicit model download/cache check: {dl_err}", exc_info=True)
+                # Continue anyway, maybe the model exists despite the error
+            # -----------------------------------------------
+
+            logger.info(f"Initializing OpenWakeWord model ({target_model})...")
             self.oww_model = OpenWakeWordModel(
                 inference_framework='onnx',
                 wakeword_models=[target_model], # Load ONLY this model
