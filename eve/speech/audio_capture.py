@@ -120,7 +120,12 @@ class AudioCapture:
                  logger.warning(f"Converting non-int16 audio data ({indata.dtype}) to int16 directly.")
                  int16_data = indata.astype(np.int16)
 
-            # --- VERIFY SHAPE --- 
+            # --- Handle potential Stereo input when Mono was requested --- 
+            if int16_data.ndim == 2 and self.channels == 1:
+                 logger.warning(f"Received 2D audio data (shape: {int16_data.shape}) when 1 channel was requested. Taking first channel.")
+                 int16_data = int16_data[:, 0]
+
+            # --- VERIFY SHAPE (Now expecting 1D) --- 
             # Check number of dimensions (should be 1 for mono raw audio frame)
             if int16_data.ndim != 1:
                  logger.error(f"Unexpected audio data dimensions: {int16_data.ndim}, expected 1. Skipping frame.")
