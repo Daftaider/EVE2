@@ -89,40 +89,61 @@ class AudioCapture:
         if self._stop_event.is_set() or not self.is_recording:
             return
 
-        # --- RMS Calculation ---
+        # --- RMS Calculation (using float32) ---
+        float_data = None # Initialize float_data
         try:
             if indata.dtype == np.int16:
                  float_data = indata.astype(np.float32) / 32768.0
             elif indata.dtype == np.float32:
-                 float_data = indata
+                 float_data = indata # Already float
             else:
-                 float_data = None
-            if float_data is not None:
-                rms = np.sqrt(np.mean(float_data**2))
-                with self._lock:
-                    self.last_rms = float(rms)
-        except Exception as e:
-            logger.error(f"Error calculating RMS: {e}")
-            with self._lock: self.last_rms = 0.0
+                 logger.warning(f"Received unexpected audio data type ({indata.dtype}), attempting float conversion.")
+                 float_data = indata.astype(np.float32) # Potential scaling needed depending on source
 
-        # Ensure audio is int16 for processing
-        if indata.dtype != np.int16:
-            logger.warning(f"Received non-int16 audio data ({indata.dtype}), attempting conversion.")
-            try:
-                # Assuming input range needs scaling if it was float
-                if np.issubdtype(indata.dtype, np.floating):
-                     indata = (indata * 32767).astype(np.int16)
-                else:
-                     indata = indata.astype(np.int16)
-            except Exception as conv_err:
-                 logger.error(f"Failed to convert audio to int16: {conv_err}")
-                 return # Skip processing if conversion fails
+            rms = np.sqrt(np.mean(float_data**2))
+            with self._lock:
+                self.last_rms = float(rms)
+        except Exception as e:
+            logger.error(f"Error calculating RMS: {e}", exc_info=False)
+            with self._lock: self.last_rms = 0.0
+            # Continue processing audio even if RMS fails
+
+        # --- Prepare int16 data for OWW and STT --- 
+        int16_data = None
+        try:
+            if indata.dtype == np.int16:
+                 int16_data = indata
+            elif float_data is not None: # Use the float_data calculated above if available
+                 # Scale float data assumed in range [-1.0, 1.0] to int16
+                 int16_data = (float_data * 32767).astype(np.int16)
+            else: # Fallback if input wasn't int16 and float conversion failed
+                 logger.warning(f"Converting non-int16 audio data ({indata.dtype}) to int16 directly.")
+                 int16_data = indata.astype(np.int16)
+
+            # --- VERIFY SHAPE --- 
+            # Check number of dimensions (should be 1 for mono raw audio frame)
+            if int16_data.ndim != 1:
+                 logger.error(f"Unexpected audio data dimensions: {int16_data.ndim}, expected 1. Skipping frame.")
+                 return
+            # Check number of samples
+            if int16_data.shape[0] != self.chunk_size:
+                 logger.error(f"Unexpected audio chunk size: {int16_data.shape[0]}, expected {self.chunk_size}. Skipping frame.")
+                 return
+
+        except Exception as conv_err:
+             logger.error(f"Failed to prepare int16 audio data: {conv_err}")
+             return # Skip processing if conversion/verification fails
 
         # --- Wake Word Detection (OpenWakeWord) --- 
         if self.oww_model and self.wake_word_enabled:
             try:
-                # Predict using the int16 numpy array
-                prediction = self.oww_model.predict(indata)
+                # --- RESHAPE FOR MODEL --- 
+                # Predict expects specific shape, often (batch_size, num_samples)
+                # Reshape from (chunk_size,) to (1, chunk_size)
+                input_chunk = int16_data.reshape(1, self.chunk_size)
+                # -------------------------
+
+                prediction = self.oww_model.predict(input_chunk)
                 # Check scores against threshold for each ww model
                 # OWW returns scores per-model; we trigger if any exceed threshold
                 for ww_name, score in prediction.items():
@@ -140,7 +161,8 @@ class AudioCapture:
 
         # --- Put data in main STT queue --- 
         try:
-            audio_bytes = indata.tobytes()
+            # Use the verified int16 data
+            audio_bytes = int16_data.tobytes()
             self.audio_queue.put_nowait(audio_bytes)
         except queue.Full:
              logger.warning("Audio (STT) queue is full. Discarding audio data.")
