@@ -175,8 +175,14 @@ class EVEApplication:
                 if display_controller and pygame_initialized:
                     self._pygame_event_loop()
                 else:
+                    # Fallback: Call update() periodically if no display/pygame
+                    logger.info("No display or Pygame, running basic update loop...")
                     while self._running:
-                        time.sleep(1)
+                        if self.orchestrator:
+                             self.orchestrator.update() # Call orchestrator update
+                        # Sleep for a short interval (e.g., 100ms)
+                        # Avoid sleeping too long, otherwise audio queue might fill
+                        time.sleep(0.1)
 
         except SystemExit as se:
              logger.info(f"SystemExit caught with code: {se.code}")

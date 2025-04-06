@@ -672,50 +672,72 @@ class EVEOrchestrator:
     def update(self):
         """
         Main update method, called periodically.
-        Handles state updates, checks timeouts, updates display.
+        Handles state updates, checks timeouts, processes audio, updates display.
         """
-        # Restoring correct indentation and body (as manually fixed earlier)
         # --- State Checks / Timeouts ---
         with self._state_lock:
-            if self._is_listening:
+            is_listening = self._is_listening # Get current state under lock
+            if is_listening:
                 timeout_duration = 10.0
                 if time.time() - self._last_interaction_time > timeout_duration:
                     self.logger.info(f"Listening timed out after {timeout_duration}s of inactivity.")
                     self._is_listening = False
                     self.set_emotion(Emotion.NEUTRAL)
-                    if self.tts:
+                    if self.tts: # Check if tts exists
                         try: self.tts.speak("Never mind.")
                         except Exception as tts_err: self.logger.warning(f"Error calling TTS during listening timeout: {tts_err}")
+            current_emotion = self._current_emotion # Get current emotion under lock
+
+        # --- Process Pending Audio --- 
+        if self.audio_capture and self.speech_recognizer and self.audio_capture.has_new_audio():
+            # Retrieve all pending audio data
+            # Limit chunk size processed at once? Or let recognizer handle longer audio?
+            # For now, get all available data.
+            audio_data = self.audio_capture.get_audio_data()
+            if audio_data:
+                 self.logger.debug(f"Processing {len(audio_data)} bytes of audio data...")
+                 # Process using the recognizer
+                 try:
+                     self.speech_recognizer.process_audio_chunk(
+                         audio_data=audio_data,
+                         listen_for_command=is_listening, # Use state captured earlier
+                         wake_word_callback=self._handle_wake_word,
+                         command_callback=self._handle_command
+                     )
+                 except Exception as sr_err:
+                     self.logger.error(f"Error during speech_recognizer.process_audio_chunk: {sr_err}", exc_info=True)
 
         # --- Update Display Controller ---
         if self.display_controller and hasattr(self.display_controller, 'update'):
             try:
-                emotion = self.get_current_emotion()
-                with self._state_lock: is_listening = self._is_listening
+                # Get latest state again in case it changed during audio processing
+                with self._state_lock: 
+                    is_listening_now = self._is_listening
+                    current_emotion_now = self._current_emotion
+                
+                # Get debug frame if needed (check debug status)
                 debug_frame = None
-                if self.debug_menu_active and self.current_debug_view == 'VIDEO':
-                    if self.camera: 
-                        ret, frame = self.camera.read()
-                        if ret: debug_frame = frame
+                # Need access to EVEApplication's debug_menu_active state?
+                # Or manage debug state within Orchestrator?
+                # Assuming debug state is managed externally for now (passed via args?)
+                # if self.debug_menu_active and self.current_debug_view == 'VIDEO':
+                #     if self.camera: 
+                #         ret, frame = self.camera.read()
+                #         if ret: debug_frame = frame
                 
                 display_state = {
-                    "emotion": emotion,
-                    "is_listening": is_listening,
-                    "debug_menu_active": self.debug_menu_active,
-                    "current_debug_view": self.current_debug_view,
-                    "debug_frame": debug_frame,
-                    "last_recognized_text": self.last_recognized_text,
-                    "last_audio_rms": self.last_audio_rms,
+                    "emotion": current_emotion_now, # Use potentially updated emotion
+                    "is_listening": is_listening_now, # Use potentially updated listening state
+                    # Pass debug state if managed here or received from caller
+                    # "debug_menu_active": self.debug_menu_active, 
+                    # "current_debug_view": self.current_debug_view,
+                    # "debug_frame": debug_frame,
+                    # Pass last recognized text etc. if needed
+                    # "last_recognized_text": self.last_recognized_text, 
+                    # "last_audio_rms": self.audio_capture.get_last_rms() if self.audio_capture else 0.0,
                 }
-                # Check if update accepts kwargs or specific args
-                try:
-                    # Try kwargs first
-                    self.display_controller.update(**display_state)
-                except TypeError:
-                    # Fallback or specific handling if update has fixed signature
-                    self.logger.warning("Display controller update might not accept arbitrary kwargs.")
-                    # Example: self.display_controller.update(emotion, is_listening)
-                    pass # Adjust as needed based on display_controller.update signature
+                # Call update with relevant state
+                self.display_controller.update(**display_state)
 
             except Exception as e:
                 self.logger.error(f"Error updating display controller: {e}", exc_info=True)
