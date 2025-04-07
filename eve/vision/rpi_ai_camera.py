@@ -287,4 +287,9 @@ class RPiAICamera:
         return self._running
 
     def get_resolution(self) -> Tuple[int, int]:
-        return self.resolution 
+        return self.resolution
+
+    def is_open(self) -> bool:
+        """Checks if the camera stream is initialized and running."""
+        # Consider adding check for self.picam2.is_open if that attribute exists
+        return self.picam2 is not None and self.camera_started and self._running 
