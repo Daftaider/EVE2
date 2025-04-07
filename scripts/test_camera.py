@@ -5,7 +5,7 @@ from picamera2 import Picamera2
 def main():
     picam2 = Picamera2()
     # Use a preview configuration for a 640x480 output.
-    config = picam2.create_video_configuration(main={"size": (640, 480)})
+    config = picam2.create_preview_configuration(main={"size": (640, 480)}, raw={})
 
     picam2.configure(config)
     
