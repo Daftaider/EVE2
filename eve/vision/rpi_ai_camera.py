@@ -68,22 +68,15 @@ class RPiAICamera:
             )
             self.logger.debug(f"Video Config: {video_config}")
             self.picam2.configure(video_config)
+            self.logger.info("Picamera2 configured.")
 
-            # --- Enable Metadata Capture ---
-            # This is crucial for getting AI results
-            # Ensure controls are enabled to allow metadata capture
-            controls = self.picam2.controls
-            self.picam2.set_controls(controls)
-            # Double-check if options or controls enable AI metadata specifically
-            # The documentation suggests metadata is captured by default if requested?
-            # self.picam2.options['metadata_format'] = "json" # Might not be needed/valid?
-            self.picam2.start_metadata_capture = True # Explicitly start metadata stream if needed? API unclear
-
+            self.logger.info("Attempting picam2.start()...")
             self.picam2.start()
             self.camera_started = True
             self.logger.info(f"Picamera2 started successfully. Sensor resolution: {self.picam2.camera_properties['PixelArraySize']}")
 
             # Start the background capture thread
+            self.logger.info("Starting camera capture thread...")
             self._running = True
             self._capture_thread = threading.Thread(target=self._capture_loop, daemon=True, name="RPiAICamThread")
             self._capture_thread.start()
