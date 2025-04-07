@@ -102,60 +102,83 @@ class RPiAICamera:
     def stop(self):
         """Stops the camera capture thread and releases the camera."""
         if not self._running:
+            self.logger.debug("RPiAICamera stop() called but already stopped.")
             return
 
         self.logger.info("Stopping RPi AI Camera...")
-        self._running = False
+        self._running = False # Signal the loop to stop first
 
-        if self._capture_thread and self._capture_thread.is_alive():
-            self.logger.debug("Joining camera capture thread...")
-            self._capture_thread.join(timeout=2.0)
-            if self._capture_thread.is_alive():
-                self.logger.warning("Camera capture thread did not stop gracefully.")
+        # Join the capture thread
+        thread = self._capture_thread
+        if thread and thread.is_alive():
+            self.logger.debug(f"Attempting to join camera capture thread ({thread.name})...")
+            thread.join(timeout=2.0) # Wait for the thread to finish
+            if thread.is_alive():
+                self.logger.warning("Camera capture thread did not stop gracefully after 2 seconds.")
+            else:
+                 self.logger.debug("Camera capture thread joined successfully.")
         self._capture_thread = None
 
-        if self.picam2 and self.camera_started:
-            self.logger.debug("Stopping Picamera2...")
+        # Stop the camera hardware stream
+        picam_instance = self.picam2
+        if picam_instance and self.camera_started:
+            self.logger.debug("Attempting to stop Picamera2 stream...")
             try:
-                self.picam2.stop()
+                picam_instance.stop()
                 self.camera_started = False
-                self.logger.debug("Picamera2 stopped.")
+                self.logger.debug("Picamera2 stream stopped.")
             except Exception as e:
-                self.logger.error(f"Error stopping Picamera2: {e}", exc_info=True)
+                self.logger.error(f"Error stopping Picamera2 stream: {e}", exc_info=True)
 
-        if self.picam2:
-            self.logger.debug("Closing Picamera2...")
+        # Close the camera device
+        if picam_instance: # Check again as stop might have failed
+            self.logger.debug("Attempting to close Picamera2 device...")
             try:
-                self.picam2.close()
-                self.logger.debug("Picamera2 closed.")
+                picam_instance.close()
+                self.logger.debug("Picamera2 device closed.")
             except Exception as e:
-                self.logger.error(f"Error closing Picamera2: {e}", exc_info=True)
+                self.logger.error(f"Error closing Picamera2 device: {e}", exc_info=True)
             self.picam2 = None
 
+        # Clear buffers
         with self._buffer_lock:
             self._frame_buffer.clear()
             self._metadata_buffer.clear()
             self._ai_results_buffer.clear()
+            self.logger.debug("Internal buffers cleared.")
 
         self.logger.info("RPi AI Camera stopped.")
 
     def _capture_loop(self):
         """Background thread to continuously capture frames and metadata."""
         self.logger.info("RPi AI Camera capture loop started.")
-        while self._running and self.picam2:
+        while self._running and self.picam2: # Check running flag at the start of each loop
+            request = None # Ensure request is defined for finally block
             try:
+                # --- Add check before potentially blocking call ---
+                if not self._running:
+                    break 
+                # --------------------------------------------------
+                
                 # capture_request() gives access to frame data AND metadata
+                # Consider adding a timeout here if capture_request can block indefinitely
                 request = self.picam2.capture_request()
                 if request is None:
-                    logger.warning("Capture request returned None, camera might be stopping.")
+                    if self._running: # Only warn if we expected a request
+                         logger.warning("Capture request returned None, camera might be stopping or having issues.")
                     time.sleep(0.01)
                     continue
 
                 frame = request.make_array("main") # Get the main frame
                 metadata = request.get_metadata() # Get the metadata dictionary
-                request.release() # Release the request buffers
+                # request.release() # Release in finally block
 
                 if frame is not None and metadata is not None:
+                    # Basic check on frame size - might need adjustment
+                    if frame.size == 0:
+                         logger.warning("Captured an empty frame.")
+                         continue # Skip empty frame
+                         
                     with self._buffer_lock:
                         self._frame_buffer.append(frame)
                         self._metadata_buffer.append(metadata)
@@ -166,18 +189,22 @@ class RPiAICamera:
                          with self._buffer_lock:
                               self._ai_results_buffer.append(ai_results)
 
-                # Optional: Small sleep to prevent busy-waiting if capture is very fast
-                # time.sleep(0.005)
-
             except Exception as e:
                 if self._running: # Only log errors if we are supposed to be running
                     self.logger.error(f"Error in camera capture loop: {e}", exc_info=False) # Keep logs cleaner
-                    # Consider adding a longer sleep on error to prevent spamming logs
-                    time.sleep(0.5)
+                    time.sleep(0.5) # Prevent spamming logs on repeated errors
                 else:
-                    # If not running, error might be expected during shutdown
                     self.logger.debug(f"Capture loop exiting due to error during shutdown: {e}")
                     break # Exit loop
+            finally:
+                 # Ensure the request buffer is always released
+                 if request is not None:
+                     try:
+                         request.release()
+                     except Exception as rel_err:
+                          # This might happen if the camera context is already gone
+                          if self._running:
+                               self.logger.error(f"Error releasing capture request: {rel_err}", exc_info=False)
 
         self.logger.info("RPi AI Camera capture loop finished.")
 
