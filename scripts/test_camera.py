@@ -1,56 +1,56 @@
 import cv2
-import numpy as np
-import logging
 import time
-import os
+from picamera2 import Picamera2
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-def test_camera():
-    # Force backend preferences
-    os.environ['OPENCV_VIDEOIO_PRIORITY_MSMF'] = '0'
-    os.environ['OPENCV_VIDEOIO_PRIORITY_INTEL_MFX'] = '0'
-    os.environ['OPENCV_VIDEOIO_PRIORITY_GSTREAMER'] = '1'
+def main():
+    # Initialize the camera
+    picam2 = Picamera2()
     
-    # Try different backends
-    backends = [
-        (cv2.CAP_V4L2, "V4L2"),
-        (cv2.CAP_GSTREAMER, "GStreamer"),
-        (cv2.CAP_ANY, "Auto")
-    ]
+    # Configure the camera in AI mode.
+    # The create_ai_configuration() method is assumed to set up the onboard AI inference.
+    # The 'main' configuration sets the resolution – adjust as needed.
+    ai_config = picam2.create_ai_configuration(main={"size": (640, 480)})
+    picam2.configure(ai_config)
     
-    for backend, name in backends:
-        logger.info(f"\nTrying {name} backend...")
-        try:
-            cap = cv2.VideoCapture(0 + backend)
-            if not cap.isOpened():
-                logger.warning(f"{name} backend failed to open camera")
-                continue
-                
-            # Try to read a frame
-            ret, frame = cap.read()
-            if not ret:
-                logger.warning(f"{name} backend failed to read frame")
-                cap.release()
-                continue
-                
-            logger.info(f"Successfully captured frame with {name} backend")
-            logger.info(f"Frame shape: {frame.shape}")
+    # Start the camera; onboard AI inference is now active.
+    picam2.start()
+    
+    try:
+        while True:
+            # Capture a frame along with the onboard AI detections.
+            # This method is assumed to return a tuple (frame, detections)
+            # where detections is a list of dicts containing keys: 'bbox', 'label', and 'confidence'.
+            frame, detections = picam2.capture_frame_with_detections()
             
-            # Save test frame
-            cv2.imwrite(f"test_frame_{name}.jpg", frame)
-            logger.info(f"Saved test frame as test_frame_{name}.jpg")
+            # If there are any detections, draw them on the frame.
+            if detections:
+                for detection in detections:
+                    # Extract bounding box and detection details.
+                    x, y, w, h = detection['bbox']
+                    label = detection.get('label', 'object')
+                    confidence = detection.get('confidence', 0)
+                    
+                    # Draw a rectangle and label.
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                    cv2.putText(frame, f"{label} {confidence:.2f}", (x, y - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
             
-            cap.release()
-            return True
+            # Show the processed frame.
+            cv2.imshow("Raspberry Pi AI Camera - Object Detection", frame)
             
-        except Exception as e:
-            logger.error(f"Error with {name} backend: {e}")
-            continue
+            # Quit on pressing 'q'
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
             
-    logger.error("All backends failed")
-    return False
+            # Small delay for smooth frame updates.
+            time.sleep(0.03)
+            
+    except KeyboardInterrupt:
+        print("Interrupted by user, exiting...")
+        
+    finally:
+        picam2.stop()
+        cv2.destroyAllWindows()
 
-if __name__ == "__main__":
-    test_camera() 
+if __name__ == '__main__':
+    main()
