@@ -117,6 +117,7 @@ class RPiAICamera:
                 self.logger.warning("Camera capture thread did not stop gracefully after 2 seconds.")
             else:
                  self.logger.debug("Camera capture thread joined successfully.")
+        self.logger.debug("Finished joining/checking capture thread.")
         self._capture_thread = None
 
         # Stop the camera hardware stream
@@ -129,6 +130,7 @@ class RPiAICamera:
                 self.logger.debug("Picamera2 stream stopped.")
             except Exception as e:
                 self.logger.error(f"Error stopping Picamera2 stream: {e}", exc_info=True)
+        self.logger.debug("Finished stopping stream.")
 
         # Close the camera device
         if picam_instance: # Check again as stop might have failed
@@ -139,6 +141,7 @@ class RPiAICamera:
             except Exception as e:
                 self.logger.error(f"Error closing Picamera2 device: {e}", exc_info=True)
             self.picam2 = None
+        self.logger.debug("Finished closing device.")
 
         # Clear buffers
         with self._buffer_lock:
@@ -225,7 +228,16 @@ class RPiAICamera:
         Bounding box coordinates should ideally be relative (0.0 to 1.0).
         """
         try:
-            # --- Placeholder Logic ---
+            # --- Log RAW Metadata --- 
+            # Limit logged size if metadata is huge?
+            metadata_str = str(metadata)
+            if len(metadata_str) > 1000:
+                 self.logger.debug(f"RAW AI Metadata (truncated): {metadata_str[:1000]}...")
+            else:
+                 self.logger.debug(f"RAW AI Metadata: {metadata_str}")
+            # ------------------------
+
+            # --- Placeholder Parsing Logic --- 
             # Examine the 'metadata' dictionary structure based on documentation or testing.
             # Documentation suggests Algorithm.Output might contain results.
 
@@ -266,11 +278,12 @@ class RPiAICamera:
                     })
 
             if parsed_results:
-                # self.logger.debug(f"Parsed AI results: {parsed_results}") # Can be noisy
+                self.logger.debug(f"Parsed AI results: {parsed_results}")
                 return parsed_results
             else:
-                # self.logger.debug("No AI detections found in metadata.")
+                self.logger.debug("Parsing resulted in NO AI detections.")
                 return None
+            # ----------------------------------
 
         except Exception as e:
             self.logger.error(f"Error parsing AI metadata: {e}", exc_info=False)
