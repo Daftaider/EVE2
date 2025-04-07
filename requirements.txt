@@ -39,4 +39,6 @@ pylint>=2.16.0
 
 # Added from the code block
 openwakeword>=0.5.0
-onnxruntime>=1.16.0 
+onnxruntime>=1.16.0
+# Dependency for fer library (Facial Emotion Recognition)
+moviepy>=1.0.0 
