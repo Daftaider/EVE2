@@ -4,45 +4,28 @@ from picamera2 import Picamera2
 
 def main():
     picam2 = Picamera2()
-    
-    # Create a still configuration for a 640x480 image.
-    # (You can adjust the resolution as needed.)
-    config = picam2.create_still_configuration(main={"size": (640, 480)})
-    
-    # Note: Do not add "post_process_file" here—Picamera2 doesn't allow it.
+    # Use a preview configuration for a 640x480 output.
+    config = picam2.create_preview_configuration(main={"size": (640, 480)})
     picam2.configure(config)
+    
+    # Start the camera; it should now run in the binned mode (2028x1520 sensor mode) but output a 640x480 preview.
     picam2.start()
     
     try:
         while True:
-            # Capture a full request (which includes both the image and its metadata)
-            request = picam2.capture_request()
+            # Capture a frame from the preview stream.
+            frame = picam2.capture_array()
+            if frame is None:
+                print("No frame captured.")
+                break
             
-            # Get the main image as a NumPy array
-            frame = request.make_array("main")
-            
-            # Attempt to extract AI detections from metadata (if the onboard AI is active)
-            metadata = request.get_metadata()
-            detections = metadata.get("detections", [])
-            
-            # Draw detections if any exist
-            for detection in detections:
-                x, y, w, h = detection.get("bbox", (0, 0, 0, 0))
-                label = detection.get("label", "object")
-                confidence = detection.get("confidence", 0)
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                cv2.putText(frame, f"{label} {confidence:.2f}", (x, y - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-            
-            cv2.imshow("Raspberry Pi AI Camera - Object Detection", frame)
-            
+            # Display the frame.
+            cv2.imshow("Raspberry Pi AI Camera - Preview", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
             
-            # Release the request so buffers are recycled
-            request.release()
+            # Small delay to reduce CPU usage.
             time.sleep(0.03)
-            
     except KeyboardInterrupt:
         print("Interrupted by user, shutting down.")
     finally:
