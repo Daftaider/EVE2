@@ -20,7 +20,7 @@ hardware:
   display_rotation: 0 # Options: 0, 90, 180, 270
 
   # Camera Specific
-  camera_type: picamera # Options: picamera, opencv
+  camera_type: rpi_ai # Options: picamera (legacy), opencv, rpi_ai
   camera_index: 0 # Used if camera_type is opencv
   camera_rotation: 0 # Options: 0, 90, 180, 270
   camera_resolution: [640, 480] # Width, Height

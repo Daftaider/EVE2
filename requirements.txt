@@ -44,4 +44,11 @@ onnxruntime>=1.16.0
 moviepy>=1.0.0
 
 # Standard requirements
-alembic>=1.10.2 
+alembic>=1.10.2
+
+# Raspberry Pi Camera
+# picamera>=1.13 # Remove old library
+picamera2>=0.3.14 # Use modern library for newer cameras
+libcamera>=0.0.5   # Often needed with Picamera2
+
+# Web framework & Server 
