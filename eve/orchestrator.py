@@ -722,24 +722,6 @@ class EVEOrchestrator:
                  # Update state immediately for next check
                  is_listening = True 
 
-        # --- Process Pending Audio for STT (Speech-to-Text) ---
-        # Only process for STT if listening, or if wake word is disabled/not detected this cycle
-        should_process_stt = is_listening or not self.config.speech.wake_word_enabled 
-        if self.audio_capture and self.speech_recognizer and should_process_stt and self.audio_capture.has_new_audio():
-            audio_data = self.audio_capture.get_audio_data()
-            if audio_data:
-                 self.logger.debug(f"Processing {len(audio_data)} bytes of audio data for STT...")
-                 try:
-                     # Pass only the command callback now
-                     self.speech_recognizer.process_audio_chunk(
-                         audio_data=audio_data,
-                         # listen_for_command is implicitly True if we reach here while is_listening
-                         # wake_word_callback is no longer needed here
-                         command_callback=self._handle_command
-                     )
-                 except Exception as sr_err:
-                     self.logger.error(f"Error during speech_recognizer.process_audio_chunk: {sr_err}", exc_info=True)
-
         # --- Update Display Controller ---
         if self.display_controller and hasattr(self.display_controller, 'update'):
             try:

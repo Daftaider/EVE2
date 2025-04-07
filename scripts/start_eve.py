@@ -149,15 +149,28 @@ class EVEApplication:
             # -----------------------------
 
             audio_capture = AudioCapture(self.config.speech) if self.config.hardware.audio_input_enabled else None
-            if audio_capture: audio_capture.start_recording() # Start stream
-
-            speech_recognizer = SpeechRecognizer(self.config.speech) if audio_capture and self.config.speech.recognition_enabled else None
+            if audio_capture:
+                audio_capture.start_recording() # Start stream
+                if self.config.speech.recognition_enabled:
+                    logger.info("Initializing SpeechRecognizer...")
+                    try:
+                        # Create recognizer, passing the audio queue
+                        speech_recognizer = SpeechRecognizer(self.config.speech, audio_capture.audio_queue)
+                        logger.info("SpeechRecognizer initialized.")
+                    except Exception as e:
+                        logger.error(f"Failed SpeechRecognizer init: {e}", exc_info=True)
+                        speech_recognizer = None # Ensure it's None on error
+                else:
+                    logger.info("Speech Recognition disabled by config.")
+                    speech_recognizer = None
+            else:
+                 logger.warning("AudioCapture not available. Speech Recognition disabled.")
+                 speech_recognizer = None
 
             tts = TextToSpeech(self.config.speech) if self.config.speech.tts_enabled else None
             if tts and not tts.start(): tts = None # Start and check
 
             llm_processor = LLMProcessor(self.config.speech) if self.config.speech.llm_enabled else None
-
 
             # 5. Create and Run Orchestrator
             logger.info("Creating EVE Orchestrator...")
@@ -168,6 +181,12 @@ class EVEApplication:
                 llm_processor=llm_processor, tts=tts, display_controller=display_controller
             ) as self.orchestrator:
                 logger.info("Starting Orchestrator...")
+                
+                # Set the command callback AFTER orchestrator is created
+                if speech_recognizer and hasattr(self.orchestrator, '_handle_command'):
+                    logger.debug("Setting SpeechRecognizer command callback to Orchestrator._handle_command")
+                    speech_recognizer.set_command_callback(self.orchestrator._handle_command)
+                
                 self.orchestrator.start()
 
                 # 6. Run Main Loop (Pygame events or wait)
