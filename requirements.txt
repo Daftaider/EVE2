@@ -49,6 +49,6 @@ alembic>=1.10.2
 # Raspberry Pi Camera
 # picamera>=1.13 # Remove old library
 picamera2>=0.3.14 # Use modern library for newer cameras
-libcamera>=0.0.5   # Often needed with Picamera2
+# libcamera>=0.0.5   # Incorrect: Install via apt, not pip
 
 # Web framework & Server 

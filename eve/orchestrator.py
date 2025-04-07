@@ -57,6 +57,7 @@ from eve.vision.emotion_analyzer import EmotionAnalyzer
 from eve.vision.display_window import VisionDisplay
 from eve.vision.camera import Camera # Added Camera import
 from eve.vision.object_detector import ObjectDetector # Added ObjectDetector import
+from eve.vision.rpi_ai_camera import RPiAICamera # <<< ADD Import
 # ------------------------
 
 # Removed fallback config class definitions
@@ -152,8 +153,8 @@ class EVEOrchestrator:
     """
     # CORRECTED __init__ method using Dependency Injection
     def __init__(self,
-                 config: SystemConfig, # Type hint should work now
-                 camera: Camera, # Type hint added
+                 config: SystemConfig,
+                 camera: Union[Camera, RPiAICamera], # <<< UPDATE Type Hint
                  # Inject optional subsystems
                  face_detector: Optional[FaceDetector] = None,
                  object_detector: Optional[ObjectDetector] = None,
@@ -162,7 +163,7 @@ class EVEOrchestrator:
                  speech_recognizer: Optional[SpeechRecognizer] = None,
                  llm_processor: Optional[LLMProcessor] = None,
                  tts: Optional[TextToSpeech] = None,
-                 display_controller: Optional[Any] = None, # e.g., LCDController or VisionDisplay
+                 display_controller: Optional[Any] = None,
                  post_event_callback: Optional[Callable[[str, Optional[Dict]], None]] = None
                  ):
         """
@@ -722,44 +723,104 @@ class EVEOrchestrator:
                  # Update state immediately for next check
                  is_listening = True 
 
-        # --- Update Display Controller ---
+        # --- Vision Processing ---
+        latest_frame = None
+        if self.camera and self.camera.is_running():
+            latest_frame = self.camera.get_latest_frame()
+
+        detected_objects = [] # Store results here
+        detected_faces = []
+        detected_emotions = {}
+
+        if latest_frame is not None:
+            current_time = time.time()
+
+            # --- BRANCH BASED ON CAMERA TYPE --- 
+            if isinstance(self.camera, RPiAICamera):
+                # --- RPi AI Camera Pathway ---
+                self.logger.debug("Using RPi AI Camera pathway for detections.")
+                ai_results = self.camera.get_latest_ai_results()
+                if ai_results:
+                    # Assuming ai_results is a list of dicts like:
+                    # {"label": str, "score": float, "bbox": [xmin, ymin, xmax, ymax]}
+                    # Filter by confidence threshold from config
+                    od_conf = getattr(self.config.vision.object_detection, 'confidence', 0.5)
+                    detected_objects = [
+                        res for res in ai_results 
+                        if res.get('score', 0.0) >= od_conf
+                    ]
+                    # TODO: The RPi AI Camera might also provide face/emotion data
+                    # in the metadata. If so, parse and populate detected_faces
+                    # and detected_emotions here instead of using separate modules.
+                    # Example placeholder:
+                    # detected_faces = parse_faces_from_ai_metadata(ai_results)
+                    # detected_emotions = parse_emotions_from_ai_metadata(ai_results)
+                    if detected_objects: self.logger.debug(f"RPi AI detected objects: {len(detected_objects)}")
+                
+            else:
+                # --- Host-based Detection Pathway (CPU/Other Accelerator) ---
+                self.logger.debug("Using host-based detection pathway.")
+                # Face Detection
+                if self.face_detector: # Check if detector exists
+                    # Add interval check if needed
+                    # detected_faces = self.face_detector.detect(latest_frame)
+                    # Assuming detect method returns list of face bounding boxes or similar
+                    # Placeholder call, adjust based on actual FaceDetector method
+                    detected_faces = [] # Replace with actual call
+
+                # Object Detection
+                if self.object_detector: # Check if detector exists
+                    # Add interval check if needed
+                    od_results = self.object_detector.detect(latest_frame) # Assuming detect returns list of dicts
+                    if od_results:
+                         detected_objects = od_results # Use results directly
+                    if detected_objects: self.logger.debug(f"Host detector found objects: {len(detected_objects)}")
+
+                # Emotion Analysis (if face detected)
+                if self.emotion_analyzer and detected_faces:
+                    # Placeholder - requires detected_faces to be populated correctly
+                    # detected_emotions = self.emotion_analyzer.analyze(latest_frame, detected_faces)
+                    pass
+            # --- END BRANCH --- 
+
+            # --- Process Detections (Common Logic) ---
+            # Update display with frame and detections
+            if self.display_controller and hasattr(self.display_controller, 'update_overlays'):
+                self.display_controller.update_overlays(latest_frame, detected_faces, detected_objects, detected_emotions)
+            
+            # Post events based on detections (example for objects)
+            if detected_objects: 
+                 self.post_event(TOPICS.VISION_OBJECTS_DETECTED, {"objects": detected_objects})
+            # Post events for faces, emotions etc. similarly
+
+        # --- Audio RMS Update (Moved from removed STT block) ---
+        if self.audio_capture:
+             self.last_audio_rms = self.audio_capture.get_last_rms()
+
+        # --- Update Display Controller (Main Update) ---
         if self.display_controller and hasattr(self.display_controller, 'update'):
             try:
-                # Get latest state again in case it changed during audio processing
+                # Get latest state again in case it changed during processing
                 with self._state_lock: 
                     is_listening_now = self._is_listening
                     current_emotion_now = self._current_emotion
                 
-                # Get debug frame if needed (check debug status)
-                debug_frame = None
-                # Need access to EVEApplication's debug_menu_active state?
-                # Or manage debug state within Orchestrator?
-                # Assuming debug state is managed externally for now (passed via args?)
-                # if self.debug_menu_active and self.current_debug_view == 'VIDEO':
-                #     if self.camera: 
-                #         ret, frame = self.camera.read()
-                #         if ret: debug_frame = frame
-                
+                # Pass necessary state to display update
                 display_state = {
-                    "emotion": current_emotion_now, # Use potentially updated emotion
-                    "is_listening": is_listening_now, # Use potentially updated listening state
-                    # Pass debug state if managed here or received from caller
+                    "emotion": current_emotion_now,
+                    "is_listening": is_listening_now,
+                    "last_rms": self.last_audio_rms,
+                    # Add other relevant state: last_recognized_text, debug flags etc.
+                    # "last_recognized_text": self.last_recognized_text,
                     # "debug_menu_active": self.debug_menu_active, 
                     # "current_debug_view": self.current_debug_view,
-                    # "debug_frame": debug_frame,
-                    # Pass last recognized text etc. if needed
-                    # "last_recognized_text": self.last_recognized_text, 
-                    # "last_audio_rms": self.audio_capture.get_last_rms() if self.audio_capture else 0.0,
                 }
-                # Call update with relevant state
-                self.display_controller.update(**display_state)
+                self.display_controller.update(display_state)
+                
+            except Exception as display_err:
+                 self.logger.error(f"Error in display_controller.update: {display_err}", exc_info=True)
 
-            except Exception as e:
-                self.logger.error(f"Error updating display controller: {e}", exc_info=True)
-
-        # --- Other periodic checks? ---
-        if self.face_detector and not self.face_detector.is_running():
-            self.logger.warning("Face detector thread seems to have stopped unexpectedly.")
+        # --- End of Update Loop --- 
 
     # --- Debug / Correction Methods --- 
     def handle_debug_ui_click(self, element_id: str):

@@ -21,11 +21,12 @@ from eve.vision.face_detector import FaceDetector
 from eve.vision.emotion_analyzer import EmotionAnalyzer
 from eve.vision.object_detector import ObjectDetector
 from eve.vision.display_window import VisionDisplay
+from eve.vision.rpi_ai_camera import RPiAICamera
 from eve.speech.audio_capture import AudioCapture
 from eve.speech.speech_recognizer import SpeechRecognizer
 from eve.speech.llm_processor import LLMProcessor
 from eve.speech.text_to_speech import TextToSpeech
-from typing import Any, Optional # Import Optional
+from typing import Any, Optional, Union # Import Optional and Union
 
 # Add the project root to the Python path
 # Ensure this runs before other eve imports
@@ -130,25 +131,58 @@ class EVEApplication:
             # logger.warning("Pygame initialization explicitly disabled for shutdown hang test.")
 
             # 4. Initialize Subsystems
-            camera = Camera(self.config) if self.config.hardware.camera_enabled else None
-            if camera and not camera.start(): camera = None # Start and check
+            camera: Optional[Union[Camera, RPiAICamera]] = None # Type hint for flexibility
+            if self.config.hardware.camera_enabled:
+                if self.config.hardware.camera_type == 'rpi_ai':
+                    logger.info("Initializing RPi AI Camera...")
+                    camera = RPiAICamera(self.config)
+                elif self.config.hardware.camera_type == 'picamera':
+                    logger.info("Initializing legacy Picamera...")
+                    # camera = Camera(self.config) # Assuming old Camera class handles picamera
+                    logger.warning("Legacy picamera type selected, but Camera class might need update for Picamera2 compatibility if not already done.")
+                    # Fallback to RPiAICamera for now if legacy isn't updated?
+                    # Or use OpenCV for generic Pi cam access?
+                    camera = Camera(self.config) # Keep using old Camera class for now
+                elif self.config.hardware.camera_type == 'opencv':
+                    logger.info("Initializing OpenCV Camera...")
+                    camera = Camera(self.config) # Assuming old Camera class handles opencv
+                else:
+                    logger.warning(f"Unsupported camera_type: {self.config.hardware.camera_type}")
+                
+                if camera and not camera.start(): 
+                    logger.error(f"Failed to start {self.config.hardware.camera_type} camera!")
+                    camera = None # Ensure camera is None if start failed
 
-            face_detector = FaceDetector(self.config, camera) if camera and self.config.vision.face_detection_enabled else None
-            if face_detector and not face_detector.start(): face_detector = None # Start and check
+            # --- Conditional Detector Initialization --- 
+            # Only initialize host-based detectors if NOT using RPi AI Camera
+            face_detector = None
+            object_detector = None
+            emotion_analyzer = None
 
-            object_detector = ObjectDetector(config=self.config) if self.config.vision.object_detection_enabled else None
-            # Add start if object_detector needs it
-
-            emotion_analyzer = EmotionAnalyzer(self.config) if self.config.vision.emotion_detection_enabled else None
+            if camera and self.config.hardware.camera_type != 'rpi_ai':
+                 logger.info("Initializing host-based vision detectors (CPU/Other Accelerator)...")
+                 if self.config.vision.face_detection_enabled:
+                     face_detector = FaceDetector(self.config, camera) 
+                     if face_detector and not face_detector.start(): face_detector = None # Start and check
+                 
+                 if self.config.vision.object_detection_enabled:
+                     object_detector = ObjectDetector(config=self.config)
+                     # Add start() if object_detector needs it later
+                 
+                 if self.config.vision.emotion_detection_enabled:
+                     emotion_analyzer = EmotionAnalyzer(self.config)
+            elif camera and self.config.hardware.camera_type == 'rpi_ai':
+                 logger.info("RPi AI Camera selected. Skipping initialization of host-based detectors (Face, Object, Emotion).")
+            # -----------------------------------------
 
             # --- RE-ENABLE VisionDisplay --- 
-            # display_controller = None
-            # logger.warning("VisionDisplay explicitly disabled for shutdown hang test.")
             display_controller = VisionDisplay(self.config, camera, face_detector, object_detector) if pygame_initialized and camera else None
             if display_controller and not display_controller.start(): display_controller = None # Start and check
             # -----------------------------
 
+            # --- Audio Subsystems --- 
             audio_capture = AudioCapture(self.config.speech) if self.config.hardware.audio_input_enabled else None
+            speech_recognizer = None # Initialize as None
             if audio_capture:
                 audio_capture.start_recording() # Start stream
                 if self.config.speech.recognition_enabled:
