@@ -577,16 +577,15 @@ class EVEOrchestrator:
                   self.logger.error("Failed to start ObjectDetector thread!")
 
         # Start Audio Capture and Processing Thread
-        if self.audio_capture and hasattr(self.audio_capture, 'start_recording'):
-             if not self.audio_capture.start_recording():
-                  self.logger.error("Failed to start AudioCapture stream! Audio input disabled.")
+        if self.audio_capture:
              # Start recognizer thread if it runs separately
              if self.speech_recognizer and hasattr(self.speech_recognizer, 'start'):
+                  self.logger.debug("Starting Speech Recognizer thread (if applicable)...")
                   self.speech_recognizer.start()
-        elif self.audio_capture: # Check if audio_capture exists but maybe lacks start_recording
-             self.logger.warning("AudioCapture available but cannot start recording (no start_recording method?).")
+        elif not self.config.hardware.audio_input_enabled:
+             self.logger.info("Audio input is explicitly disabled in config.")
         else:
-             self.logger.warning("AudioCapture not available. Audio input disabled.")
+             self.logger.warning("AudioCapture not available or not started externally. Audio input disabled.")
 
         # Start Display Controller/Thread (if applicable)
         if self.display_controller and hasattr(self.display_controller, 'start'):
