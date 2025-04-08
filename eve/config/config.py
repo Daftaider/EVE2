@@ -91,11 +91,15 @@ class DisplayConfig:
     TEXT_COLOR: Tuple[int, int, int] = (255, 255, 255)
     EYE_COLOR: Tuple[int, int, int] = (0, 191, 255)
     BLINK_INTERVAL_SEC: float = 3.0
+    BLINK_DURATION: float = 0.15  # Duration of blink animation in seconds
     ENABLE_BLINKING: bool = True
     ENABLE_EMOTIONS: bool = True
     EMOTION_TRANSITION_TIME_MS: int = 500
     FONT_NAME: str = "Arial"
     FONT_SIZE: int = 24
+    DEBUG_MENU_ENABLED: bool = True  # Enable debug menu by default
+    DEBUG_FONT_SIZE: int = 24  # Font size for debug menu
+    CURRENT_FRAME_PATH: str = "current_display.png"  # Path to save current frame
 
 @dataclass
 class LoggingConfig:
