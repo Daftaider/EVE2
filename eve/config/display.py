@@ -2,7 +2,7 @@
 Display configuration settings for EVE2
 """
 
-from enum import Enum
+from enum import Enum, auto
 from typing import Dict, Tuple, Optional, Union, Any
 import logging
 import pygame
@@ -13,42 +13,29 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 class Emotion(Enum):
-    """Enumeration of possible emotions."""
-    NEUTRAL = "neutral"
-    HAPPY = "happy"
-    SAD = "sad"
-    ANGRY = "angry"
-    SURPRISED = "surprised"
-    CONFUSED = "confused"
+    """Emotion states for display."""
+    NEUTRAL = auto()
+    HAPPY = auto()
+    SAD = auto()
+    ANGRY = auto()
+    SURPRISED = auto()
+    FEARFUL = auto()
+    DISGUSTED = auto()
+    BLINK = auto()
 
     @classmethod
-    def from_value(cls, value: Union[str, int, 'Emotion', None]) -> 'Emotion':
-        """Convert various input types to Emotion enum, defaulting to NEUTRAL."""
-        if isinstance(value, cls):
-            return value
+    def from_value(cls, value: Optional[str]) -> 'Emotion':
+        """Convert string or int to Emotion enum."""
         if value is None:
             return cls.NEUTRAL
-        
-        normalized_value = str(value).strip().upper()
-        
-        # Try direct name lookup
-        if normalized_value in cls.__members__:
-            return cls[normalized_value]
-        
-        # Try value lookup
-        for member in cls:
-            if member.value.upper() == normalized_value:
-                return member
-                
-        # Try index lookup if integer
+        if isinstance(value, cls):
+            return value
         if isinstance(value, int):
-            try:
-                return list(cls)[value]
-            except IndexError:
-                pass  # Fall through to default
-
-        logger.warning(f"Invalid emotion value: '{value}', defaulting to NEUTRAL.")
-        return cls.NEUTRAL
+            return list(cls)[value % len(cls)]
+        try:
+            return cls[value.upper()]
+        except KeyError:
+            return cls.NEUTRAL
 
     def __str__(self) -> str:
         return self.value
@@ -60,12 +47,31 @@ class Emotion(Enum):
 
 @dataclass
 class DisplayConfig:
-    """Configuration for the display subsystem."""
-    
-    # Display settings
-    WINDOW_SIZE: Tuple[int, int] = (800, 480)
+    """Display configuration settings."""
+    # Window settings
+    WINDOW_SIZE: Tuple[int, int] = (800, 480)  # Default size for 7" LCD
     FPS: int = 30
-    FULLSCREEN: bool = False
+    FULLSCREEN: bool = True
+    
+    # Display hardware settings
+    USE_HARDWARE_DISPLAY: bool = True  # Use hardware LCD if available
+    DISPLAY_ROTATION: int = 0  # 0, 90, 180, 270 degrees
+    
+    # Default colors
+    BACKGROUND_COLOR: Tuple[int, int, int] = (0, 0, 0)  # Black
+    EYE_COLOR: Tuple[int, int, int] = (255, 255, 255)   # White
+    
+    # Animation settings
+    BLINK_INTERVAL: float = 4.0  # Seconds between blinks
+    BLINK_DURATION: float = 0.15  # Seconds for blink animation
+    
+    # Debug settings
+    DEBUG_MENU_ENABLED: bool = True
+    DEBUG_FONT_SIZE: int = 36
+    
+    # File paths
+    EMOTION_IMAGES_DIR: str = "assets/emotions"
+    CURRENT_FRAME_PATH: str = "current_display.png"
     
     # Emotion settings
     DEFAULT_EMOTION: Emotion = Emotion.NEUTRAL
@@ -148,6 +154,22 @@ class DisplayConfig:
                          instance_kwargs[field_name] = raw_value
                      else:
                          instance_kwargs[field_name] = default_value
+                elif field_name == 'USE_HARDWARE_DISPLAY':
+                     instance_kwargs[field_name] = bool(raw_value)
+                elif field_name == 'DISPLAY_ROTATION':
+                     instance_kwargs[field_name] = int(raw_value)
+                elif field_name == 'BLINK_INTERVAL':
+                     instance_kwargs[field_name] = float(raw_value)
+                elif field_name == 'BLINK_DURATION':
+                     instance_kwargs[field_name] = float(raw_value)
+                elif field_name == 'DEBUG_MENU_ENABLED':
+                     instance_kwargs[field_name] = bool(raw_value)
+                elif field_name == 'DEBUG_FONT_SIZE':
+                     instance_kwargs[field_name] = int(raw_value)
+                elif field_name == 'EMOTION_IMAGES_DIR':
+                     instance_kwargs[field_name] = str(raw_value)
+                elif field_name == 'CURRENT_FRAME_PATH':
+                     instance_kwargs[field_name] = str(raw_value)
                 else:
                     instance_kwargs[field_name] = raw_value
             except (ValueError, TypeError) as e:
