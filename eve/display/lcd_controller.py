@@ -475,6 +475,9 @@ class LCDController:
                 self.running = False
                 return
             elif event.type == pygame.KEYDOWN:
+                # Log key press for debugging
+                self.logger.debug(f"Key pressed: {pygame.key.name(event.key)}, Modifiers: {event.mod}")
+                
                 if event.key == pygame.K_c and event.mod & pygame.KMOD_CTRL:
                     # CTRL+C - Exit
                     self.logger.info("CTRL+C pressed, exiting...")
@@ -483,6 +486,7 @@ class LCDController:
                     sys.exit(0)
                 elif event.key == pygame.K_s and event.mod & pygame.KMOD_CTRL:
                     # CTRL+S - Toggle debug mode
+                    self.logger.info("CTRL+S pressed, toggling debug mode")
                     if self.debug_mode is None:
                         # Show debug mode selection menu
                         self._show_debug_mode_menu()
@@ -490,20 +494,25 @@ class LCDController:
                         # Exit debug mode
                         self.debug_mode = None
                         self.logger.info("Exiting debug mode")
+                elif event.key == pygame.K_ESCAPE:
+                    # ESC - Exit debug mode or application
+                    if self.debug_mode is not None:
+                        self.debug_mode = None
+                        self.logger.info("Exiting debug mode")
+                    else:
+                        self.logger.info("ESC pressed, exiting...")
+                        self.running = False
+                        pygame.quit()
+                        sys.exit(0)
                 elif self.debug_mode == 'video':
                     # Video debug mode controls
                     if event.key == pygame.K_r:
                         # Rotate display
                         self.rotation = (self.rotation + 90) % 360
                         self.logger.info(f"Display rotation set to {self.rotation} degrees")
-                    elif event.key == pygame.K_ESCAPE:
-                        # Exit video debug mode
-                        self.debug_mode = None
                 elif self.debug_mode == 'audio':
                     # Audio debug mode controls
-                    if event.key == pygame.K_ESCAPE:
-                        # Exit audio debug mode
-                        self.debug_mode = None
+                    pass
         
         # Clear screen
         self.screen.fill(self.background_color)
@@ -601,9 +610,11 @@ class LCDController:
         text_surface = font.render(emotion_text, True, self.text_color)
         self.screen.blit(text_surface, (10, 10))
         
-        # Draw listening status
-        listening_text = "Listening: Yes" if is_listening else "Listening: No"
-        text_surface = font.render(listening_text, True, self.text_color)
+        # Draw listening status with more visible formatting
+        listening_text = "Listening: YES" if is_listening else "Listening: NO"
+        # Use a different color for better visibility
+        listening_color = (0, 255, 0) if is_listening else (255, 0, 0)  # Green for Yes, Red for No
+        text_surface = font.render(listening_text, True, listening_color)
         self.screen.blit(text_surface, (10, 40))
         
         # Draw FPS (ensure we get a valid FPS value)
@@ -615,7 +626,8 @@ class LCDController:
         # Draw keyboard shortcuts
         shortcuts = [
             "CTRL+C: Exit",
-            "CTRL+S: Debug Menu"
+            "CTRL+S: Debug Menu",
+            "ESC: Exit/Back"
         ]
         
         for i, text in enumerate(shortcuts):
@@ -874,9 +886,11 @@ class LCDController:
         text_surface = font.render(emotion_text, True, self.text_color)
         self.screen.blit(text_surface, (10, 10))
         
-        # Draw listening status
-        listening_text = "Listening: Yes" if is_listening else "Listening: No"
-        text_surface = font.render(listening_text, True, self.text_color)
+        # Draw listening status with more visible formatting
+        listening_text = "Listening: YES" if is_listening else "Listening: NO"
+        # Use a different color for better visibility
+        listening_color = (0, 255, 0) if is_listening else (255, 0, 0)  # Green for Yes, Red for No
+        text_surface = font.render(listening_text, True, listening_color)
         self.screen.blit(text_surface, (10, 40))
         
         # Draw FPS (ensure we get a valid FPS value)
@@ -888,7 +902,8 @@ class LCDController:
         # Draw keyboard shortcuts
         shortcuts = [
             "CTRL+C: Exit",
-            "CTRL+S: Debug Menu"
+            "CTRL+S: Debug Menu",
+            "ESC: Exit/Back"
         ]
         
         for i, text in enumerate(shortcuts):
