@@ -296,7 +296,8 @@ class LCDController:
         self.emotion_images = {}
         for emotion in Emotion:
             try:
-                image_path = self.config.get_emotion_path(emotion)
+                # Construct the image path using the asset directory and emotion filename
+                image_path = os.path.join(self.asset_dir, emotion.filename)
                 original = pygame.image.load(image_path)
                 
                 # Scale image if needed
@@ -308,7 +309,7 @@ class LCDController:
                 self.emotion_images[emotion] = colored
                 
             except Exception as e:
-                logger.warning(f"Failed to load emotion image for {emotion}: {e}")
+                self.logger.warning(f"Failed to load emotion image for {emotion.name}: {e}")
                 # Create a fallback surface
                 surface = pygame.Surface(self.window_size)
                 surface.fill(self._get_fallback_color(emotion))
