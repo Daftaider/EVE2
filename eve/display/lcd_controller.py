@@ -578,9 +578,6 @@ class LCDController:
         if not self.running:
             return
         
-        # Process any pending events
-        self._process_events()
-        
         # Clear screen
         self.screen.fill(self.background_color)
         
@@ -1039,10 +1036,12 @@ class LCDController:
         Returns:
             bool: True if the event was handled, False otherwise
         """
+        handled = False
+        
         if event.type == pygame.QUIT:
             self.logger.info("Received QUIT event")
             self.running = False
-            return True
+            handled = True
         
         elif event.type == pygame.KEYDOWN:
             # Log key press with modifiers
@@ -1068,7 +1067,7 @@ class LCDController:
                     self._show_debug_mode_menu()
                 else:
                     self.debug_mode = None
-                return True
+                handled = True
             
             # Handle ESC
             elif event.key == pygame.K_ESCAPE:
@@ -1080,7 +1079,7 @@ class LCDController:
                     self.running = False
                     pygame.quit()
                     sys.exit(0)
-                return True
+                handled = True
         
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # Left mouse button
@@ -1099,13 +1098,17 @@ class LCDController:
                         self._show_debug_mode_menu()
                     else:
                         self.debug_mode = None
+                    handled = True
                     # Reset click tracking after double-click
                     self.last_click_time = None
                     self.last_click_pos = None
-                    return True
                 else:
                     # Update last click time and position
                     self.last_click_time = current_time
                     self.last_click_pos = current_pos
         
-        return False 
+        # If an event was handled, update the display
+        if handled:
+            self.update()
+        
+        return handled 
