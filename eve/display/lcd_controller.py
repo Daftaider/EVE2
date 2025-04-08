@@ -470,6 +470,31 @@ class LCDController:
                         (self.width // 3, mouth_y), 
                         (2 * self.width // 3, mouth_y), 3)
 
+    def _create_disgusted_face(self, surface):
+        """Create a disgusted face."""
+        # Draw eyes
+        eye_color = self.eye_color
+        eye_size = min(self.width, self.height) // 16
+        
+        # Left eye
+        pygame.draw.circle(surface, eye_color, 
+                          (self.width // 3, self.height // 2), eye_size)
+        
+        # Right eye
+        pygame.draw.circle(surface, eye_color, 
+                          (2 * self.width // 3, self.height // 2), eye_size)
+        
+        # Draw mouth (disgusted)
+        mouth_y = 2 * self.height // 3
+        pygame.draw.arc(surface, eye_color, 
+                       (self.width // 3, mouth_y - 20, 
+                        self.width // 3, 40), 0, 3.14, 3)
+        
+        # Draw tongue
+        pygame.draw.line(surface, eye_color, 
+                        (self.width // 2, mouth_y + 10), 
+                        (self.width // 2, mouth_y + 30), 3)
+
     def _signal_handler(self, signum, frame):
         """Handle CTRL+C signal."""
         self.logger.info("Received CTRL+C signal")
