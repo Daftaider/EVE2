@@ -20,6 +20,7 @@ import cv2
 
 from eve import config
 from eve.emotion.emotion import Emotion
+from eve.config.config import DisplayConfig
 
 logger = logging.getLogger(__name__)
 
@@ -51,40 +52,40 @@ IOU_THRESHOLD = 0.7 # Overlap threshold to consider a match for correction
 class LCDController:
     """Controls the LCD display and renders eye animations."""
     
-    def __init__(self, config: Dict):
+    def __init__(self, config: DisplayConfig):
         """Initialize the LCD controller.
         
         Args:
-            config: Configuration dictionary containing display settings
+            config: DisplayConfig object containing display settings
         """
         self.logger = logging.getLogger(__name__)
         
         # Display settings
-        self.width = config.get('display', {}).get('resolution', [800, 480])[0]
-        self.height = config.get('display', {}).get('resolution', [800, 480])[1]
-        self.fps = config.get('display', {}).get('fps', 30)
-        self.fullscreen = config.get('display', {}).get('fullscreen', True)
-        self.rotation = config.get('display', {}).get('rotation', 0)
-        self.use_hardware_display = config.get('display', {}).get('use_hardware_display', True)
+        self.width = config.WINDOW_SIZE[0]
+        self.height = config.WINDOW_SIZE[1]
+        self.fps = config.FPS
+        self.fullscreen = config.FULLSCREEN
+        self.rotation = config.DISPLAY_ROTATION
+        self.use_hardware_display = config.USE_HARDWARE_DISPLAY
         
         # Color settings
-        self.background_color = self._parse_color(config.get('display', {}).get('background_color', (0, 0, 0)))
-        self.eye_color = self._parse_color(config.get('display', {}).get('eye_color', (255, 255, 255)))
-        self.text_color = self._parse_color(config.get('display', {}).get('text_color', (255, 255, 255)))
+        self.background_color = self._parse_color(config.BACKGROUND_COLOR)
+        self.eye_color = self._parse_color(config.EYE_COLOR)
+        self.text_color = self._parse_color(config.TEXT_COLOR)
         
         # Animation settings
-        self.blink_interval = config.get('display', {}).get('blink_interval_sec', 4.0)
-        self.blink_duration = config.get('display', {}).get('blink_duration_sec', 0.15)
-        self.transition_speed = config.get('display', {}).get('transition_speed', 0.1)
+        self.blink_interval = config.BLINK_INTERVAL_SEC
+        self.blink_duration = config.BLINK_DURATION
+        self.transition_speed = config.TRANSITION_SPEED
         
         # Debug settings
-        self.debug_menu_enabled = config.get('display', {}).get('debug_menu_enabled', True)
-        self.debug_font_size = config.get('display', {}).get('debug_font_size', 24)
+        self.debug_menu_enabled = config.DEBUG_MENU_ENABLED
+        self.debug_font_size = config.DEBUG_FONT_SIZE
         self.debug_ui_elements = {}
         
         # File paths
-        self.asset_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'display')
-        self.current_frame_path = None
+        self.asset_dir = os.path.join(os.path.dirname(__file__), '..', '..', config.ASSET_DIR)
+        self.current_frame_path = config.CURRENT_FRAME_PATH
         
         # State
         self.running = True
