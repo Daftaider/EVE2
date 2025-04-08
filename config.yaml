@@ -15,7 +15,7 @@ hardware:
 
   # Display Specific
   display_resolution: [800, 480] # Width, Height
-  fullscreen: False
+  fullscreen: True  # Changed to True for LCD
   display_type: lcd # Options: lcd, oled, hdmi, none
   display_rotation: 0 # Options: 0, 90, 180, 270
 
@@ -177,16 +177,16 @@ communication:
 display: # Corresponds to DisplayConfig dataclass
   WINDOW_SIZE: [800, 480]
   FPS: 30
-  FULLSCREEN: False
+  FULLSCREEN: True  # Changed to True for LCD
+  USE_HARDWARE_DISPLAY: True  # Added to ensure hardware display is used
+  DISPLAY_ROTATION: 0  # Added to match hardware config
   DEFAULT_EMOTION: neutral # Initial emotion
   ASSET_DIR: assets/emotions # Path to emotion images
   TRANSITION_SPEED: 0.5 # Speed of emotion transitions
   BACKGROUND_COLOR: [0, 0, 0] # RGB for background
   TEXT_COLOR: [255, 255, 255] # RGB for text overlays
   EYE_COLOR: [0, 191, 255] # RGB for default eye color
-  BLINK_INTERVAL_SEC: 3.0 # Average time between blinks
-  ENABLE_BLINKING: True
-  ENABLE_EMOTIONS: True # Enable emotion display changes
-  EMOTION_TRANSITION_TIME_MS: 500 # Duration of emotion transition animation
-  FONT_NAME: Arial # Font for text overlays
-  FONT_SIZE: 24 # Size of font 
+  BLINK_INTERVAL: 3.0 # Average time between blinks
+  BLINK_DURATION: 0.15 # Duration of blink animation
+  DEBUG_MENU_ENABLED: True # Enable debug menu
+  DEBUG_FONT_SIZE: 24 # Size of debug text 

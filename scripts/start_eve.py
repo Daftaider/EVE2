@@ -34,8 +34,9 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 # Add at the top of the file, before importing pygame
-# os.environ['SDL_VIDEODRIVER'] = 'dummy'
-# os.environ['SDL_RENDERER_DRIVER'] = 'software'
+os.environ['SDL_VIDEODRIVER'] = 'fbcon'  # Use framebuffer console
+os.environ['SDL_FBDEV'] = '/dev/fb0'     # Primary framebuffer device
+os.environ['SDL_VIDEO_CURSOR_HIDDEN'] = '1'  # Hide cursor
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 
 # --- Initial Logging Setup ---
@@ -176,7 +177,14 @@ class EVEApplication:
             # -----------------------------------------
 
             # --- RE-ENABLE VisionDisplay --- 
-            display_controller = VisionDisplay(self.config, camera, face_detector, object_detector) if pygame_initialized and camera else None
+            from eve.display.lcd_controller import LCDController
+            display_controller = LCDController(
+                config=self.config.display,
+                width=self.config.hardware.display_resolution[0],
+                height=self.config.hardware.display_resolution[1],
+                rotation=self.config.hardware.display_rotation,
+                use_hardware_display=True
+            ) if pygame_initialized else None
             if display_controller and not display_controller.start(): display_controller = None # Start and check
             # -----------------------------
 
