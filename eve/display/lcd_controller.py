@@ -294,15 +294,29 @@ class LCDController:
     def _load_emotion_images(self):
         """Load all emotion images into memory."""
         self.emotion_images = {}
+        
+        # Create assets directory if it doesn't exist
+        os.makedirs(self.asset_dir, exist_ok=True)
+        
         for emotion in Emotion:
             try:
                 # Construct the image path using the asset directory and emotion filename
                 image_path = os.path.join(self.asset_dir, emotion.filename)
+                
+                # Check if file exists
+                if not os.path.exists(image_path):
+                    self.logger.warning(f"Emotion image not found: {image_path}")
+                    # Create a fallback surface with emotion color
+                    surface = pygame.Surface((self.width, self.height))
+                    surface.fill(self._get_fallback_color(emotion))
+                    self.emotion_images[emotion] = surface
+                    continue
+                
                 original = pygame.image.load(image_path)
                 
                 # Scale image if needed
-                if original.get_size() != self.window_size:
-                    original = pygame.transform.scale(original, self.window_size)
+                if original.get_size() != (self.width, self.height):
+                    original = pygame.transform.scale(original, (self.width, self.height))
                 
                 # Apply eye color
                 colored = self._apply_eye_color(original, self.eye_color)
@@ -311,7 +325,7 @@ class LCDController:
             except Exception as e:
                 self.logger.warning(f"Failed to load emotion image for {emotion.name}: {e}")
                 # Create a fallback surface
-                surface = pygame.Surface(self.window_size)
+                surface = pygame.Surface((self.width, self.height))
                 surface.fill(self._get_fallback_color(emotion))
                 self.emotion_images[emotion] = surface
 
