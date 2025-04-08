@@ -179,11 +179,7 @@ class EVEApplication:
             # --- RE-ENABLE VisionDisplay --- 
             from eve.display.lcd_controller import LCDController
             display_controller = LCDController(
-                config=self.config.display,
-                width=self.config.hardware.display_resolution[0],
-                height=self.config.hardware.display_resolution[1],
-                rotation=self.config.hardware.display_rotation,
-                use_hardware_display=True
+                config=self.config.display
             ) if pygame_initialized else None
             if display_controller and not display_controller.start(): display_controller = None # Start and check
             # -----------------------------
