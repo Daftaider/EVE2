@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Union
 from enum import Enum
+import traceback
 
 import pygame
 import numpy as np
@@ -569,67 +570,58 @@ class LCDController:
         
         return handled
 
-    def update(self, is_listening: bool = False):
-        """Update the display with current state.
-        
-        Args:
-            is_listening: Whether EVE is currently listening
-        """
-        if not self.running:
-            return
-        
-        # Clear screen
-        self.screen.fill(self.background_color)
-        
-        # Check if we should blink
-        current_time = time.time()
-        if current_time - self.last_blink_time >= self.blink_interval:
-            self.blink()
-            self.last_blink_time = current_time
-        
-        # Handle different display modes
-        if self.debug_mode == 'video':
-            self._update_video_debug()
-        elif self.debug_mode == 'audio':
-            self._update_audio_debug()
-        else:
-            # Normal display mode
-            # Get current emotion image
-            image = self.emotion_images.get(self.current_emotion)
-            if image is None:
-                self.logger.error(f"No image found for emotion: {self.current_emotion}")
+    def update(self):
+        """Update the display."""
+        try:
+            # Process any pending events
+            self._process_events()
+            
+            # Clear screen
+            self.screen.fill(self.background_color)
+            
+            # Check if we need to blink
+            if self.current_emotion == "blink":
+                self._perform_blink()
                 return
             
-            # Center the image
-            x = (self.width - image.get_width()) // 2
-            y = (self.height - image.get_height()) // 2
-            
-            # Apply rotation if needed
-            if self.rotation != 0:
-                image = pygame.transform.rotate(image, self.rotation)
-            
-            # Draw the emotion image
-            self.screen.blit(image, (x, y))
+            # Handle different display modes
+            if self.debug_mode == 'video':
+                # Draw video debug info
+                self._draw_video_debug()
+            elif self.debug_mode == 'audio':
+                # Draw audio debug info
+                self._draw_audio_debug()
+            else:
+                # Normal display mode
+                if self.current_emotion in self.emotion_images:
+                    image = self.emotion_images[self.current_emotion]
+                    
+                    # Handle image rotation if needed
+                    if self.rotation != 0:
+                        image = pygame.transform.rotate(image, self.rotation)
+                    
+                    # Draw the emotion image
+                    rect = image.get_rect(center=self.screen.get_rect().center)
+                    self.screen.blit(image, rect)
             
             # Draw debug menu if enabled
-            if self.debug_menu_enabled:
-                self._draw_debug_menu(is_listening)
-        
-        # Update display
-        if not self.headless_mode:
-            pygame.display.flip()
-        
-        # Save current frame if path is set
-        if self.current_frame_path:
-            pygame.image.save(self.screen, self.current_frame_path)
-        
-        # Cap the frame rate and update FPS counter
-        self.clock.tick(self.fps)
-        
-        # Log FPS periodically
-        current_fps = self.clock.get_fps()
-        if current_fps > 0:
-            self.logger.debug(f"Current FPS: {int(current_fps)}")
+            if self.debug_mode:
+                self._draw_debug_menu()
+            
+            # Update display
+            pygame.display.update()
+            
+            # Save current frame if path is set
+            if self.current_frame_path:
+                pygame.image.save(self.screen, self.current_frame_path)
+                self.current_frame_path = None
+            
+            # Cap frame rate and update FPS counter
+            self.clock.tick(self.fps)
+            
+        except Exception as e:
+            self.logger.error(f"Error updating display: {str(e)}")
+            self.logger.error(traceback.format_exc())
 
     def _show_debug_mode_menu(self):
         """Show the debug mode selection menu."""
@@ -706,12 +698,8 @@ class LCDController:
             # Return to normal display
             self.update()
 
-    def _draw_debug_menu(self, is_listening: bool):
-        """Draw the debug menu on the screen.
-        
-        Args:
-            is_listening: Whether EVE is currently listening
-        """
+    def _draw_debug_menu(self):
+        """Draw the debug menu on the screen."""
         font = pygame.font.Font(None, self.debug_font_size)
         
         # Draw emotion text with background for better visibility
@@ -722,8 +710,8 @@ class LCDController:
         self.screen.blit(text_surface, text_rect)
         
         # Draw listening status with more visible formatting
-        listening_text = "Listening: YES" if is_listening else "Listening: NO"
-        listening_color = (0, 255, 0) if is_listening else (255, 0, 0)  # Green for Yes, Red for No
+        listening_text = "Listening: YES" if self.is_listening else "Listening: NO"
+        listening_color = (0, 255, 0) if self.is_listening else (255, 0, 0)  # Green for Yes, Red for No
         text_surface = font.render(listening_text, True, listening_color)
         text_rect = text_surface.get_rect(topleft=(10, 40))
         pygame.draw.rect(self.screen, (0, 0, 0, 128), text_rect.inflate(10, 5))
@@ -945,17 +933,138 @@ class LCDController:
                 self.logger.error(f"Error updating display during blink: {e}")
     
     def _blink_loop(self):
-        """Loop for blinking animation."""
-        while self.running:
-            try:
-                if self.is_blinking:
-                    # Don't call update() here to avoid recursion
-                    time.sleep(0.01)  # Small sleep to prevent CPU hogging
-                else:
-                    time.sleep(0.1)  # Longer sleep when not blinking
-            except Exception as e:
-                self.logger.error(f"Error in blink loop: {e}")
-                time.sleep(0.5)  # Sleep longer on error
+        """Run the blink animation loop."""
+        try:
+            while self.running and not self._blink_stop_event.is_set():
+                # Perform blink animation
+                self._perform_blink()
+                
+                # Wait for next blink interval
+                time.sleep(self.blink_interval)
+                
+        except Exception as e:
+            self.logger.error(f"Error in blink loop: {str(e)}")
+            self.logger.error(traceback.format_exc())
+        finally:
+            self.logger.info("Blink loop stopped")
+    
+    def _perform_blink(self):
+        """Perform a single blink animation."""
+        try:
+            # Save current emotion
+            current_emotion = self.current_emotion
+            
+            # Set blink emotion
+            self.current_emotion = 'blink'
+            
+            # Draw blink emotion
+            self._draw_current_emotion()
+            pygame.display.flip()
+            
+            # Wait for blink duration
+            time.sleep(self.blink_duration)
+            
+            # Restore previous emotion
+            self.current_emotion = current_emotion
+            
+            # Draw restored emotion
+            self._draw_current_emotion()
+            pygame.display.flip()
+            
+        except Exception as e:
+            self.logger.error(f"Error in blink animation: {str(e)}")
+            self.logger.error(traceback.format_exc())
+    
+    def _draw_current_emotion(self):
+        """Draw the current emotion on the screen."""
+        try:
+            # Clear screen
+            self.screen.fill(self.background_color)
+            
+            # Get current emotion image
+            emotion_image = self.emotion_images.get(self.current_emotion)
+            if emotion_image:
+                # Draw emotion image
+                self.screen.blit(emotion_image, (0, 0))
+                
+                # Draw debug info if enabled
+                if self.debug_mode:
+                    self._draw_debug_info()
+                    
+        except Exception as e:
+            self.logger.error(f"Error drawing emotion: {str(e)}")
+            self.logger.error(traceback.format_exc())
+    
+    def handle_event(self, event):
+        """Handle a Pygame event."""
+        try:
+            # Handle quit event
+            if event.type == pygame.QUIT:
+                self.running = False
+                return True
+            
+            # Handle key events
+            if event.type == pygame.KEYDOWN:
+                # Log key event
+                key_name = pygame.key.name(event.key)
+                mod_keys = []
+                if event.mod & pygame.KMOD_CTRL: mod_keys.append('CTRL')
+                if event.mod & pygame.KMOD_SHIFT: mod_keys.append('SHIFT')
+                if event.mod & pygame.KMOD_ALT: mod_keys.append('ALT')
+                mod_str = '+'.join(mod_keys) if mod_keys else 'NO_MOD'
+                self.logger.debug(f"Key event: {key_name}, Modifiers: {mod_str}")
+                
+                # Handle CTRL+C
+                if event.key == pygame.K_c and event.mod & pygame.KMOD_CTRL:
+                    self.running = False
+                    return True
+                
+                # Handle CTRL+S
+                if event.key == pygame.K_s and event.mod & pygame.KMOD_CTRL:
+                    self.debug_mode = not self.debug_mode
+                    self.logger.info(f"Debug mode {'enabled' if self.debug_mode else 'disabled'}")
+                    return True
+                
+                # Handle ESC
+                if event.key == pygame.K_ESCAPE:
+                    self.running = False
+                    return True
+            
+            # Handle mouse events
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                # Log mouse event
+                self.logger.debug(f"Mouse button {event.button} clicked at {event.pos}")
+                
+                # Handle double-click
+                current_time = time.time()
+                if (current_time - self.last_click_time < self.double_click_threshold and
+                    abs(event.pos[0] - self.last_click_pos[0]) < 10 and
+                    abs(event.pos[1] - self.last_click_pos[1]) < 10):
+                    self.logger.info("Double-click detected")
+                    # Handle double-click action here
+                    self.last_click_time = 0  # Reset click tracking
+                    return True
+                
+                # Update click tracking
+                self.last_click_time = current_time
+                self.last_click_pos = event.pos
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error handling event: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            return False
+    
+    def _stop_blink(self):
+        """Stop the blink animation."""
+        try:
+            self._blink_stop_event.set()
+            if self.blink_thread and self.blink_thread.is_alive():
+                self.blink_thread.join(timeout=1.0)
+        except Exception as e:
+            self.logger.error(f"Error stopping blink animation: {str(e)}")
+            self.logger.error(traceback.format_exc())
 
     def _update_video_debug(self):
         """Update the video debug display."""
@@ -1027,99 +1136,11 @@ class LCDController:
         if not self.headless_mode:
             pygame.display.flip()
     
-    def handle_event(self, event):
-        """Handle a Pygame event.
-        
-        Args:
-            event: The Pygame event to handle
-            
-        Returns:
-            bool: True if the event was handled, False otherwise
-        """
-        handled = False
-        
-        if event.type == pygame.QUIT:
-            self.logger.info("Received QUIT event")
-            self.running = False
-            handled = True
-        
-        elif event.type == pygame.KEYDOWN:
-            # Log key press with modifiers
-            key_name = pygame.key.name(event.key)
-            mod_keys = []
-            if event.mod & pygame.KMOD_CTRL: mod_keys.append('CTRL')
-            if event.mod & pygame.KMOD_SHIFT: mod_keys.append('SHIFT')
-            if event.mod & pygame.KMOD_ALT: mod_keys.append('ALT')
-            mod_str = '+'.join(mod_keys) if mod_keys else 'NO_MOD'
-            self.logger.info(f"Key pressed: {key_name}, Modifiers: {mod_str}")
-            
-            # Handle CTRL+C
-            if event.key == pygame.K_c and event.mod & pygame.KMOD_CTRL:
-                self.logger.info("CTRL+C pressed, exiting...")
-                self.running = False
-                pygame.quit()
-                sys.exit(0)
-            
-            # Handle CTRL+S
-            elif event.key == pygame.K_s and event.mod & pygame.KMOD_CTRL:
-                self.logger.info("CTRL+S pressed, toggling debug mode")
-                if self.debug_mode is None:
-                    self._show_debug_mode_menu()
-                else:
-                    self.debug_mode = None
-                handled = True
-            
-            # Handle ESC
-            elif event.key == pygame.K_ESCAPE:
-                if self.debug_mode is not None:
-                    self.logger.info("ESC pressed, exiting debug mode")
-                    self.debug_mode = None
-                else:
-                    self.logger.info("ESC pressed, exiting application")
-                    self.running = False
-                    pygame.quit()
-                    sys.exit(0)
-                handled = True
-            
-            # Handle number keys in debug menu
-            elif self.debug_mode is None and event.key in [pygame.K_1, pygame.K_2, pygame.K_3]:
-                self.logger.info(f"Number key {event.key - pygame.K_1 + 1} pressed in debug menu")
-                if event.key == pygame.K_1:
-                    self.debug_mode = 'video'
-                elif event.key == pygame.K_2:
-                    self.debug_mode = 'audio'
-                elif event.key == pygame.K_3:
-                    self.debug_mode = None
-                handled = True
-        
-        elif event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1:  # Left mouse button
-                current_time = time.time()
-                current_pos = event.pos
-                self.logger.info(f"Mouse click at position: {current_pos}")
-                
-                # Check for double-click with improved position checking
-                if (self.last_click_time and 
-                    current_time - self.last_click_time < self.double_click_threshold and 
-                    self.last_click_pos and 
-                    abs(current_pos[0] - self.last_click_pos[0]) < 20 and  # Increased threshold
-                    abs(current_pos[1] - self.last_click_pos[1]) < 20):    # Increased threshold
-                    self.logger.info("Double-click detected, toggling debug mode")
-                    if self.debug_mode is None:
-                        self._show_debug_mode_menu()
-                    else:
-                        self.debug_mode = None
-                    handled = True
-                    # Reset click tracking after double-click
-                    self.last_click_time = None
-                    self.last_click_pos = None
-                else:
-                    # Update last click time and position
-                    self.last_click_time = current_time
-                    self.last_click_pos = current_pos
-        
-        # If an event was handled, update the display
-        if handled:
-            self.update()
-        
-        return handled 
+    def _draw_debug_info(self):
+        """Draw debug information on the screen."""
+        # Implementation of _draw_debug_info method
+        pass
+
+    def _blink_stop_event(self):
+        """Stop the blink animation."""
+        self._blink_stop_event.set() 

@@ -27,6 +27,7 @@ from eve.speech.speech_recognizer import SpeechRecognizer
 from eve.speech.llm_processor import LLMProcessor
 from eve.speech.text_to_speech import TextToSpeech
 from typing import Any, Optional, Union # Import Optional and Union
+import traceback
 
 # Add the project root to the Python path
 # Ensure this runs before other eve imports
@@ -86,6 +87,8 @@ class EVEApplication:
         self.config: Optional[SystemConfig] = None
         self.args = None # Store parsed args from main()
         self._setup_signal_handlers()
+        self.clock = pygame.time.Clock()
+        self.display_controller = None
 
     def _setup_signal_handlers(self):
         """Register signal handlers for graceful shutdown."""
@@ -126,6 +129,8 @@ class EVEApplication:
                 try:
                     pygame.init()
                     pygame_initialized = True
+                    self.clock = pygame.time.Clock()
+                    self.display_controller = self._setup_display_controller()
                     logger.info("Pygame initialized.")
                 except Exception as pg_err:
                     logger.error(f"Pygame initialization failed: {pg_err}. Display might not work.")
@@ -178,10 +183,7 @@ class EVEApplication:
 
             # --- RE-ENABLE VisionDisplay --- 
             from eve.display.lcd_controller import LCDController
-            display_controller = LCDController(
-                config=self.config.display
-            ) if pygame_initialized else None
-            if display_controller and not display_controller.start(): display_controller = None # Start and check
+            if self.display_controller and not self.display_controller.start(): self.display_controller = None # Start and check
             # -----------------------------
 
             # --- Audio Subsystems --- 
@@ -216,7 +218,7 @@ class EVEApplication:
                 config=self.config, camera=camera, face_detector=face_detector,
                 object_detector=object_detector, emotion_analyzer=emotion_analyzer,
                 audio_capture=audio_capture, speech_recognizer=speech_recognizer,
-                llm_processor=llm_processor, tts=tts, display_controller=display_controller
+                llm_processor=llm_processor, tts=tts, display_controller=self.display_controller
             ) as self.orchestrator:
                 logger.info("Starting Orchestrator...")
                 
@@ -229,7 +231,7 @@ class EVEApplication:
 
                 # 6. Run Main Loop (Pygame events or wait)
                 logger.info("EVE application running. Press Ctrl+C to exit.")
-                if display_controller and pygame_initialized:
+                if self.display_controller and pygame_initialized:
                     self._pygame_event_loop()
                 else:
                     # Fallback: Call update() periodically if no display/pygame
@@ -275,49 +277,49 @@ class EVEApplication:
             return exit_code
 
     def _pygame_event_loop(self):
-        """Runs the Pygame event loop for UI interaction."""
-        logger.info("Starting Pygame event loop...")
-        while self._running:
-            try:
-                # Handle Pygame events
+        """Handle Pygame events in the main loop."""
+        try:
+            while self._running:
+                # Process all pending events
                 for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        logger.info("Pygame QUIT event received.")
-                        self._signal_handler(signal.SIGTERM, None) # Treat QUIT as shutdown signal
-                        return # Exit loop
+                    # Log key events for debugging
+                    if event.type == pygame.KEYDOWN:
+                        key_name = pygame.key.name(event.key)
+                        mod_keys = []
+                        if event.mod & pygame.KMOD_CTRL: mod_keys.append('CTRL')
+                        if event.mod & pygame.KMOD_SHIFT: mod_keys.append('SHIFT')
+                        if event.mod & pygame.KMOD_ALT: mod_keys.append('ALT')
+                        mod_str = '+'.join(mod_keys) if mod_keys else 'NO_MOD'
+                        self.logger.debug(f"Key event: {key_name}, Modifiers: {mod_str}")
                     
-                    # Pass events to LCD controller if available
-                    if self.orchestrator and self.orchestrator.display_controller:
-                        # Log the event for debugging
-                        if event.type == pygame.KEYDOWN:
-                            key_name = pygame.key.name(event.key)
-                            mod_keys = []
-                            if event.mod & pygame.KMOD_CTRL: mod_keys.append('CTRL')
-                            if event.mod & pygame.KMOD_SHIFT: mod_keys.append('SHIFT')
-                            if event.mod & pygame.KMOD_ALT: mod_keys.append('ALT')
-                            mod_str = '+'.join(mod_keys) if mod_keys else 'NO_MOD'
-                            logger.debug(f"Passing key event to LCD controller: {key_name}, Modifiers: {mod_str}")
-                        elif event.type == pygame.MOUSEBUTTONDOWN:
-                            logger.debug(f"Passing mouse event to LCD controller: Button {event.button} at {event.pos}")
-                        
-                        # Pass the event to the LCD controller
-                        self.orchestrator.display_controller.handle_event(event)
+                    # Log mouse events for debugging
+                    elif event.type == pygame.MOUSEBUTTONDOWN:
+                        self.logger.debug(f"Mouse button {event.button} clicked at {event.pos}")
+                    
+                    # Pass event to LCD controller if available
+                    if self.display_controller:
+                        if self.display_controller.handle_event(event):
+                            # Event was handled by LCD controller
+                            continue
+                    
+                    # Handle quit event
+                    if event.type == pygame.QUIT:
+                        self._running = False
+                        break
                 
                 # Update orchestrator
                 if self.orchestrator:
                     self.orchestrator.update()
                 
-                # Optional sleep to prevent busy-waiting
-                time.sleep(0.01)
-
-            except KeyboardInterrupt:
-                logger.info("KeyboardInterrupt received in pygame loop.")
-                self._signal_handler(signal.SIGINT, None)
-                return # Exit loop
-            except Exception as e:
-                logger.error(f"Error in pygame event loop: {e}", exc_info=True)
-                time.sleep(0.5)
-        logger.info("Pygame event loop finished.")
+                # Cap frame rate
+                self.clock.tick(60)
+                
+        except Exception as e:
+            self.logger.error(f"Error in Pygame event loop: {str(e)}")
+            self.logger.error(traceback.format_exc())
+        finally:
+            self.logger.info("Pygame event loop stopped")
+            self._running = False
 
 # cleanup() method is no longer needed as pygame quit moved to run() finally
 # def cleanup(self): ...
