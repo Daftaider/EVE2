@@ -95,6 +95,11 @@ class LCDController:
             self.debug_mode = None
             self.last_blink_time = time.time()
             
+            # Double-click detection
+            self.last_click_time = 0
+            self.double_click_threshold = 0.5  # seconds
+            self.last_click_pos = None
+            
             # Check if we're in a headless environment
             self.headless_mode = self._is_headless_environment()
             if self.headless_mode:
@@ -177,6 +182,9 @@ class LCDController:
             
             # Initialize clock
             self.clock = pygame.time.Clock()
+            
+            # Enable key repeat for better keyboard handling
+            pygame.key.set_repeat(500, 50)  # 500ms delay, 50ms interval
             
             # Load images
             self._load_emotion_images()
@@ -460,20 +468,12 @@ class LCDController:
         pygame.quit()
         sys.exit(0)
     
-    def update(self, is_listening: bool = False):
-        """Update the display with current state.
-        
-        Args:
-            is_listening: Whether EVE is currently listening
-        """
-        if not self.running:
-            return
-        
-        # Handle pygame events
+    def _handle_keyboard_events(self):
+        """Handle keyboard events and return True if a key was pressed."""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
-                return
+                return True
             elif event.type == pygame.KEYDOWN:
                 # Log key press for debugging
                 self.logger.debug(f"Key pressed: {pygame.key.name(event.key)}, Modifiers: {event.mod}")
@@ -494,6 +494,7 @@ class LCDController:
                         # Exit debug mode
                         self.debug_mode = None
                         self.logger.info("Exiting debug mode")
+                    return True
                 elif event.key == pygame.K_ESCAPE:
                     # ESC - Exit debug mode or application
                     if self.debug_mode is not None:
@@ -504,15 +505,62 @@ class LCDController:
                         self.running = False
                         pygame.quit()
                         sys.exit(0)
+                    return True
                 elif self.debug_mode == 'video':
                     # Video debug mode controls
                     if event.key == pygame.K_r:
                         # Rotate display
                         self.rotation = (self.rotation + 90) % 360
                         self.logger.info(f"Display rotation set to {self.rotation} degrees")
+                        return True
                 elif self.debug_mode == 'audio':
                     # Audio debug mode controls
                     pass
+        return False
+        
+    def _handle_mouse_events(self):
+        """Handle mouse events and return True if a mouse event was processed."""
+        for event in pygame.event.get():
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                # Handle mouse clicks
+                if event.button == 1:  # Left mouse button
+                    current_time = time.time()
+                    current_pos = event.pos
+                    
+                    # Check for double-click
+                    if (current_time - self.last_click_time < self.double_click_threshold and 
+                        self.last_click_pos and 
+                        abs(current_pos[0] - self.last_click_pos[0]) < 10 and 
+                        abs(current_pos[1] - self.last_click_pos[1]) < 10):
+                        # Double-click detected
+                        self.logger.info("Double-click detected, toggling debug mode")
+                        if self.debug_mode is None:
+                            # Show debug mode selection menu
+                            self._show_debug_mode_menu()
+                        else:
+                            # Exit debug mode
+                            self.debug_mode = None
+                            self.logger.info("Exiting debug mode")
+                        return True
+                    
+                    # Update last click time and position
+                    self.last_click_time = current_time
+                    self.last_click_pos = current_pos
+                    return True
+        return False
+        
+    def update(self, is_listening: bool = False):
+        """Update the display with current state.
+        
+        Args:
+            is_listening: Whether EVE is currently listening
+        """
+        if not self.running:
+            return
+        
+        # Handle keyboard and mouse events
+        self._handle_keyboard_events()
+        self._handle_mouse_events()
         
         # Clear screen
         self.screen.fill(self.background_color)
@@ -627,7 +675,8 @@ class LCDController:
         shortcuts = [
             "CTRL+C: Exit",
             "CTRL+S: Debug Menu",
-            "ESC: Exit/Back"
+            "ESC: Exit/Back",
+            "Double-Click: Debug Menu"
         ]
         
         for i, text in enumerate(shortcuts):
@@ -903,7 +952,8 @@ class LCDController:
         shortcuts = [
             "CTRL+C: Exit",
             "CTRL+S: Debug Menu",
-            "ESC: Exit/Back"
+            "ESC: Exit/Back",
+            "Double-Click: Debug Menu"
         ]
         
         for i, text in enumerate(shortcuts):
