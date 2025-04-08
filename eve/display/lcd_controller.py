@@ -11,6 +11,7 @@ import signal
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Union
+from enum import Enum
 
 import pygame
 import numpy as np
@@ -19,6 +20,7 @@ import cv2
 
 from eve import config
 from eve.config.display import Emotion, DisplayConfig
+from eve.emotion.emotion import Emotion as EveEmotion
 
 logger = logging.getLogger(__name__)
 
@@ -50,163 +52,106 @@ IOU_THRESHOLD = 0.7 # Overlap threshold to consider a match for correction
 class LCDController:
     """Controls the LCD display and renders eye animations."""
     
-    def __init__(self, config: DisplayConfig):
+    def __init__(self, config: Dict):
         """Initialize the LCD controller.
         
         Args:
-            config: Display configuration settings
+            config: Configuration dictionary containing display settings
         """
-        self.config = config
         self.logger = logging.getLogger(__name__)
         
-        # Initialize display settings
-        self.width, self.height = config.WINDOW_SIZE
-        self.fps = config.FPS
-        self.fullscreen = config.FULLSCREEN
-        self.use_hardware_display = config.USE_HARDWARE_DISPLAY
-        self.rotation = config.DISPLAY_ROTATION
+        # Display settings
+        self.width = config.get('display', {}).get('resolution', [800, 480])[0]
+        self.height = config.get('display', {}).get('resolution', [800, 480])[1]
+        self.fps = config.get('display', {}).get('fps', 30)
+        self.fullscreen = config.get('display', {}).get('fullscreen', True)
+        self.rotation = config.get('display', {}).get('rotation', 0)
+        self.use_hardware_display = config.get('display', {}).get('use_hardware_display', True)
         
-        # Initialize colors
-        self.background_color = config.BACKGROUND_COLOR
-        self.eye_color = config.EYE_COLOR
-        self.text_color = config.TEXT_COLOR
+        # Color settings
+        self.background_color = self._parse_color(config.get('display', {}).get('background_color', (0, 0, 0)))
+        self.eye_color = self._parse_color(config.get('display', {}).get('eye_color', (255, 255, 255)))
+        self.text_color = self._parse_color(config.get('display', {}).get('text_color', (255, 255, 255)))
         
-        # Initialize animation settings
-        self.blink_interval = config.BLINK_INTERVAL_SEC
-        self.blink_duration = config.BLINK_DURATION
-        self.transition_speed = config.TRANSITION_SPEED
+        # Animation settings
+        self.blink_interval = config.get('display', {}).get('blink_interval_sec', 4.0)
+        self.blink_duration = config.get('display', {}).get('blink_duration_sec', 0.15)
+        self.transition_speed = config.get('display', {}).get('transition_speed', 0.1)
         
-        # Initialize debug settings
-        self.debug_menu_enabled = config.DEBUG_MENU_ENABLED
-        self.debug_font_size = config.DEBUG_FONT_SIZE
+        # Debug settings
+        self.debug_menu_enabled = config.get('display', {}).get('debug_menu_enabled', True)
+        self.debug_font_size = config.get('display', {}).get('debug_font_size', 24)
+        self.debug_ui_elements = {}
         
-        # Initialize file paths
-        self.asset_dir = config.ASSET_DIR
-        self.current_frame_path = config.CURRENT_FRAME_PATH
+        # File paths
+        self.asset_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'display')
+        self.current_frame_path = None
         
-        # Initialize emotion settings
-        self.current_emotion = config.DEFAULT_EMOTION
-        self.emotion_images = {}
-        
-        # Initialize Pygame
-        if not pygame.get_init():
-            pygame.init()
-        
-        # Set up display
-        if self.use_hardware_display:
-            try:
-                os.environ['SDL_VIDEODRIVER'] = 'fbcon'
-                os.environ['SDL_FBDEV'] = '/dev/fb0'
-                os.environ['SDL_VIDEO_CURSOR_HIDDEN'] = '1'
-                os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
-                # Test if fbcon is available
-                pygame.display.init()
-                pygame.display.quit()
-            except pygame.error:
-                self.logger.warning("Framebuffer console (fbcon) not available, falling back to X11 display mode")
-                self.use_hardware_display = False
-                os.environ['SDL_VIDEODRIVER'] = 'x11'
-        
-        # Create display surface
-        try:
-            if self.fullscreen:
-                self.screen = pygame.display.set_mode((self.width, self.height), pygame.FULLSCREEN)
-            else:
-                self.screen = pygame.display.set_mode((self.width, self.height))
-        except pygame.error as e:
-            self.logger.error(f"Failed to create display surface: {e}")
-            raise
-        
-        # Load emotion images
-        self._load_emotion_images()
-        
-        # Initialize animation state
-        self.last_blink_time = time.time()
-        self.is_blinking = False
-        self.blink_start_time = 0
-        
-        # Initialize debug mode state
-        self.debug_mode = None  # None, 'video', or 'audio'
+        # State
         self.running = True
+        self.is_blinking = False
+        self.current_emotion = Emotion.NEUTRAL
+        self.debug_mode = None
+        self.last_blink_time = time.time()
+        
+        # Initialize pygame and display
+        self._init_display()
         
         # Set up signal handler for CTRL+C
         signal.signal(signal.SIGINT, self._signal_handler)
         
-        # Initialize clock for FPS control
-        self.clock = pygame.time.Clock()
-        
-        self.logger.info("LCD Controller initialized with config: %s", config)
+        # Start blink thread
+        self.blink_thread = threading.Thread(target=self._blink_loop, daemon=True)
+        self.blink_thread.start()
     
-    def _signal_handler(self, sig, frame):
-        """Handle CTRL+C signal to exit gracefully."""
-        self.logger.info("Received CTRL+C, exiting...")
+    def _signal_handler(self, signum, frame):
+        """Handle CTRL+C signal."""
+        self.logger.info("Received CTRL+C signal")
         self.running = False
-        self.cleanup()
+        pygame.quit()
         sys.exit(0)
     
-    def update(self, emotion: Emotion = None, is_listening: bool = False):
-        """Update the display with the current emotion and state.
+    def update(self, is_listening: bool = False):
+        """Update the display with current state.
         
         Args:
-            emotion: Current emotion to display
             is_listening: Whether EVE is currently listening
         """
-        # Handle events
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                self.running = False
-            elif event.type == pygame.KEYDOWN:
-                self._handle_key_event(event)
-        
-        # Exit if not running
         if not self.running:
             return
         
-        # Handle debug modes
-        if self.debug_mode == 'video':
-            self._update_video_debug()
-            return
-        elif self.debug_mode == 'audio':
-            self._update_audio_debug()
-            return
-        
-        # Normal eye display mode
-        if emotion is not None:
-            self.current_emotion = emotion
-        
-        # Handle blinking
-        current_time = time.time()
-        if current_time - self.last_blink_time >= self.blink_interval:
-            if not self.is_blinking:
-                self.is_blinking = True
-                self.blink_start_time = current_time
-            elif current_time - self.blink_start_time >= self.blink_duration:
-                self.is_blinking = False
-                self.last_blink_time = current_time
+        # Handle pygame events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.running = False
+                return
+            elif event.type == pygame.KEYDOWN:
+                self._handle_key_event(event)
         
         # Clear screen
         self.screen.fill(self.background_color)
         
-        # Draw current emotion
-        if self.current_emotion in self.emotion_images:
-            image = self.emotion_images[self.current_emotion]
-            
-            # Apply blinking effect
-            if self.is_blinking:
-                # Scale down the image during blink
-                scale = 0.2
-                scaled_size = (int(image.get_width() * scale), int(image.get_height() * scale))
-                image = pygame.transform.scale(image, scaled_size)
-            
-            # Center the image
-            x = (self.width - image.get_width()) // 2
-            y = (self.height - image.get_height()) // 2
-            
-            # Apply rotation if needed
-            if self.rotation != 0:
-                image = pygame.transform.rotate(image, self.rotation)
-            
-            self.screen.blit(image, (x, y))
+        # Check if we should blink
+        current_time = time.time()
+        if current_time - self.last_blink_time >= self.blink_interval:
+            self.blink()
+            self.last_blink_time = current_time
+        
+        # Get current emotion image
+        image = self.emotion_images.get(self.current_emotion)
+        if image is None:
+            self.logger.error(f"No image found for emotion: {self.current_emotion}")
+            return
+        
+        # Center the image
+        x = (self.width - image.get_width()) // 2
+        y = (self.height - image.get_height()) // 2
+        
+        # Apply rotation if needed
+        if self.rotation != 0:
+            image = pygame.transform.rotate(image, self.rotation)
+        
+        self.screen.blit(image, (x, y))
         
         # Draw debug menu if enabled
         if self.debug_menu_enabled:
@@ -432,14 +377,8 @@ class LCDController:
             pygame.display.set_caption("EVE2 Display")
             
             # Initialize the display
-            self.screen = pygame.display.set_mode(
-                (self.width, self.height),
-                pygame.SHOWN | (pygame.FULLSCREEN if self.use_hardware_display else 0)
-            )
-            
-            # Apply rotation if needed
-            if self.rotation != 0:
-                self.screen = pygame.transform.rotate(self.screen, -self.rotation)
+            flags = pygame.FULLSCREEN if self.fullscreen else 0
+            self.screen = pygame.display.set_mode((self.width, self.height), flags)
             
             # Initialize clock
             self.clock = pygame.time.Clock()
@@ -451,10 +390,10 @@ class LCDController:
             self.screen.fill(self.background_color)
             pygame.display.flip()
             
-            logger.info("Display initialized successfully")
+            self.logger.info("Display initialized successfully")
             
         except Exception as e:
-            logger.error(f"Failed to initialize display: {e}")
+            self.logger.error(f"Failed to initialize display: {e}")
             self._init_fallback_mode()
 
     def _init_fallback_mode(self):
@@ -635,4 +574,159 @@ class LCDController:
             logger.debug("Completed blink animation")
         except Exception as e:
             logger.error(f"Error during blink animation: {e}")
-            self.is_blinking = False 
+            self.is_blinking = False
+
+    def _blink_loop(self):
+        """Loop for blinking animation."""
+        while self.running:
+            if self.is_blinking:
+                self.update()
+            time.sleep(0.01)  # Wait between checks
+
+    def _show_debug_mode_menu(self):
+        """Show the debug mode selection menu."""
+        self.screen.fill(self.background_color)
+        
+        # Draw menu title
+        font = pygame.font.Font(None, 36)
+        title = font.render("Debug Mode Selection", True, self.text_color)
+        title_rect = title.get_rect(center=(self.width // 2, self.height // 3))
+        self.screen.blit(title, title_rect)
+        
+        # Draw options
+        font = pygame.font.Font(None, 24)
+        video_option = font.render("1. Video Debug (Object Detection)", True, self.text_color)
+        audio_option = font.render("2. Audio Debug (Voice Detection)", True, self.text_color)
+        exit_option = font.render("3. Exit Menu", True, self.text_color)
+        
+        video_rect = video_option.get_rect(center=(self.width // 2, self.height // 2))
+        audio_rect = audio_option.get_rect(center=(self.width // 2, self.height // 2 + 40))
+        exit_rect = exit_option.get_rect(center=(self.width // 2, self.height // 2 + 80))
+        
+        self.screen.blit(video_option, video_rect)
+        self.screen.blit(audio_option, audio_rect)
+        self.screen.blit(exit_option, exit_rect)
+        
+        pygame.display.flip()
+        
+        # Wait for selection
+        waiting = True
+        while waiting and self.running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.running = False
+                    waiting = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_1:
+                        self.debug_mode = 'video'
+                        waiting = False
+                    elif event.key == pygame.K_2:
+                        self.debug_mode = 'audio'
+                        waiting = False
+                    elif event.key == pygame.K_3 or event.key == pygame.K_ESCAPE:
+                        waiting = False
+    
+    def _update_video_debug(self):
+        """Update the video debug display."""
+        # Clear screen
+        self.screen.fill(self.background_color)
+        
+        # Draw title
+        font = pygame.font.Font(None, 36)
+        title = font.render("Video Debug Mode", True, self.text_color)
+        title_rect = title.get_rect(center=(self.width // 2, 30))
+        self.screen.blit(title, title_rect)
+        
+        # Draw instructions
+        font = pygame.font.Font(None, 24)
+        instructions = [
+            "R: Rotate display",
+            "ESC: Exit debug mode",
+            "CTRL+C: Exit application"
+        ]
+        
+        for i, text in enumerate(instructions):
+            text_surface = font.render(text, True, self.text_color)
+            self.screen.blit(text_surface, (20, 80 + i * 30))
+        
+        # Draw current rotation
+        rotation_text = f"Current rotation: {self.rotation}°"
+        rotation_surface = font.render(rotation_text, True, self.text_color)
+        self.screen.blit(rotation_surface, (20, 200))
+        
+        # Draw placeholder for object detection
+        # In a real implementation, this would show the camera feed with detected objects
+        placeholder_text = "Object Detection Feed"
+        placeholder_surface = font.render(placeholder_text, True, self.text_color)
+        placeholder_rect = placeholder_surface.get_rect(center=(self.width // 2, self.height // 2))
+        self.screen.blit(placeholder_surface, placeholder_rect)
+        
+        # Update display
+        pygame.display.flip()
+        self.clock.tick(self.fps)
+    
+    def _update_audio_debug(self):
+        """Update the audio debug display."""
+        # Clear screen
+        self.screen.fill(self.background_color)
+        
+        # Draw title
+        font = pygame.font.Font(None, 36)
+        title = font.render("Audio Debug Mode", True, self.text_color)
+        title_rect = title.get_rect(center=(self.width // 2, 30))
+        self.screen.blit(title, title_rect)
+        
+        # Draw instructions
+        font = pygame.font.Font(None, 24)
+        instructions = [
+            "ESC: Exit debug mode",
+            "CTRL+C: Exit application"
+        ]
+        
+        for i, text in enumerate(instructions):
+            text_surface = font.render(text, True, self.text_color)
+            self.screen.blit(text_surface, (20, 80 + i * 30))
+        
+        # Draw placeholder for audio visualization
+        # In a real implementation, this would show audio levels and detected speech
+        placeholder_text = "Audio Visualization"
+        placeholder_surface = font.render(placeholder_text, True, self.text_color)
+        placeholder_rect = placeholder_surface.get_rect(center=(self.width // 2, self.height // 2))
+        self.screen.blit(placeholder_surface, placeholder_rect)
+        
+        # Update display
+        pygame.display.flip()
+        self.clock.tick(self.fps)
+    
+    def _draw_debug_menu(self, is_listening: bool):
+        """Draw the debug menu on the screen.
+        
+        Args:
+            is_listening: Whether EVE is currently listening
+        """
+        font = pygame.font.Font(None, self.debug_font_size)
+        
+        # Draw emotion text
+        emotion_text = f"Emotion: {self.current_emotion.name}"
+        text_surface = font.render(emotion_text, True, self.text_color)
+        self.screen.blit(text_surface, (10, 10))
+        
+        # Draw listening status
+        listening_text = "Listening: Yes" if is_listening else "Listening: No"
+        text_surface = font.render(listening_text, True, self.text_color)
+        self.screen.blit(text_surface, (10, 40))
+        
+        # Draw FPS
+        fps_text = f"FPS: {int(self.clock.get_fps())}"
+        text_surface = font.render(fps_text, True, self.text_color)
+        self.screen.blit(text_surface, (10, 70))
+        
+        # Draw keyboard shortcuts
+        shortcuts = [
+            "CTRL+C: Exit",
+            "CTRL+S: Debug Menu"
+        ]
+        
+        for i, text in enumerate(shortcuts):
+            text_surface = font.render(text, True, self.text_color)
+            self.screen.blit(text_surface, (10, 100 + i * 30)) 
