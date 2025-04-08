@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Tuple, Any, Union
 from enum import Enum
 import traceback
 import random
+import queue
 
 import pygame
 import numpy as np
@@ -109,6 +110,11 @@ class LCDController:
             self.double_click_threshold = 0.5  # seconds
             self.last_click_pos = None
             
+            # Thread synchronization
+            self._blink_stop_event = threading.Event()
+            self._blink_queue = queue.Queue()
+            self._blink_thread = None
+            
             # Check if we're in a headless environment
             self.headless_mode = self._is_headless_environment()
             if self.headless_mode:
@@ -120,12 +126,8 @@ class LCDController:
             # Set up signal handler for CTRL+C
             signal.signal(signal.SIGINT, self._signal_handler)
             
-            # Initialize blink stop event
-            self._blink_stop_event = threading.Event()
-            
             # Start blink thread
-            self.blink_thread = threading.Thread(target=self._blink_loop, daemon=True)
-            self.blink_thread.start()
+            self._start_blink_thread()
             
             self.logger.info("LCD Controller initialized successfully")
             
@@ -600,13 +602,17 @@ class LCDController:
             # Process any pending events
             self._process_events()
             
+            # Check for blink requests from blink thread
+            try:
+                while not self._blink_queue.empty():
+                    action, _ = self._blink_queue.get_nowait()
+                    if action == 'blink':
+                        self._perform_blink()
+            except queue.Empty:
+                pass
+            
             # Clear screen
             self.screen.fill(self.background_color)
-            
-            # Check if we need to blink
-            if self.current_emotion == "blink":
-                self._perform_blink()
-                return
             
             # Handle different display modes
             if self.debug_mode == 'video':
@@ -923,70 +929,23 @@ class LCDController:
         self.current_emotion = emotion
         self.update()
 
-    def blink(self):
-        """Perform a single blink animation"""
+    def _start_blink_thread(self):
+        """Start the blink animation thread."""
         try:
-            self.is_blinking = True
-            
-            # Save current emotion
-            current_emotion = self.current_emotion
-            
-            # Set to blink emotion
-            self.current_emotion = Emotion.BLINK
-            
-            # Draw the blink emotion directly without calling update()
-            self._draw_current_emotion()
-            
-            # Wait for blink duration
-            time.sleep(self.blink_duration)
-            
-            # Restore previous emotion
-            self.current_emotion = current_emotion
-            
-            # Draw the restored emotion directly
-            self._draw_current_emotion()
-            
-            self.is_blinking = False
-            self.logger.debug("Completed blink animation")
+            self._blink_thread = threading.Thread(target=self._blink_loop, daemon=True)
+            self._blink_thread.start()
+            self.logger.info("Blink thread started")
         except Exception as e:
-            self.logger.error(f"Error during blink animation: {e}")
-            self.is_blinking = False
-    
-    def _draw_current_emotion(self):
-        """Draw the current emotion on the screen without updating the display."""
-        # Clear screen
-        self.screen.fill(self.background_color)
-        
-        # Get current emotion image
-        image = self.emotion_images.get(self.current_emotion)
-        if image is None:
-            self.logger.error(f"No image found for emotion: {self.current_emotion}")
-            return
-        
-        # Center the image
-        x = (self.width - image.get_width()) // 2
-        y = (self.height - image.get_height()) // 2
-        
-        # Apply rotation if needed
-        if self.rotation != 0:
-            image = pygame.transform.rotate(image, self.rotation)
-        
-        # Draw the emotion image
-        self.screen.blit(image, (x, y))
-        
-        # Update display
-        if not self.headless_mode:
-            try:
-                pygame.display.flip()
-            except pygame.error as e:
-                self.logger.error(f"Error updating display during blink: {e}")
-    
+            self.logger.error(f"Failed to start blink thread: {e}")
+            self.logger.error(traceback.format_exc())
+
     def _blink_loop(self):
         """Handle blinking animation in a separate thread."""
         try:
             while self.running and not self._blink_stop_event.is_set():
                 try:
-                    self._perform_blink()
+                    # Signal main thread to perform blink
+                    self._blink_queue.put(('blink', None))
                     # Wait for next blink
                     time.sleep(random.uniform(2.0, 5.0))
                 except Exception as e:
@@ -998,7 +957,7 @@ class LCDController:
             self.logger.error(traceback.format_exc())
         finally:
             self.logger.info("Blink loop stopped")
-    
+
     def _perform_blink(self):
         """Perform a single blink animation."""
         try:
@@ -1006,11 +965,10 @@ class LCDController:
             current_emotion = self.current_emotion
             
             # Set blink emotion
-            self.current_emotion = 'blink'
+            self.current_emotion = Emotion.BLINK
             
             # Draw blink emotion
             self._draw_current_emotion()
-            pygame.display.flip()
             
             # Wait for blink duration
             time.sleep(self.blink_duration)
@@ -1020,12 +978,11 @@ class LCDController:
             
             # Draw restored emotion
             self._draw_current_emotion()
-            pygame.display.flip()
             
         except Exception as e:
             self.logger.error(f"Error in blink animation: {str(e)}")
             self.logger.error(traceback.format_exc())
-    
+
     def _draw_current_emotion(self):
         """Draw the current emotion on the screen."""
         try:
@@ -1045,68 +1002,7 @@ class LCDController:
         except Exception as e:
             self.logger.error(f"Error drawing emotion: {str(e)}")
             self.logger.error(traceback.format_exc())
-    
-    def handle_event(self, event):
-        """Handle a Pygame event."""
-        try:
-            # Handle quit event
-            if event.type == pygame.QUIT:
-                self.running = False
-                return True
-            
-            # Handle key events
-            if event.type == pygame.KEYDOWN:
-                # Log key event
-                key_name = pygame.key.name(event.key)
-                mod_keys = []
-                if event.mod & pygame.KMOD_CTRL: mod_keys.append('CTRL')
-                if event.mod & pygame.KMOD_SHIFT: mod_keys.append('SHIFT')
-                if event.mod & pygame.KMOD_ALT: mod_keys.append('ALT')
-                mod_str = '+'.join(mod_keys) if mod_keys else 'NO_MOD'
-                self.logger.debug(f"Key event: {key_name}, Modifiers: {mod_str}")
-                
-                # Handle CTRL+C
-                if event.key == pygame.K_c and event.mod & pygame.KMOD_CTRL:
-                    self.running = False
-                    return True
-                
-                # Handle CTRL+S
-                if event.key == pygame.K_s and event.mod & pygame.KMOD_CTRL:
-                    self.debug_mode = not self.debug_mode
-                    self.logger.info(f"Debug mode {'enabled' if self.debug_mode else 'disabled'}")
-                    return True
-                
-                # Handle ESC
-                if event.key == pygame.K_ESCAPE:
-                    self.running = False
-                    return True
-            
-            # Handle mouse events
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                # Log mouse event
-                self.logger.debug(f"Mouse button {event.button} clicked at {event.pos}")
-                
-                # Handle double-click
-                current_time = time.time()
-                if (current_time - self.last_click_time < self.double_click_threshold and
-                    abs(event.pos[0] - self.last_click_pos[0]) < 10 and
-                    abs(event.pos[1] - self.last_click_pos[1]) < 10):
-                    self.logger.info("Double-click detected")
-                    # Handle double-click action here
-                    self.last_click_time = 0  # Reset click tracking
-                    return True
-                
-                # Update click tracking
-                self.last_click_time = current_time
-                self.last_click_pos = event.pos
-            
-            return False
-            
-        except Exception as e:
-            self.logger.error(f"Error handling event: {str(e)}")
-            self.logger.error(traceback.format_exc())
-            return False
-    
+
     def _stop_blink(self):
         """Stop the blink animation thread."""
         try:
