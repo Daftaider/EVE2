@@ -578,9 +578,6 @@ class LCDController:
         if not self.running:
             return
         
-        # Process all pending events first
-        events_handled = self._process_events()
-        
         # Clear screen
         self.screen.fill(self.background_color)
         
@@ -626,11 +623,6 @@ class LCDController:
         current_fps = self.clock.get_fps()
         if current_fps > 0:
             self.logger.debug(f"Current FPS: {int(current_fps)}")
-        
-        # If events were handled, force a display update
-        if events_handled and not self.headless_mode:
-            pygame.display.flip()
-            self.clock.tick(self.fps)  # Ensure we maintain frame rate
     
     def _show_debug_mode_menu(self):
         """Show the debug mode selection menu."""
@@ -719,7 +711,7 @@ class LCDController:
             text_rect = text_surface.get_rect(topleft=(10, 100 + i * 30))
             pygame.draw.rect(self.screen, (0, 0, 0, 128), text_rect.inflate(10, 5))
             self.screen.blit(text_surface, text_rect)
-    
+
     def cleanup(self):
         """Clean up resources."""
         pygame.quit()
@@ -959,47 +951,82 @@ class LCDController:
         pygame.display.flip()
         self.clock.tick(self.fps)
     
-    def _draw_debug_menu(self, is_listening: bool):
-        """Draw the debug menu on the screen.
+    def handle_event(self, event):
+        """Handle a Pygame event.
         
         Args:
-            is_listening: Whether EVE is currently listening
+            event: The Pygame event to handle
+            
+        Returns:
+            bool: True if the event was handled, False otherwise
         """
-        font = pygame.font.Font(None, self.debug_font_size)
+        if event.type == pygame.QUIT:
+            self.logger.info("Received QUIT event")
+            self.running = False
+            return True
         
-        # Draw emotion text with background for better visibility
-        emotion_text = f"Emotion: {self.current_emotion.name}"
-        text_surface = font.render(emotion_text, True, self.text_color)
-        text_rect = text_surface.get_rect(topleft=(10, 10))
-        pygame.draw.rect(self.screen, (0, 0, 0, 128), text_rect.inflate(10, 5))
-        self.screen.blit(text_surface, text_rect)
+        elif event.type == pygame.KEYDOWN:
+            # Log key press with modifiers
+            key_name = pygame.key.name(event.key)
+            mod_keys = []
+            if event.mod & pygame.KMOD_CTRL: mod_keys.append('CTRL')
+            if event.mod & pygame.KMOD_SHIFT: mod_keys.append('SHIFT')
+            if event.mod & pygame.KMOD_ALT: mod_keys.append('ALT')
+            mod_str = '+'.join(mod_keys) if mod_keys else 'NO_MOD'
+            self.logger.info(f"Key pressed: {key_name}, Modifiers: {mod_str}")
+            
+            # Handle CTRL+C
+            if event.key == pygame.K_c and event.mod & pygame.KMOD_CTRL:
+                self.logger.info("CTRL+C pressed, exiting...")
+                self.running = False
+                pygame.quit()
+                sys.exit(0)
+            
+            # Handle CTRL+S
+            elif event.key == pygame.K_s and event.mod & pygame.KMOD_CTRL:
+                self.logger.info("CTRL+S pressed, toggling debug mode")
+                if self.debug_mode is None:
+                    self._show_debug_mode_menu()
+                else:
+                    self.debug_mode = None
+                return True
+            
+            # Handle ESC
+            elif event.key == pygame.K_ESCAPE:
+                if self.debug_mode is not None:
+                    self.logger.info("ESC pressed, exiting debug mode")
+                    self.debug_mode = None
+                else:
+                    self.logger.info("ESC pressed, exiting application")
+                    self.running = False
+                    pygame.quit()
+                    sys.exit(0)
+                return True
         
-        # Draw listening status with more visible formatting
-        listening_text = "Listening: YES" if is_listening else "Listening: NO"
-        listening_color = (0, 255, 0) if is_listening else (255, 0, 0)  # Green for Yes, Red for No
-        text_surface = font.render(listening_text, True, listening_color)
-        text_rect = text_surface.get_rect(topleft=(10, 40))
-        pygame.draw.rect(self.screen, (0, 0, 0, 128), text_rect.inflate(10, 5))
-        self.screen.blit(text_surface, text_rect)
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # Left mouse button
+                current_time = time.time()
+                current_pos = event.pos
+                self.logger.info(f"Mouse click at position: {current_pos}")
+                
+                # Check for double-click with improved position checking
+                if (self.last_click_time and 
+                    current_time - self.last_click_time < self.double_click_threshold and 
+                    self.last_click_pos and 
+                    abs(current_pos[0] - self.last_click_pos[0]) < 20 and  # Increased threshold
+                    abs(current_pos[1] - self.last_click_pos[1]) < 20):    # Increased threshold
+                    self.logger.info("Double-click detected, toggling debug mode")
+                    if self.debug_mode is None:
+                        self._show_debug_mode_menu()
+                    else:
+                        self.debug_mode = None
+                    # Reset click tracking after double-click
+                    self.last_click_time = None
+                    self.last_click_pos = None
+                    return True
+                else:
+                    # Update last click time and position
+                    self.last_click_time = current_time
+                    self.last_click_pos = current_pos
         
-        # Draw FPS with background
-        current_fps = self.clock.get_fps()
-        fps_text = f"FPS: {int(current_fps) if current_fps > 0 else 0}"
-        text_surface = font.render(fps_text, True, self.text_color)
-        text_rect = text_surface.get_rect(topleft=(10, 70))
-        pygame.draw.rect(self.screen, (0, 0, 0, 128), text_rect.inflate(10, 5))
-        self.screen.blit(text_surface, text_rect)
-        
-        # Draw keyboard shortcuts with background
-        shortcuts = [
-            "CTRL+C: Exit",
-            "CTRL+S: Debug Menu",
-            "ESC: Exit/Back",
-            "Double-Click: Debug Menu"
-        ]
-        
-        for i, text in enumerate(shortcuts):
-            text_surface = font.render(text, True, self.text_color)
-            text_rect = text_surface.get_rect(topleft=(10, 100 + i * 30))
-            pygame.draw.rect(self.screen, (0, 0, 0, 128), text_rect.inflate(10, 5))
-            self.screen.blit(text_surface, text_rect) 
+        return False 

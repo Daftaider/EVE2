@@ -285,8 +285,15 @@ class EVEApplication:
                         logger.info("Pygame QUIT event received.")
                         self._signal_handler(signal.SIGTERM, None) # Treat QUIT as shutdown signal
                         return # Exit loop
-                    # ... (Keep existing event handling logic for keys/mouse) ...
-
+                    
+                    # Pass events to LCD controller if available
+                    if self.orchestrator and self.orchestrator.display_controller:
+                        self.orchestrator.display_controller.handle_event(event)
+                
+                # Update orchestrator
+                if self.orchestrator:
+                    self.orchestrator.update()
+                
                 # Optional sleep to prevent busy-waiting
                 time.sleep(0.01)
 
