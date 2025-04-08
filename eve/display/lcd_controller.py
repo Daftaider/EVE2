@@ -59,7 +59,9 @@ class LCDController:
             config: DisplayConfig object containing display settings
         """
         try:
+            # Set up logger with proper name
             self.logger = logging.getLogger(__name__)
+            self.logger.setLevel(logging.INFO)  # Ensure input events are visible
             
             # Display settings
             self.width = config.WINDOW_SIZE[0]
@@ -468,87 +470,76 @@ class LCDController:
         pygame.quit()
         sys.exit(0)
     
-    def _handle_keyboard_events(self):
-        """Handle keyboard events and return True if a key was pressed."""
+    def _process_events(self):
+        """Process all pending events and return True if any were handled."""
+        handled = False
         for event in pygame.event.get():
+            # Log all events at debug level
+            self.logger.debug(f"Processing event: {event}")
+            
             if event.type == pygame.QUIT:
+                self.logger.info("Received QUIT event")
                 self.running = False
-                return True
+                handled = True
+                break
+            
             elif event.type == pygame.KEYDOWN:
-                # Log key press for debugging
-                self.logger.debug(f"Key pressed: {pygame.key.name(event.key)}, Modifiers: {event.mod}")
+                # Log key press with modifiers
+                key_name = pygame.key.name(event.key)
+                mod_keys = []
+                if event.mod & pygame.KMOD_CTRL: mod_keys.append('CTRL')
+                if event.mod & pygame.KMOD_SHIFT: mod_keys.append('SHIFT')
+                if event.mod & pygame.KMOD_ALT: mod_keys.append('ALT')
+                mod_str = '+'.join(mod_keys) if mod_keys else 'NO_MOD'
+                self.logger.info(f"Key pressed: {key_name}, Modifiers: {mod_str}")
                 
                 if event.key == pygame.K_c and event.mod & pygame.KMOD_CTRL:
-                    # CTRL+C - Exit
                     self.logger.info("CTRL+C pressed, exiting...")
                     self.running = False
                     pygame.quit()
                     sys.exit(0)
                 elif event.key == pygame.K_s and event.mod & pygame.KMOD_CTRL:
-                    # CTRL+S - Toggle debug mode
                     self.logger.info("CTRL+S pressed, toggling debug mode")
                     if self.debug_mode is None:
-                        # Show debug mode selection menu
                         self._show_debug_mode_menu()
                     else:
-                        # Exit debug mode
                         self.debug_mode = None
-                        self.logger.info("Exiting debug mode")
-                    return True
+                    handled = True
                 elif event.key == pygame.K_ESCAPE:
-                    # ESC - Exit debug mode or application
                     if self.debug_mode is not None:
+                        self.logger.info("ESC pressed, exiting debug mode")
                         self.debug_mode = None
-                        self.logger.info("Exiting debug mode")
                     else:
-                        self.logger.info("ESC pressed, exiting...")
+                        self.logger.info("ESC pressed, exiting application")
                         self.running = False
                         pygame.quit()
                         sys.exit(0)
-                    return True
-                elif self.debug_mode == 'video':
-                    # Video debug mode controls
-                    if event.key == pygame.K_r:
-                        # Rotate display
-                        self.rotation = (self.rotation + 90) % 360
-                        self.logger.info(f"Display rotation set to {self.rotation} degrees")
-                        return True
-                elif self.debug_mode == 'audio':
-                    # Audio debug mode controls
-                    pass
-        return False
-        
-    def _handle_mouse_events(self):
-        """Handle mouse events and return True if a mouse event was processed."""
-        for event in pygame.event.get():
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                # Handle mouse clicks
+                    handled = True
+            
+            elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left mouse button
                     current_time = time.time()
                     current_pos = event.pos
+                    self.logger.info(f"Mouse click at position: {current_pos}")
                     
                     # Check for double-click
                     if (current_time - self.last_click_time < self.double_click_threshold and 
                         self.last_click_pos and 
                         abs(current_pos[0] - self.last_click_pos[0]) < 10 and 
                         abs(current_pos[1] - self.last_click_pos[1]) < 10):
-                        # Double-click detected
                         self.logger.info("Double-click detected, toggling debug mode")
                         if self.debug_mode is None:
-                            # Show debug mode selection menu
                             self._show_debug_mode_menu()
                         else:
-                            # Exit debug mode
                             self.debug_mode = None
-                            self.logger.info("Exiting debug mode")
-                        return True
+                        handled = True
                     
                     # Update last click time and position
                     self.last_click_time = current_time
                     self.last_click_pos = current_pos
-                    return True
-        return False
         
+        return handled
+
     def update(self, is_listening: bool = False):
         """Update the display with current state.
         
@@ -558,9 +549,8 @@ class LCDController:
         if not self.running:
             return
         
-        # Handle keyboard and mouse events
-        self._handle_keyboard_events()
-        self._handle_mouse_events()
+        # Process all pending events
+        self._process_events()
         
         # Clear screen
         self.screen.fill(self.background_color)
