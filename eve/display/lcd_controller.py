@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Union
 from enum import Enum
 import traceback
+import random
 
 import pygame
 import numpy as np
@@ -118,6 +119,9 @@ class LCDController:
             
             # Set up signal handler for CTRL+C
             signal.signal(signal.SIGINT, self._signal_handler)
+            
+            # Initialize blink stop event
+            self._blink_stop_event = threading.Event()
             
             # Start blink thread
             self.blink_thread = threading.Thread(target=self._blink_loop, daemon=True)
@@ -978,17 +982,19 @@ class LCDController:
                 self.logger.error(f"Error updating display during blink: {e}")
     
     def _blink_loop(self):
-        """Run the blink animation loop."""
+        """Handle blinking animation in a separate thread."""
         try:
             while self.running and not self._blink_stop_event.is_set():
-                # Perform blink animation
-                self._perform_blink()
-                
-                # Wait for next blink interval
-                time.sleep(self.blink_interval)
-                
+                try:
+                    self._perform_blink()
+                    # Wait for next blink
+                    time.sleep(random.uniform(2.0, 5.0))
+                except Exception as e:
+                    self.logger.error(f"Error in blink loop: {str(e)}")
+                    self.logger.error(traceback.format_exc())
+                    time.sleep(1.0)  # Prevent rapid error loops
         except Exception as e:
-            self.logger.error(f"Error in blink loop: {str(e)}")
+            self.logger.error(f"Fatal error in blink loop: {str(e)}")
             self.logger.error(traceback.format_exc())
         finally:
             self.logger.info("Blink loop stopped")
@@ -1102,13 +1108,16 @@ class LCDController:
             return False
     
     def _stop_blink(self):
-        """Stop the blink animation."""
+        """Stop the blink animation thread."""
         try:
-            self._blink_stop_event.set()
-            if self.blink_thread and self.blink_thread.is_alive():
-                self.blink_thread.join(timeout=1.0)
+            if hasattr(self, '_blink_stop_event'):
+                self._blink_stop_event.set()
+            if hasattr(self, '_blink_thread') and self._blink_thread.is_alive():
+                self._blink_thread.join(timeout=1.0)
+                if self._blink_thread.is_alive():
+                    self.logger.warning("Blink thread did not stop gracefully")
         except Exception as e:
-            self.logger.error(f"Error stopping blink animation: {str(e)}")
+            self.logger.error(f"Error stopping blink thread: {str(e)}")
             self.logger.error(traceback.format_exc())
 
     def _update_video_debug(self):
