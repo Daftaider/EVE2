@@ -46,84 +46,155 @@ def calculate_iou(boxA, boxB):
 IOU_THRESHOLD = 0.7 # Overlap threshold to consider a match for correction
 
 class LCDController:
-    """
-    LCD display controller for rendering eye animations.
+    """Controls the LCD display and renders eye animations."""
     
-    This class handles the initialization of the display and
-    manages the rendering of emotive eye animations.
-    """
-    
-    def __init__(self, 
-                 config: Optional[DisplayConfig] = None, 
-                 width: Optional[int] = None,
-                 height: Optional[int] = None,
-                 fps: Optional[int] = None,
-                 default_emotion: Optional[Union[str, int, Emotion]] = None,
-                 background_color: Optional[Union[Tuple[int, int, int], str]] = None,
-                 eye_color: Optional[Union[Tuple[int, int, int], str]] = None,
-                 rotation: int = 0,
-                 use_hardware_display: bool = True):
-        """
-        Initialize the LCD Controller.
+    def __init__(self, config: DisplayConfig):
+        """Initialize the LCD controller.
         
         Args:
-            config: Display configuration object
-            width: Optional window width (overrides config)
-            height: Optional window height (overrides config)
-            fps: Optional frames per second (overrides config)
-            default_emotion: Optional starting emotion (overrides config)
-            background_color: Optional background color as RGB tuple or string
-            eye_color: Optional eye color as RGB tuple or string
-            rotation: Display rotation in degrees (0, 90, 180, 270)
-            use_hardware_display: Whether to use hardware LCD display
+            config: Display configuration settings
         """
-        # Set environment variables for display
-        if use_hardware_display:
-            os.environ['SDL_VIDEODRIVER'] = 'fbcon'  # Use framebuffer console
-            os.environ['SDL_FBDEV'] = '/dev/fb0'     # Primary framebuffer device
-            # Disable cursor for hardware display
+        self.config = config
+        self.logger = logging.getLogger(__name__)
+        
+        # Initialize display settings
+        self.width, self.height = config.WINDOW_SIZE
+        self.fps = config.FPS
+        self.fullscreen = config.FULLSCREEN
+        self.use_hardware_display = config.USE_HARDWARE_DISPLAY
+        self.rotation = config.DISPLAY_ROTATION
+        
+        # Initialize colors
+        self.background_color = config.BACKGROUND_COLOR
+        self.eye_color = config.EYE_COLOR
+        self.text_color = config.TEXT_COLOR
+        
+        # Initialize animation settings
+        self.blink_interval = config.BLINK_INTERVAL_SEC
+        self.blink_duration = config.BLINK_DURATION
+        self.transition_speed = config.TRANSITION_SPEED
+        
+        # Initialize debug settings
+        self.debug_menu_enabled = config.DEBUG_MENU_ENABLED
+        self.debug_font_size = config.DEBUG_FONT_SIZE
+        
+        # Initialize file paths
+        self.asset_dir = config.ASSET_DIR
+        self.current_frame_path = config.CURRENT_FRAME_PATH
+        
+        # Initialize emotion settings
+        self.current_emotion = config.DEFAULT_EMOTION
+        self.emotion_images = {}
+        
+        # Initialize Pygame
+        if not pygame.get_init():
+            pygame.init()
+        
+        # Set up display
+        if self.use_hardware_display:
+            os.environ['SDL_VIDEODRIVER'] = 'fbcon'
+            os.environ['SDL_FBDEV'] = '/dev/fb0'
             os.environ['SDL_VIDEO_CURSOR_HIDDEN'] = '1'
+            os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+        
+        # Create display surface
+        if self.fullscreen:
+            self.screen = pygame.display.set_mode((self.width, self.height), pygame.FULLSCREEN)
         else:
-            os.environ['SDL_VIDEODRIVER'] = 'x11'    # Use X11 for testing
+            self.screen = pygame.display.set_mode((self.width, self.height))
         
-        self.config = config or DisplayConfig
-        self.use_hardware_display = use_hardware_display
-        self.rotation = rotation % 360  # Normalize rotation
+        # Load emotion images
+        self._load_emotion_images()
         
-        # Override config values if parameters are provided
-        if width is not None and height is not None:
-            self.window_size = (width, height)
-        else:
-            self.window_size = self.config.WINDOW_SIZE
-            
-        self.fps = fps if fps is not None else self.config.FPS
-        
-        # Convert and validate emotion using the from_value method
-        self._current_emotion = Emotion.from_value(default_emotion)
-        
-        # Handle colors
-        self.background_color = self._parse_color(background_color) if background_color else self.config.BACKGROUND_COLOR
-        self.eye_color = self._parse_color(eye_color) if eye_color else self.config.EYE_COLOR
-        
-        # Animation settings
-        self.blink_interval = self.config.BLINK_INTERVAL
-        self.blink_duration = self.config.BLINK_DURATION
-        self.is_blinking = False
+        # Initialize animation state
         self.last_blink_time = time.time()
+        self.is_blinking = False
+        self.blink_start_time = 0
         
-        # Initialize display system
-        self._init_display()
+        self.logger.info("LCD Controller initialized with config: %s", config)
+    
+    def update(self, emotion: Emotion = None, is_listening: bool = False):
+        """Update the display with the current emotion and state.
         
-        # Font for debug text
-        self.debug_font = pygame.font.SysFont(None, self.config.DEBUG_FONT_SIZE)
-        self.debug_ui_elements: Dict[str, pygame.Rect] = {}
+        Args:
+            emotion: Current emotion to display
+            is_listening: Whether EVE is currently listening
+        """
+        if emotion is not None:
+            self.current_emotion = emotion
         
-        # Log initialization parameters
-        logger.info(f"LCD Controller initialized with: size={self.window_size}, "
-                    f"fps={self.fps}, default_emotion={self._current_emotion.name}, "
-                    f"background_color={self.background_color}, "
-                    f"eye_color={self.eye_color}, rotation={self.rotation}, "
-                    f"hardware_display={self.use_hardware_display}")
+        # Handle blinking
+        current_time = time.time()
+        if current_time - self.last_blink_time >= self.blink_interval:
+            if not self.is_blinking:
+                self.is_blinking = True
+                self.blink_start_time = current_time
+            elif current_time - self.blink_start_time >= self.blink_duration:
+                self.is_blinking = False
+                self.last_blink_time = current_time
+        
+        # Clear screen
+        self.screen.fill(self.background_color)
+        
+        # Draw current emotion
+        if self.current_emotion in self.emotion_images:
+            image = self.emotion_images[self.current_emotion]
+            
+            # Apply blinking effect
+            if self.is_blinking:
+                # Scale down the image during blink
+                scale = 0.2
+                scaled_size = (int(image.get_width() * scale), int(image.get_height() * scale))
+                image = pygame.transform.scale(image, scaled_size)
+            
+            # Center the image
+            x = (self.width - image.get_width()) // 2
+            y = (self.height - image.get_height()) // 2
+            
+            # Apply rotation if needed
+            if self.rotation != 0:
+                image = pygame.transform.rotate(image, self.rotation)
+            
+            self.screen.blit(image, (x, y))
+        
+        # Draw debug menu if enabled
+        if self.debug_menu_enabled:
+            self._draw_debug_menu(is_listening)
+        
+        # Update display
+        pygame.display.flip()
+        
+        # Save current frame if path is set
+        if self.current_frame_path:
+            pygame.image.save(self.screen, self.current_frame_path)
+    
+    def _draw_debug_menu(self, is_listening: bool):
+        """Draw the debug menu on the screen.
+        
+        Args:
+            is_listening: Whether EVE is currently listening
+        """
+        font = pygame.font.Font(None, self.debug_font_size)
+        
+        # Draw emotion text
+        emotion_text = f"Emotion: {self.current_emotion.name}"
+        text_surface = font.render(emotion_text, True, self.text_color)
+        self.screen.blit(text_surface, (10, 10))
+        
+        # Draw listening status
+        listening_text = "Listening: Yes" if is_listening else "Listening: No"
+        text_surface = font.render(listening_text, True, self.text_color)
+        self.screen.blit(text_surface, (10, 40))
+        
+        # Draw FPS
+        fps_text = f"FPS: {int(self.fps)}"
+        text_surface = font.render(fps_text, True, self.text_color)
+        self.screen.blit(text_surface, (10, 70))
+    
+    def cleanup(self):
+        """Clean up resources."""
+        pygame.quit()
+        self.logger.info("LCD Controller cleaned up")
 
     def _parse_color(self, color: Union[Tuple[int, int, int], str, None]) -> Tuple[int, int, int]:
         """Convert color to RGB tuple."""
@@ -245,88 +316,44 @@ class LCDController:
         }
         return colors.get(emotion, (0, 0, 0))
 
-    def update(self, 
-               emotion: Optional[Emotion] = None, 
-               debug_menu_active: bool = False,
-               current_debug_view: Optional[str] = None,
-               debug_frame: Optional[np.ndarray] = None,
-               detections: Optional[List[Dict[str, Any]]] = None,
-               camera_info: Optional[Dict[str, Any]] = None,
-               camera_rotation: int = 0,
-               is_correcting: bool = False,
-               input_buffer: str = "",
-               corrections: Optional[List[Dict[str, Any]]] = None,
-               audio_debug_listen_always: bool = False,
-               last_recognized_text: str = "",
-               available_audio_devices: Optional[List[Dict]] = None,
-               selected_audio_device_index: Optional[int] = None,
-               last_audio_rms: float = 0.0,
-               current_porcupine_sensitivity: float = 0.5
-               ) -> None:
-        """Update the display with current emotion or debug view."""
-        # Check for blink
-        current_time = time.time()
-        if current_time - self.last_blink_time > self.blink_interval:
-            self.blink()
-            self.last_blink_time = current_time
-
-        # Normal Emotion Mode (if debug menu isn't active)
-        if not debug_menu_active:
-            if emotion is not None:
-                self._current_emotion = emotion
-                
-                try:
-                    self.screen.fill(self.background_color)
-                    if self._current_emotion in self.emotion_images:
-                        emotion_surface = self.emotion_images[self._current_emotion]
-                        if self.rotation != 0:
-                            emotion_surface = self._rotate_surface(emotion_surface)
-                        self.screen.blit(emotion_surface, (0, 0))
-                    pygame.display.flip()
-                except Exception as e:
-                    logger.error(f"Error updating display (normal mode): {e}")
-                return
-
-        # ... rest of the update method (debug mode) remains unchanged ...
-
-    def cleanup(self) -> None:
-        """Clean up pygame resources and restore display settings."""
+    def start(self) -> bool:
+        """Start the display controller."""
         try:
-            # Save final frame
-            if hasattr(self, 'screen'):
-                pygame.image.save(self.screen, self.config.CURRENT_FRAME_PATH)
-            
-            # Quit pygame
-            pygame.quit()
-            
-            # If using hardware display, try to restore default settings
-            if self.use_hardware_display:
-                try:
-                    # Reset framebuffer settings if needed
-                    os.system('echo 0 > /sys/class/graphics/fb0/rotate')
-                    # Restore cursor
-                    os.environ['SDL_VIDEO_CURSOR_HIDDEN'] = '0'
-                except Exception as e:
-                    logger.warning(f"Could not reset display settings: {e}")
-            
+            logger.info("Starting LCD Controller...")
+            # Initial display update
+            self.update()
+            logger.info("LCD Controller started successfully")
+            return True
         except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
+            logger.error(f"Failed to start LCD Controller: {e}")
+            return False
 
-    def set_rotation(self, rotation: int) -> None:
-        """Set display rotation (0, 90, 180, 270 degrees)."""
+    def stop(self):
+        """Stop the display controller."""
+        try:
+            logger.info("Stopping LCD Controller...")
+            # Clean up resources
+            pygame.quit()
+            logger.info("LCD Controller stopped successfully")
+        except Exception as e:
+            logger.error(f"Error stopping LCD Controller: {e}")
+
+    def cleanup(self):
+        """Clean up resources."""
+        self.stop()
+
+    def set_rotation(self, rotation: int):
+        """Set the display rotation."""
         self.rotation = rotation % 360
-        if hasattr(self, 'screen'):
-            self.screen = pygame.transform.rotate(self.screen, -self.rotation)
         logger.info(f"Display rotation set to {self.rotation} degrees")
 
-    def toggle_hardware_display(self, use_hardware: bool) -> None:
-        """Toggle between hardware display and window mode."""
+    def toggle_hardware_display(self, use_hardware: bool):
+        """Toggle hardware display mode."""
         if self.use_hardware_display != use_hardware:
             self.use_hardware_display = use_hardware
-            os.environ['SDL_VIDEODRIVER'] = 'fbcon' if use_hardware else 'x11'
-            os.environ['SDL_VIDEO_CURSOR_HIDDEN'] = '1' if use_hardware else '0'
-            self._init_display()  # Reinitialize display with new settings
-            logger.info(f"Display mode changed to {'hardware' if use_hardware else 'window'}")
+            # Reinitialize display with new settings
+            self._init_display()
+            logger.info(f"Hardware display {'enabled' if use_hardware else 'disabled'}")
 
     def get_debug_ui_element_at(self, pos: Tuple[int, int]) -> Optional[str]:
         """Check if a position overlaps with a known debug UI element.
@@ -356,13 +383,13 @@ class LCDController:
 
     def get_current_emotion(self) -> Emotion:
         """Get the current emotion being displayed."""
-        return self._current_emotion
+        return self.current_emotion
 
     def set_emotion(self, emotion: Emotion) -> None:
         """Set the current emotion."""
         if not isinstance(emotion, Emotion):
             raise ValueError(f"Expected Emotion enum, got {type(emotion)}")
-        self._current_emotion = emotion
+        self.current_emotion = emotion
         self.update()
 
     def blink(self):
@@ -371,17 +398,17 @@ class LCDController:
             self.is_blinking = True
             
             # Save current emotion
-            current_emotion = self._current_emotion
+            current_emotion = self.current_emotion
             
             # Set to blink emotion
-            self._current_emotion = Emotion.BLINK
+            self.current_emotion = Emotion.BLINK
             self.update()
             
             # Wait for blink duration
             time.sleep(self.blink_duration)
             
             # Restore previous emotion
-            self._current_emotion = current_emotion
+            self.current_emotion = current_emotion
             self.update()
             
             self.is_blinking = False

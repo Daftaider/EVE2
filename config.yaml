@@ -186,7 +186,8 @@ display: # Corresponds to DisplayConfig dataclass
   BACKGROUND_COLOR: [0, 0, 0] # RGB for background
   TEXT_COLOR: [255, 255, 255] # RGB for text overlays
   EYE_COLOR: [0, 191, 255] # RGB for default eye color
-  BLINK_INTERVAL: 3.0 # Average time between blinks
-  BLINK_DURATION: 0.15 # Duration of blink animation
+  BLINK_INTERVAL_SEC: 3.0 # Average time between blinks (in seconds)
+  BLINK_DURATION: 0.15 # Duration of blink animation (in seconds)
   DEBUG_MENU_ENABLED: True # Enable debug menu
-  DEBUG_FONT_SIZE: 24 # Size of debug text 
+  DEBUG_FONT_SIZE: 24 # Size of debug text
+  CURRENT_FRAME_PATH: "current_display.png" # Path to save current frame 

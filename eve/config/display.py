@@ -60,17 +60,19 @@ class DisplayConfig:
     # Default colors
     BACKGROUND_COLOR: Tuple[int, int, int] = (0, 0, 0)  # Black
     EYE_COLOR: Tuple[int, int, int] = (255, 255, 255)   # White
+    TEXT_COLOR: Tuple[int, int, int] = (255, 255, 255)  # White
     
     # Animation settings
-    BLINK_INTERVAL: float = 4.0  # Seconds between blinks
+    BLINK_INTERVAL_SEC: float = 3.0  # Seconds between blinks
     BLINK_DURATION: float = 0.15  # Seconds for blink animation
+    TRANSITION_SPEED: float = 0.5  # Speed of emotion transitions
     
     # Debug settings
     DEBUG_MENU_ENABLED: bool = True
-    DEBUG_FONT_SIZE: int = 36
+    DEBUG_FONT_SIZE: int = 24
     
     # File paths
-    EMOTION_IMAGES_DIR: str = "assets/emotions"
+    ASSET_DIR: str = "assets/emotions"
     CURRENT_FRAME_PATH: str = "current_display.png"
     
     # Emotion settings
@@ -84,11 +86,40 @@ class DisplayConfig:
     DEFAULT_EYE_COLOR: Tuple[int, int, int] = (255, 255, 255)
     
     # Asset paths
-    ASSET_DIR: str = "assets/emotions"
+    EMOTION_IMAGES_DIR: str = "assets/emotions"
     
     # Animation settings
-    TRANSITION_SPEED: float = 0.5
-    
+    ANIMATION_FPS: int = 30
+    BLINK_INTERVAL: float = 3.0
+    ANIMATION_PATH: str = "assets/animations"
+    ENABLE_BLINKING: bool = True
+    ENABLE_EMOTIONS: bool = True
+    ANIMATION_SMOOTHING: bool = True
+    EMOTION_TRANSITION_TIME_MS: int = 500  # Time to transition between emotions
+
+    # Face settings
+    EYE_SIZE: int = 50
+    EYE_SPACING: int = 100
+    MOUTH_WIDTH: int = 120
+    MOUTH_HEIGHT: int = 20
+
+    # UI elements
+    SHOW_STATUS_BAR: bool = True
+    SHOW_TIME: bool = True
+    SHOW_WEATHER: bool = False
+    SHOW_BATTERY: bool = False
+    FONT_NAME: str = "Arial"
+    FONT_SIZE: int = 24
+    UI_PADDING: int = 10
+    STATUS_BAR_HEIGHT: int = 30
+
+    # Transitions
+    ENABLE_TRANSITIONS: bool = True
+    TRANSITION_DURATION: float = 0.3  # seconds
+
+    # Add to your display configuration
+    HEADLESS_MODE: bool = True  # Set to True to skip display initialization
+
     @classmethod
     def get_emotion_path(cls, emotion: Union[str, Emotion, None]) -> str:
         """Get the file path for an emotion's image."""
@@ -158,7 +189,7 @@ class DisplayConfig:
                      instance_kwargs[field_name] = bool(raw_value)
                 elif field_name == 'DISPLAY_ROTATION':
                      instance_kwargs[field_name] = int(raw_value)
-                elif field_name == 'BLINK_INTERVAL':
+                elif field_name == 'BLINK_INTERVAL_SEC':
                      instance_kwargs[field_name] = float(raw_value)
                 elif field_name == 'BLINK_DURATION':
                      instance_kwargs[field_name] = float(raw_value)
@@ -170,6 +201,50 @@ class DisplayConfig:
                      instance_kwargs[field_name] = str(raw_value)
                 elif field_name == 'CURRENT_FRAME_PATH':
                      instance_kwargs[field_name] = str(raw_value)
+                elif field_name == 'ANIMATION_FPS':
+                     instance_kwargs[field_name] = int(raw_value)
+                elif field_name == 'BLINK_INTERVAL':
+                     instance_kwargs[field_name] = float(raw_value)
+                elif field_name == 'ANIMATION_PATH':
+                     instance_kwargs[field_name] = str(raw_value)
+                elif field_name == 'ENABLE_BLINKING':
+                     instance_kwargs[field_name] = bool(raw_value)
+                elif field_name == 'ENABLE_EMOTIONS':
+                     instance_kwargs[field_name] = bool(raw_value)
+                elif field_name == 'ANIMATION_SMOOTHING':
+                     instance_kwargs[field_name] = bool(raw_value)
+                elif field_name == 'EMOTION_TRANSITION_TIME_MS':
+                     instance_kwargs[field_name] = int(raw_value)
+                elif field_name == 'EYE_SIZE':
+                     instance_kwargs[field_name] = int(raw_value)
+                elif field_name == 'EYE_SPACING':
+                     instance_kwargs[field_name] = int(raw_value)
+                elif field_name == 'MOUTH_WIDTH':
+                     instance_kwargs[field_name] = int(raw_value)
+                elif field_name == 'MOUTH_HEIGHT':
+                     instance_kwargs[field_name] = int(raw_value)
+                elif field_name == 'SHOW_STATUS_BAR':
+                     instance_kwargs[field_name] = bool(raw_value)
+                elif field_name == 'SHOW_TIME':
+                     instance_kwargs[field_name] = bool(raw_value)
+                elif field_name == 'SHOW_WEATHER':
+                     instance_kwargs[field_name] = bool(raw_value)
+                elif field_name == 'SHOW_BATTERY':
+                     instance_kwargs[field_name] = bool(raw_value)
+                elif field_name == 'FONT_NAME':
+                     instance_kwargs[field_name] = str(raw_value)
+                elif field_name == 'FONT_SIZE':
+                     instance_kwargs[field_name] = int(raw_value)
+                elif field_name == 'UI_PADDING':
+                     instance_kwargs[field_name] = int(raw_value)
+                elif field_name == 'STATUS_BAR_HEIGHT':
+                     instance_kwargs[field_name] = int(raw_value)
+                elif field_name == 'ENABLE_TRANSITIONS':
+                     instance_kwargs[field_name] = bool(raw_value)
+                elif field_name == 'TRANSITION_DURATION':
+                     instance_kwargs[field_name] = float(raw_value)
+                elif field_name == 'HEADLESS_MODE':
+                     instance_kwargs[field_name] = bool(raw_value)
                 else:
                     instance_kwargs[field_name] = raw_value
             except (ValueError, TypeError) as e:
