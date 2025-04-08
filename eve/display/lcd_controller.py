@@ -92,16 +92,28 @@ class LCDController:
         
         # Set up display
         if self.use_hardware_display:
-            os.environ['SDL_VIDEODRIVER'] = 'fbcon'
-            os.environ['SDL_FBDEV'] = '/dev/fb0'
-            os.environ['SDL_VIDEO_CURSOR_HIDDEN'] = '1'
-            os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+            try:
+                os.environ['SDL_VIDEODRIVER'] = 'fbcon'
+                os.environ['SDL_FBDEV'] = '/dev/fb0'
+                os.environ['SDL_VIDEO_CURSOR_HIDDEN'] = '1'
+                os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+                # Test if fbcon is available
+                pygame.display.init()
+                pygame.display.quit()
+            except pygame.error:
+                self.logger.warning("Framebuffer console (fbcon) not available, falling back to X11 display mode")
+                self.use_hardware_display = False
+                os.environ['SDL_VIDEODRIVER'] = 'x11'
         
         # Create display surface
-        if self.fullscreen:
-            self.screen = pygame.display.set_mode((self.width, self.height), pygame.FULLSCREEN)
-        else:
-            self.screen = pygame.display.set_mode((self.width, self.height))
+        try:
+            if self.fullscreen:
+                self.screen = pygame.display.set_mode((self.width, self.height), pygame.FULLSCREEN)
+            else:
+                self.screen = pygame.display.set_mode((self.width, self.height))
+        except pygame.error as e:
+            self.logger.error(f"Failed to create display surface: {e}")
+            raise
         
         # Load emotion images
         self._load_emotion_images()
