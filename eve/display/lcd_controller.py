@@ -98,6 +98,11 @@ class LCDController:
             self.debug_mode = None
             self.last_blink_time = time.time()
             
+            # FPS tracking
+            self.current_fps = 0
+            self.fps_counter = 0
+            self.last_fps_time = time.time()
+            
             # Double-click detection
             self.last_click_time = 0
             self.double_click_threshold = 0.5  # seconds
@@ -631,7 +636,16 @@ class LCDController:
                 pygame.image.save(self.screen, self.current_frame_path)
                 self.current_frame_path = None
             
-            # Cap frame rate and update FPS counter
+            # Update FPS counter
+            self.fps_counter += 1
+            current_time = time.time()
+            if current_time - self.last_fps_time >= 1.0:
+                self.current_fps = self.fps_counter
+                self.fps_counter = 0
+                self.last_fps_time = current_time
+                self.logger.debug(f"FPS: {self.current_fps}")
+            
+            # Cap frame rate
             self.clock.tick(self.fps)
             
         except Exception as e:
