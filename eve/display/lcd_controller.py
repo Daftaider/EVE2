@@ -449,31 +449,6 @@ class LCDController:
         pygame.draw.ellipse(surface, eye_color, 
                           (self.width // 2 - 20, mouth_y - 10, 40, 20), 3)
     
-    def _create_disgusted_face(self, surface):
-        """Create a disgusted face."""
-        # Draw eyes
-        eye_color = self.eye_color
-        eye_size = min(self.width, self.height) // 16
-        
-        # Left eye
-        pygame.draw.circle(surface, eye_color, 
-                          (self.width // 3, self.height // 2), eye_size)
-        
-        # Right eye
-        pygame.draw.circle(surface, eye_color, 
-                          (2 * self.width // 3, self.height // 2), eye_size)
-        
-        # Draw mouth (disgusted)
-        mouth_y = 2 * self.height // 3
-        pygame.draw.arc(surface, eye_color, 
-                       (self.width // 3, mouth_y - 20, 
-                        self.width // 3, 40), 0, 3.14, 3)
-        
-        # Draw tongue
-        pygame.draw.line(surface, eye_color, 
-                        (self.width // 2, mouth_y + 10), 
-                        (self.width // 2, mouth_y + 30), 3)
-    
     def _create_blink_face(self, surface):
         """Create a blinking face."""
         # Draw eyes (closed)
@@ -581,8 +556,12 @@ class LCDController:
         
         return handled
 
-    def update(self):
-        """Update the display."""
+    def update(self, display_state=None):
+        """Update the display.
+        
+        Args:
+            display_state: Optional display state information from the orchestrator
+        """
         try:
             # Process any pending events
             self._process_events()
@@ -617,7 +596,7 @@ class LCDController:
             
             # Draw debug menu if enabled
             if self.debug_mode:
-                self._draw_debug_menu()
+                self._draw_debug_menu(display_state)
             
             # Update display
             pygame.display.update()
@@ -709,46 +688,62 @@ class LCDController:
             # Return to normal display
             self.update()
 
-    def _draw_debug_menu(self):
-        """Draw the debug menu on the screen."""
+    def _draw_debug_menu(self, display_state=None):
+        """Draw the debug menu on the screen.
+        
+        Args:
+            display_state: Optional display state information from the orchestrator
+        """
         font = pygame.font.Font(None, self.debug_font_size)
         
-        # Draw emotion text with background for better visibility
-        emotion_text = f"Emotion: {self.current_emotion.name}"
-        text_surface = font.render(emotion_text, True, self.text_color)
-        text_rect = text_surface.get_rect(topleft=(10, 10))
-        pygame.draw.rect(self.screen, (0, 0, 0, 128), text_rect.inflate(10, 5))
-        self.screen.blit(text_surface, text_rect)
+        # Draw FPS counter with background
+        fps_text = f"FPS: {self.current_fps}"
+        fps_surface = font.render(fps_text, True, (255, 255, 255))
+        fps_rect = fps_surface.get_rect(topleft=(10, 10))
+        
+        # Draw semi-transparent background for FPS
+        fps_bg = pygame.Surface((fps_rect.width + 10, fps_rect.height + 5))
+        fps_bg.fill((0, 0, 0))
+        fps_bg.set_alpha(128)
+        self.screen.blit(fps_bg, (fps_rect.left - 5, fps_rect.top - 2))
+        self.screen.blit(fps_surface, fps_rect)
         
         # Draw listening status with more visible formatting
-        listening_text = "Listening: YES" if self.is_listening else "Listening: NO"
-        listening_color = (0, 255, 0) if self.is_listening else (255, 0, 0)  # Green for Yes, Red for No
+        is_listening = False
+        if display_state and hasattr(display_state, 'is_listening'):
+            is_listening = display_state.is_listening
+        elif hasattr(self, 'is_listening'):
+            is_listening = self.is_listening
+            
+        listening_text = "Listening: YES" if is_listening else "Listening: NO"
+        listening_color = (0, 255, 0) if is_listening else (255, 0, 0)  # Green for Yes, Red for No
         text_surface = font.render(listening_text, True, listening_color)
         text_rect = text_surface.get_rect(topleft=(10, 40))
-        pygame.draw.rect(self.screen, (0, 0, 0, 128), text_rect.inflate(10, 5))
+        
+        # Draw semi-transparent background for listening status
+        listening_bg = pygame.Surface((text_rect.width + 10, text_rect.height + 5))
+        listening_bg.fill((0, 0, 0))
+        listening_bg.set_alpha(128)
+        self.screen.blit(listening_bg, (text_rect.left - 5, text_rect.top - 2))
         self.screen.blit(text_surface, text_rect)
         
-        # Draw FPS with background
-        current_fps = self.clock.get_fps()
-        fps_text = f"FPS: {int(current_fps) if current_fps > 0 else 0}"
-        text_surface = font.render(fps_text, True, self.text_color)
-        text_rect = text_surface.get_rect(topleft=(10, 70))
-        pygame.draw.rect(self.screen, (0, 0, 0, 128), text_rect.inflate(10, 5))
-        self.screen.blit(text_surface, text_rect)
-        
-        # Draw keyboard shortcuts with background
+        # Draw keyboard shortcuts
         shortcuts = [
             "CTRL+C: Exit",
-            "CTRL+S: Debug Menu",
-            "ESC: Exit/Back",
-            "Double-Click: Debug Menu"
+            "CTRL+S: Toggle Debug",
+            "ESC: Exit"
         ]
         
-        for i, text in enumerate(shortcuts):
-            text_surface = font.render(text, True, self.text_color)
-            text_rect = text_surface.get_rect(topleft=(10, 100 + i * 30))
-            pygame.draw.rect(self.screen, (0, 0, 0, 128), text_rect.inflate(10, 5))
-            self.screen.blit(text_surface, text_rect)
+        for i, shortcut in enumerate(shortcuts):
+            shortcut_surface = font.render(shortcut, True, (200, 200, 200))
+            shortcut_rect = shortcut_surface.get_rect(topleft=(10, 70 + i * 25))
+            
+            # Draw semi-transparent background for shortcuts
+            shortcut_bg = pygame.Surface((shortcut_rect.width + 10, shortcut_rect.height + 5))
+            shortcut_bg.fill((0, 0, 0))
+            shortcut_bg.set_alpha(128)
+            self.screen.blit(shortcut_bg, (shortcut_rect.left - 5, shortcut_rect.top - 2))
+            self.screen.blit(shortcut_surface, shortcut_rect)
 
     def cleanup(self):
         """Clean up resources."""
