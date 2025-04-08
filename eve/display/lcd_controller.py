@@ -146,7 +146,9 @@ class LCDController:
     def _init_display(self):
         """Initialize the display with current settings."""
         try:
-            pygame.init()
+            # Initialize pygame if not already initialized
+            if not pygame.get_init():
+                pygame.init()
             
             # Set window position (centered)
             os.environ['SDL_VIDEO_CENTERED'] = '1'
@@ -169,8 +171,14 @@ class LCDController:
                             with open('/proc/device-tree/model', 'r') as f:
                                 model = f.read().lower()
                                 is_raspberry_pi = 'raspberry pi' in model
+                            self.logger.info(f"Detected Raspberry Pi model: {model.strip()}")
                         
                         if is_raspberry_pi:
+                            # Clear any existing SDL environment variables
+                            for var in ['SDL_VIDEODRIVER', 'SDL_FBDEV', 'SDL_VIDEO_CURSOR_HIDDEN']:
+                                if var in os.environ:
+                                    del os.environ[var]
+                            
                             # Set environment variables for framebuffer
                             os.environ['SDL_VIDEODRIVER'] = 'fbcon'
                             os.environ['SDL_FBDEV'] = '/dev/fb0'
@@ -178,30 +186,30 @@ class LCDController:
                             
                             # Create fullscreen display
                             flags = pygame.FULLSCREEN
+                            self.logger.info("Attempting to create fullscreen display with framebuffer...")
                             self.screen = pygame.display.set_mode((self.width, self.height), flags)
-                            self.logger.info("Using hardware display with framebuffer on Raspberry Pi")
+                            self.logger.info("Successfully initialized hardware display with framebuffer")
                         else:
                             raise RuntimeError("Not running on a Raspberry Pi")
                             
                     except Exception as fb_err:
                         self.logger.warning(f"Failed to use framebuffer: {fb_err}. Falling back to windowed mode.")
                         # Reset SDL video driver to default
-                        if 'SDL_VIDEODRIVER' in os.environ:
-                            del os.environ['SDL_VIDEODRIVER']
-                        if 'SDL_FBDEV' in os.environ:
-                            del os.environ['SDL_FBDEV']
-                        if 'SDL_VIDEO_CURSOR_HIDDEN' in os.environ:
-                            del os.environ['SDL_VIDEO_CURSOR_HIDDEN']
+                        for var in ['SDL_VIDEODRIVER', 'SDL_FBDEV', 'SDL_VIDEO_CURSOR_HIDDEN']:
+                            if var in os.environ:
+                                del os.environ[var]
                         
                         # Fall back to windowed mode
                         flags = pygame.FULLSCREEN if self.fullscreen else 0
+                        self.logger.info("Attempting to create windowed display...")
                         self.screen = pygame.display.set_mode((self.width, self.height), flags)
-                        self.logger.info("Using windowed display mode")
+                        self.logger.info("Successfully initialized windowed display")
                 else:
                     # Use windowed mode
                     flags = pygame.FULLSCREEN if self.fullscreen else 0
+                    self.logger.info("Hardware display disabled, using windowed mode...")
                     self.screen = pygame.display.set_mode((self.width, self.height), flags)
-                    self.logger.info("Using windowed display mode (hardware display disabled)")
+                    self.logger.info("Successfully initialized windowed display")
             
             # Initialize clock
             self.clock = pygame.time.Clock()
@@ -217,11 +225,14 @@ class LCDController:
             if not self.headless_mode:
                 pygame.display.flip()
             
-            self.logger.info("Display initialized successfully")
+            self.logger.info("Display initialization completed successfully")
+            return True
             
         except Exception as e:
             self.logger.error(f"Failed to initialize display: {e}")
+            self.logger.error(traceback.format_exc())
             self._init_fallback_mode()
+            return False
     
     def _init_fallback_mode(self):
         """Initialize a fallback mode for headless operation."""

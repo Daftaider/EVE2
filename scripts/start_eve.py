@@ -122,19 +122,41 @@ class EVEApplication:
             setup_logging(self.config.logging, self.args.debug)
             logger.debug(f"Loaded configuration: {self.config!r}")
 
-            # 3. Initialize Pygame (if display enabled) - RE-ENABLING FOR TESTING
+            # 3. Initialize Pygame (if display enabled)
             pygame_initialized = False
             if self.config.hardware.display_enabled:
-                logger.info("Initializing Pygame...")
+                logger.info("Initializing display subsystem...")
                 try:
+                    # Clear any existing SDL environment variables
+                    for var in ['SDL_VIDEODRIVER', 'SDL_FBDEV', 'SDL_VIDEO_CURSOR_HIDDEN']:
+                        if var in os.environ:
+                            del os.environ[var]
+                    
+                    # Initialize Pygame
                     pygame.init()
                     pygame_initialized = True
                     self.clock = pygame.time.Clock()
-                    self.display_controller = self._setup_display_controller()
-                    logger.info("Pygame initialized.")
+                    
+                    # Initialize display controller
+                    from eve.display.lcd_controller import LCDController
+                    self.display_controller = LCDController(self.config.display)
+                    if not self.display_controller.start():
+                        logger.error("Failed to start display controller")
+                        self.display_controller = None
+                        pygame_initialized = False
+                    else:
+                        logger.info("Display subsystem initialized successfully")
+                        
                 except Exception as pg_err:
-                    logger.error(f"Pygame initialization failed: {pg_err}. Display might not work.")
-            # logger.warning("Pygame initialization explicitly disabled for shutdown hang test.")
+                    logger.error(f"Display initialization failed: {pg_err}")
+                    logger.error(traceback.format_exc())
+                    pygame_initialized = False
+                    if self.display_controller:
+                        try:
+                            self.display_controller.cleanup()
+                        except:
+                            pass
+                        self.display_controller = None
 
             # 4. Initialize Subsystems
             camera: Optional[Union[Camera, RPiAICamera]] = None # Type hint for flexibility
