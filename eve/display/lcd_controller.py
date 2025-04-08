@@ -592,6 +592,76 @@ class LCDController:
         
         return handled
 
+    def handle_event(self, event):
+        """Handle a Pygame event.
+        
+        Args:
+            event: The Pygame event to handle
+            
+        Returns:
+            bool: True if the event was handled and should stop propagation
+        """
+        try:
+            # Handle quit event
+            if event.type == pygame.QUIT:
+                self.running = False
+                return True
+            
+            # Handle key events
+            if event.type == pygame.KEYDOWN:
+                # Log key event
+                key_name = pygame.key.name(event.key)
+                mod_keys = []
+                if event.mod & pygame.KMOD_CTRL: mod_keys.append('CTRL')
+                if event.mod & pygame.KMOD_SHIFT: mod_keys.append('SHIFT')
+                if event.mod & pygame.KMOD_ALT: mod_keys.append('ALT')
+                mod_str = '+'.join(mod_keys) if mod_keys else 'NO_MOD'
+                self.logger.debug(f"Key event: {key_name}, Modifiers: {mod_str}")
+                
+                # Handle CTRL+C
+                if event.key == pygame.K_c and event.mod & pygame.KMOD_CTRL:
+                    self.running = False
+                    return True
+                
+                # Handle CTRL+S
+                if event.key == pygame.K_s and event.mod & pygame.KMOD_CTRL:
+                    self.debug_mode = not self.debug_mode
+                    self.logger.info(f"Debug mode {'enabled' if self.debug_mode else 'disabled'}")
+                    return True
+                
+                # Handle ESC
+                if event.key == pygame.K_ESCAPE:
+                    self.running = False
+                    return True
+            
+            # Handle mouse events
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                # Log mouse event
+                self.logger.debug(f"Mouse button {event.button} clicked at {event.pos}")
+                
+                # Handle double-click
+                current_time = time.time()
+                if (self.last_click_time and 
+                    current_time - self.last_click_time < self.double_click_threshold and
+                    self.last_click_pos and
+                    abs(event.pos[0] - self.last_click_pos[0]) < 10 and
+                    abs(event.pos[1] - self.last_click_pos[1]) < 10):
+                    self.logger.info("Double-click detected")
+                    # Handle double-click action here
+                    self.last_click_time = 0  # Reset click tracking
+                    return True
+                
+                # Update click tracking
+                self.last_click_time = current_time
+                self.last_click_pos = event.pos
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error handling event: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            return False
+
     def update(self, display_state=None):
         """Update the display.
         
