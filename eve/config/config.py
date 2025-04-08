@@ -81,6 +81,8 @@ class DisplayConfig:
     WINDOW_SIZE: Tuple[int, int] = (800, 480)
     FPS: int = 30
     FULLSCREEN: bool = False
+    USE_HARDWARE_DISPLAY: bool = True  # Use hardware LCD if available
+    DISPLAY_ROTATION: int = 0  # 0, 90, 180, 270 degrees
     DEFAULT_EMOTION: str = "neutral" # Store as string, maybe convert to Enum later if needed
     ASSET_DIR: str = "assets/emotions"
     TRANSITION_SPEED: float = 0.5
