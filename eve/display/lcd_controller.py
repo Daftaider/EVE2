@@ -578,6 +578,9 @@ class LCDController:
         if not self.running:
             return
         
+        # Process any pending events
+        self._process_events()
+        
         # Clear screen
         self.screen.fill(self.background_color)
         
@@ -587,26 +590,33 @@ class LCDController:
             self.blink()
             self.last_blink_time = current_time
         
-        # Get current emotion image
-        image = self.emotion_images.get(self.current_emotion)
-        if image is None:
-            self.logger.error(f"No image found for emotion: {self.current_emotion}")
-            return
-        
-        # Center the image
-        x = (self.width - image.get_width()) // 2
-        y = (self.height - image.get_height()) // 2
-        
-        # Apply rotation if needed
-        if self.rotation != 0:
-            image = pygame.transform.rotate(image, self.rotation)
-        
-        # Draw the emotion image
-        self.screen.blit(image, (x, y))
-        
-        # Draw debug menu if enabled
-        if self.debug_menu_enabled:
-            self._draw_debug_menu(is_listening)
+        # Handle different display modes
+        if self.debug_mode == 'video':
+            self._update_video_debug()
+        elif self.debug_mode == 'audio':
+            self._update_audio_debug()
+        else:
+            # Normal display mode
+            # Get current emotion image
+            image = self.emotion_images.get(self.current_emotion)
+            if image is None:
+                self.logger.error(f"No image found for emotion: {self.current_emotion}")
+                return
+            
+            # Center the image
+            x = (self.width - image.get_width()) // 2
+            y = (self.height - image.get_height()) // 2
+            
+            # Apply rotation if needed
+            if self.rotation != 0:
+                image = pygame.transform.rotate(image, self.rotation)
+            
+            # Draw the emotion image
+            self.screen.blit(image, (x, y))
+            
+            # Draw debug menu if enabled
+            if self.debug_menu_enabled:
+                self._draw_debug_menu(is_listening)
         
         # Update display
         if not self.headless_mode:
@@ -623,7 +633,7 @@ class LCDController:
         current_fps = self.clock.get_fps()
         if current_fps > 0:
             self.logger.debug(f"Current FPS: {int(current_fps)}")
-    
+
     def _show_debug_mode_menu(self):
         """Show the debug mode selection menu."""
         self.screen.fill(self.background_color)
@@ -660,13 +670,45 @@ class LCDController:
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_1:
                         self.debug_mode = 'video'
+                        self.logger.info("Selected Video Debug Mode")
                         waiting = False
                     elif event.key == pygame.K_2:
                         self.debug_mode = 'audio'
+                        self.logger.info("Selected Audio Debug Mode")
                         waiting = False
                     elif event.key == pygame.K_3 or event.key == pygame.K_ESCAPE:
+                        self.debug_mode = None
+                        self.logger.info("Exiting Debug Menu")
                         waiting = False
-    
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    # Check if click is within the video option area
+                    if video_rect.collidepoint(event.pos):
+                        self.debug_mode = 'video'
+                        self.logger.info("Selected Video Debug Mode")
+                        waiting = False
+                    # Check if click is within the audio option area
+                    elif audio_rect.collidepoint(event.pos):
+                        self.debug_mode = 'audio'
+                        self.logger.info("Selected Audio Debug Mode")
+                        waiting = False
+                    # Check if click is within the exit option area
+                    elif exit_rect.collidepoint(event.pos):
+                        self.debug_mode = None
+                        self.logger.info("Exiting Debug Menu")
+                        waiting = False
+            
+            # Small sleep to prevent CPU hogging
+            time.sleep(0.01)
+        
+        # Update the display based on the selected debug mode
+        if self.debug_mode == 'video':
+            self._update_video_debug()
+        elif self.debug_mode == 'audio':
+            self._update_audio_debug()
+        else:
+            # Return to normal display
+            self.update()
+
     def _draw_debug_menu(self, is_listening: bool):
         """Draw the debug menu on the screen.
         
@@ -920,75 +962,73 @@ class LCDController:
 
     def _update_video_debug(self):
         """Update the video debug display."""
-        # Clear screen
-        self.screen.fill(self.background_color)
-        
         # Draw title
-        font = pygame.font.Font(None, 36)
-        title = font.render("Video Debug Mode", True, self.text_color)
+        title = self.font.render("Video Debug Mode", True, (255, 255, 255))
         title_rect = title.get_rect(center=(self.width // 2, 30))
         self.screen.blit(title, title_rect)
         
         # Draw instructions
-        font = pygame.font.Font(None, 24)
         instructions = [
-            "R: Rotate display",
-            "ESC: Exit debug mode",
-            "CTRL+C: Exit application"
+            "Press ESC to exit debug mode",
+            "Click on objects to submit corrections",
+            "Double-click to toggle debug menu"
         ]
         
-        for i, text in enumerate(instructions):
-            text_surface = font.render(text, True, self.text_color)
-            self.screen.blit(text_surface, (20, 80 + i * 30))
+        y = 60
+        for instruction in instructions:
+            text = self.font.render(instruction, True, (200, 200, 200))
+            text_rect = text.get_rect(center=(self.width // 2, y))
+            self.screen.blit(text, text_rect)
+            y += 30
         
-        # Draw current rotation
-        rotation_text = f"Current rotation: {self.rotation}°"
-        rotation_surface = font.render(rotation_text, True, self.text_color)
-        self.screen.blit(rotation_surface, (20, 200))
+        # Draw current emotion
+        emotion_text = self.font.render(f"Current Emotion: {self.current_emotion}", True, (255, 255, 255))
+        emotion_rect = emotion_text.get_rect(center=(self.width // 2, y + 30))
+        self.screen.blit(emotion_text, emotion_rect)
         
-        # Draw placeholder for object detection
-        # In a real implementation, this would show the camera feed with detected objects
-        placeholder_text = "Object Detection Feed"
-        placeholder_surface = font.render(placeholder_text, True, self.text_color)
-        placeholder_rect = placeholder_surface.get_rect(center=(self.width // 2, self.height // 2))
-        self.screen.blit(placeholder_surface, placeholder_rect)
+        # Draw FPS
+        fps_text = self.font.render(f"FPS: {int(self.clock.get_fps())}", True, (255, 255, 255))
+        fps_rect = fps_text.get_rect(center=(self.width // 2, y + 60))
+        self.screen.blit(fps_text, fps_rect)
         
         # Update display
-        pygame.display.flip()
-        self.clock.tick(self.fps)
+        if not self.headless_mode:
+            pygame.display.flip()
     
     def _update_audio_debug(self):
         """Update the audio debug display."""
-        # Clear screen
-        self.screen.fill(self.background_color)
-        
         # Draw title
-        font = pygame.font.Font(None, 36)
-        title = font.render("Audio Debug Mode", True, self.text_color)
+        title = self.font.render("Audio Debug Mode", True, (255, 255, 255))
         title_rect = title.get_rect(center=(self.width // 2, 30))
         self.screen.blit(title, title_rect)
         
         # Draw instructions
-        font = pygame.font.Font(None, 24)
         instructions = [
-            "ESC: Exit debug mode",
-            "CTRL+C: Exit application"
+            "Press ESC to exit debug mode",
+            "Speak to see audio levels",
+            "Double-click to toggle debug menu"
         ]
         
-        for i, text in enumerate(instructions):
-            text_surface = font.render(text, True, self.text_color)
-            self.screen.blit(text_surface, (20, 80 + i * 30))
+        y = 60
+        for instruction in instructions:
+            text = self.font.render(instruction, True, (200, 200, 200))
+            text_rect = text.get_rect(center=(self.width // 2, y))
+            self.screen.blit(text, text_rect)
+            y += 30
         
-        # Draw placeholder for audio visualization
-        # In a real implementation, this would show audio levels and detected speech
-        placeholder_text = "Audio Visualization"
-        placeholder_surface = font.render(placeholder_text, True, self.text_color)
-        placeholder_rect = placeholder_surface.get_rect(center=(self.width // 2, self.height // 2))
-        self.screen.blit(placeholder_surface, placeholder_rect)
+        # Draw current emotion
+        emotion_text = self.font.render(f"Current Emotion: {self.current_emotion}", True, (255, 255, 255))
+        emotion_rect = emotion_text.get_rect(center=(self.width // 2, y + 30))
+        self.screen.blit(emotion_text, emotion_rect)
+        
+        # Draw FPS
+        fps_text = self.font.render(f"FPS: {int(self.clock.get_fps())}", True, (255, 255, 255))
+        fps_rect = fps_text.get_rect(center=(self.width // 2, y + 60))
+        self.screen.blit(fps_text, fps_rect)
         
         # Update display
-        pygame.display.flip()
-        self.clock.tick(self.fps)
+        if not self.headless_mode:
+            pygame.display.flip()
     
     def handle_event(self, event):
         """Handle a Pygame event.
