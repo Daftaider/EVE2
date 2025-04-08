@@ -639,16 +639,14 @@ class LCDController:
         self.screen.fill(self.background_color)
         
         # Draw menu title
-        font = pygame.font.Font(None, 36)
-        title = font.render("Debug Mode Selection", True, self.text_color)
+        title = self.font.render("Debug Mode Selection", True, (255, 255, 255))
         title_rect = title.get_rect(center=(self.width // 2, self.height // 3))
         self.screen.blit(title, title_rect)
         
         # Draw options
-        font = pygame.font.Font(None, 24)
-        video_option = font.render("1. Video Debug (Object Detection)", True, self.text_color)
-        audio_option = font.render("2. Audio Debug (Voice Detection)", True, self.text_color)
-        exit_option = font.render("3. Exit Menu", True, self.text_color)
+        video_option = self.font.render("1. Video Debug (Object Detection)", True, (255, 255, 255))
+        audio_option = self.font.render("2. Audio Debug (Voice Detection)", True, (255, 255, 255))
+        exit_option = self.font.render("3. Exit Menu", True, (255, 255, 255))
         
         video_rect = video_option.get_rect(center=(self.width // 2, self.height // 2))
         audio_rect = audio_option.get_rect(center=(self.width // 2, self.height // 2 + 40))
@@ -658,7 +656,9 @@ class LCDController:
         self.screen.blit(audio_option, audio_rect)
         self.screen.blit(exit_option, exit_rect)
         
-        pygame.display.flip()
+        # Update display
+        if not self.headless_mode:
+            pygame.display.flip()
         
         # Wait for selection
         waiting = True
