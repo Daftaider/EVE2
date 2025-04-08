@@ -857,27 +857,66 @@ class LCDController:
             
             # Set to blink emotion
             self.current_emotion = Emotion.BLINK
-            self.update()
+            
+            # Draw the blink emotion directly without calling update()
+            self._draw_current_emotion()
             
             # Wait for blink duration
             time.sleep(self.blink_duration)
             
             # Restore previous emotion
             self.current_emotion = current_emotion
-            self.update()
+            
+            # Draw the restored emotion directly
+            self._draw_current_emotion()
             
             self.is_blinking = False
-            logger.debug("Completed blink animation")
+            self.logger.debug("Completed blink animation")
         except Exception as e:
-            logger.error(f"Error during blink animation: {e}")
+            self.logger.error(f"Error during blink animation: {e}")
             self.is_blinking = False
-
+    
+    def _draw_current_emotion(self):
+        """Draw the current emotion on the screen without updating the display."""
+        # Clear screen
+        self.screen.fill(self.background_color)
+        
+        # Get current emotion image
+        image = self.emotion_images.get(self.current_emotion)
+        if image is None:
+            self.logger.error(f"No image found for emotion: {self.current_emotion}")
+            return
+        
+        # Center the image
+        x = (self.width - image.get_width()) // 2
+        y = (self.height - image.get_height()) // 2
+        
+        # Apply rotation if needed
+        if self.rotation != 0:
+            image = pygame.transform.rotate(image, self.rotation)
+        
+        # Draw the emotion image
+        self.screen.blit(image, (x, y))
+        
+        # Update display
+        if not self.headless_mode:
+            try:
+                pygame.display.flip()
+            except pygame.error as e:
+                self.logger.error(f"Error updating display during blink: {e}")
+    
     def _blink_loop(self):
         """Loop for blinking animation."""
         while self.running:
-            if self.is_blinking:
-                self.update()
-            time.sleep(0.01)  # Wait between checks
+            try:
+                if self.is_blinking:
+                    # Don't call update() here to avoid recursion
+                    time.sleep(0.01)  # Small sleep to prevent CPU hogging
+                else:
+                    time.sleep(0.1)  # Longer sleep when not blinking
+            except Exception as e:
+                self.logger.error(f"Error in blink loop: {e}")
+                time.sleep(0.5)  # Sleep longer on error
 
     def _update_video_debug(self):
         """Update the video debug display."""
