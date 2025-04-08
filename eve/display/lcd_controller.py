@@ -162,25 +162,45 @@ class LCDController:
                 # Try to use hardware display if available
                 if self.use_hardware_display:
                     try:
-                        # Set environment variables for framebuffer
-                        os.environ['SDL_VIDEODRIVER'] = 'fbcon'
-                        os.environ['SDL_FBDEV'] = '/dev/fb0'
-                        os.environ['SDL_VIDEO_CURSOR_HIDDEN'] = '1'
+                        # Check if we're on a Raspberry Pi
+                        is_raspberry_pi = os.path.exists('/proc/device-tree/model')
+                        if is_raspberry_pi:
+                            with open('/proc/device-tree/model', 'r') as f:
+                                model = f.read().lower()
+                                is_raspberry_pi = 'raspberry pi' in model
                         
-                        # Create fullscreen display
-                        flags = pygame.FULLSCREEN
-                        self.screen = pygame.display.set_mode((self.width, self.height), flags)
-                        self.logger.info("Using hardware display with framebuffer")
+                        if is_raspberry_pi:
+                            # Set environment variables for framebuffer
+                            os.environ['SDL_VIDEODRIVER'] = 'fbcon'
+                            os.environ['SDL_FBDEV'] = '/dev/fb0'
+                            os.environ['SDL_VIDEO_CURSOR_HIDDEN'] = '1'
+                            
+                            # Create fullscreen display
+                            flags = pygame.FULLSCREEN
+                            self.screen = pygame.display.set_mode((self.width, self.height), flags)
+                            self.logger.info("Using hardware display with framebuffer on Raspberry Pi")
+                        else:
+                            raise RuntimeError("Not running on a Raspberry Pi")
+                            
                     except Exception as fb_err:
                         self.logger.warning(f"Failed to use framebuffer: {fb_err}. Falling back to windowed mode.")
+                        # Reset SDL video driver to default
+                        if 'SDL_VIDEODRIVER' in os.environ:
+                            del os.environ['SDL_VIDEODRIVER']
+                        if 'SDL_FBDEV' in os.environ:
+                            del os.environ['SDL_FBDEV']
+                        if 'SDL_VIDEO_CURSOR_HIDDEN' in os.environ:
+                            del os.environ['SDL_VIDEO_CURSOR_HIDDEN']
+                        
                         # Fall back to windowed mode
-                        os.environ['SDL_VIDEODRIVER'] = 'x11'  # Try X11
                         flags = pygame.FULLSCREEN if self.fullscreen else 0
                         self.screen = pygame.display.set_mode((self.width, self.height), flags)
+                        self.logger.info("Using windowed display mode")
                 else:
                     # Use windowed mode
                     flags = pygame.FULLSCREEN if self.fullscreen else 0
                     self.screen = pygame.display.set_mode((self.width, self.height), flags)
+                    self.logger.info("Using windowed display mode (hardware display disabled)")
             
             # Initialize clock
             self.clock = pygame.time.Clock()
