@@ -58,52 +58,401 @@ class LCDController:
         Args:
             config: DisplayConfig object containing display settings
         """
-        self.logger = logging.getLogger(__name__)
-        
-        # Display settings
-        self.width = config.WINDOW_SIZE[0]
-        self.height = config.WINDOW_SIZE[1]
-        self.fps = config.FPS
-        self.fullscreen = config.FULLSCREEN
-        self.rotation = config.DISPLAY_ROTATION
-        self.use_hardware_display = config.USE_HARDWARE_DISPLAY
-        
-        # Color settings
-        self.background_color = self._parse_color(config.BACKGROUND_COLOR)
-        self.eye_color = self._parse_color(config.EYE_COLOR)
-        self.text_color = self._parse_color(config.TEXT_COLOR)
-        
-        # Animation settings
-        self.blink_interval = config.BLINK_INTERVAL_SEC
-        self.blink_duration = config.BLINK_DURATION
-        self.transition_speed = config.TRANSITION_SPEED
-        
-        # Debug settings
-        self.debug_menu_enabled = config.DEBUG_MENU_ENABLED
-        self.debug_font_size = config.DEBUG_FONT_SIZE
-        self.debug_ui_elements = {}
-        
-        # File paths
-        self.asset_dir = os.path.join(os.path.dirname(__file__), '..', '..', config.ASSET_DIR)
-        self.current_frame_path = config.CURRENT_FRAME_PATH
-        
-        # State
-        self.running = True
-        self.is_blinking = False
-        self.current_emotion = Emotion.NEUTRAL
-        self.debug_mode = None
-        self.last_blink_time = time.time()
-        
-        # Initialize pygame and display
-        self._init_display()
-        
-        # Set up signal handler for CTRL+C
-        signal.signal(signal.SIGINT, self._signal_handler)
-        
-        # Start blink thread
-        self.blink_thread = threading.Thread(target=self._blink_loop, daemon=True)
-        self.blink_thread.start()
+        try:
+            self.logger = logging.getLogger(__name__)
+            
+            # Display settings
+            self.width = config.WINDOW_SIZE[0]
+            self.height = config.WINDOW_SIZE[1]
+            self.fps = config.FPS
+            self.fullscreen = config.FULLSCREEN
+            self.rotation = config.DISPLAY_ROTATION
+            self.use_hardware_display = config.USE_HARDWARE_DISPLAY
+            
+            # Color settings
+            self.background_color = self._parse_color(config.BACKGROUND_COLOR)
+            self.eye_color = self._parse_color(config.EYE_COLOR)
+            self.text_color = self._parse_color(config.TEXT_COLOR)
+            
+            # Animation settings
+            self.blink_interval = config.BLINK_INTERVAL_SEC
+            self.blink_duration = config.BLINK_DURATION
+            self.transition_speed = config.TRANSITION_SPEED
+            
+            # Debug settings
+            self.debug_menu_enabled = config.DEBUG_MENU_ENABLED
+            self.debug_font_size = config.DEBUG_FONT_SIZE
+            self.debug_ui_elements = {}
+            
+            # File paths
+            self.asset_dir = os.path.join(os.path.dirname(__file__), '..', '..', config.ASSET_DIR)
+            self.current_frame_path = config.CURRENT_FRAME_PATH
+            
+            # State
+            self.running = True
+            self.is_blinking = False
+            self.current_emotion = Emotion.NEUTRAL
+            self.debug_mode = None
+            self.last_blink_time = time.time()
+            
+            # Check if we're in a headless environment
+            self.headless_mode = self._is_headless_environment()
+            if self.headless_mode:
+                self.logger.info("Running in headless mode - display will be simulated")
+            
+            # Initialize pygame and display
+            self._init_display()
+            
+            # Set up signal handler for CTRL+C
+            signal.signal(signal.SIGINT, self._signal_handler)
+            
+            # Start blink thread
+            self.blink_thread = threading.Thread(target=self._blink_loop, daemon=True)
+            self.blink_thread.start()
+            
+            self.logger.info("LCD Controller initialized successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize LCD Controller: {e}", exc_info=True)
+            raise
     
+    def _is_headless_environment(self) -> bool:
+        """Check if we're running in a headless environment."""
+        # Check if DISPLAY environment variable is set
+        if 'DISPLAY' not in os.environ:
+            return True
+        
+        # Check if we're running in a container or virtual environment
+        if os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv'):
+            return True
+        
+        # Check if we're running on a Raspberry Pi without a display
+        if os.path.exists('/proc/device-tree/model'):
+            with open('/proc/device-tree/model', 'r') as f:
+                model = f.read().lower()
+                if 'raspberry pi' in model and not os.path.exists('/dev/fb0'):
+                    return True
+        
+        return False
+    
+    def _init_display(self):
+        """Initialize the display with current settings."""
+        try:
+            pygame.init()
+            
+            # Set window position (centered)
+            os.environ['SDL_VIDEO_CENTERED'] = '1'
+            
+            # Create the window with a title
+            pygame.display.set_caption("EVE2 Display")
+            
+            # Initialize the display
+            if self.headless_mode:
+                # Use a dummy display in headless mode
+                self.screen = pygame.Surface((self.width, self.height))
+                self.logger.info("Using dummy display in headless mode")
+            else:
+                # Try to use hardware display if available
+                if self.use_hardware_display:
+                    try:
+                        # Set environment variables for framebuffer
+                        os.environ['SDL_VIDEODRIVER'] = 'fbcon'
+                        os.environ['SDL_FBDEV'] = '/dev/fb0'
+                        os.environ['SDL_VIDEO_CURSOR_HIDDEN'] = '1'
+                        
+                        # Create fullscreen display
+                        flags = pygame.FULLSCREEN
+                        self.screen = pygame.display.set_mode((self.width, self.height), flags)
+                        self.logger.info("Using hardware display with framebuffer")
+                    except Exception as fb_err:
+                        self.logger.warning(f"Failed to use framebuffer: {fb_err}. Falling back to windowed mode.")
+                        # Fall back to windowed mode
+                        os.environ['SDL_VIDEODRIVER'] = 'x11'  # Try X11
+                        flags = pygame.FULLSCREEN if self.fullscreen else 0
+                        self.screen = pygame.display.set_mode((self.width, self.height), flags)
+                else:
+                    # Use windowed mode
+                    flags = pygame.FULLSCREEN if self.fullscreen else 0
+                    self.screen = pygame.display.set_mode((self.width, self.height), flags)
+            
+            # Initialize clock
+            self.clock = pygame.time.Clock()
+            
+            # Load images
+            self._load_emotion_images()
+            
+            # Initial display update
+            self.screen.fill(self.background_color)
+            if not self.headless_mode:
+                pygame.display.flip()
+            
+            self.logger.info("Display initialized successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initialize display: {e}")
+            self._init_fallback_mode()
+    
+    def _init_fallback_mode(self):
+        """Initialize a fallback mode for headless operation."""
+        self.logger.info("Initializing display in fallback mode")
+        pygame.init()
+        self.screen = pygame.Surface((self.width, self.height))
+        self.clock = pygame.time.Clock()
+        self._load_emotion_images()
+        self.headless_mode = True
+    
+    def _load_emotion_images(self):
+        """Load all emotion images into memory."""
+        self.emotion_images = {}
+        
+        # Create assets directory if it doesn't exist
+        os.makedirs(self.asset_dir, exist_ok=True)
+        
+        # Create default emotion images if they don't exist
+        self._create_default_emotion_images()
+        
+        for emotion in Emotion:
+            try:
+                # Construct the image path using the asset directory and emotion filename
+                image_path = os.path.join(self.asset_dir, emotion.filename)
+                
+                # Check if file exists
+                if not os.path.exists(image_path):
+                    self.logger.warning(f"Emotion image not found: {image_path}")
+                    # Create a fallback surface with emotion color
+                    surface = pygame.Surface((self.width, self.height))
+                    surface.fill(self._get_fallback_color(emotion))
+                    self.emotion_images[emotion] = surface
+                    continue
+                
+                original = pygame.image.load(image_path)
+                
+                # Scale image if needed
+                if original.get_size() != (self.width, self.height):
+                    original = pygame.transform.scale(original, (self.width, self.height))
+                
+                # Apply eye color
+                colored = self._apply_eye_color(original, self.eye_color)
+                self.emotion_images[emotion] = colored
+                
+            except Exception as e:
+                self.logger.warning(f"Failed to load emotion image for {emotion.name}: {e}")
+                # Create a fallback surface
+                surface = pygame.Surface((self.width, self.height))
+                surface.fill(self._get_fallback_color(emotion))
+                self.emotion_images[emotion] = surface
+    
+    def _create_default_emotion_images(self):
+        """Create default emotion images if they don't exist."""
+        # Define basic shapes for each emotion
+        emotion_shapes = {
+            Emotion.NEUTRAL: self._create_neutral_face,
+            Emotion.HAPPY: self._create_happy_face,
+            Emotion.SAD: self._create_sad_face,
+            Emotion.ANGRY: self._create_angry_face,
+            Emotion.SURPRISED: self._create_surprised_face,
+            Emotion.FEARFUL: self._create_fearful_face,
+            Emotion.DISGUSTED: self._create_disgusted_face,
+            Emotion.BLINK: self._create_blink_face
+        }
+        
+        # Create each emotion image if it doesn't exist
+        for emotion, shape_func in emotion_shapes.items():
+            image_path = os.path.join(self.asset_dir, emotion.filename)
+            if not os.path.exists(image_path):
+                self.logger.info(f"Creating default image for {emotion.name}")
+                # Create a new surface
+                surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+                surface.fill((0, 0, 0, 0))  # Transparent background
+                
+                # Draw the emotion shape
+                shape_func(surface)
+                
+                # Save the image
+                pygame.image.save(surface, image_path)
+    
+    def _create_neutral_face(self, surface):
+        """Create a neutral face."""
+        # Draw eyes
+        eye_color = self.eye_color
+        eye_size = min(self.width, self.height) // 16
+        
+        # Left eye
+        pygame.draw.circle(surface, eye_color, 
+                          (self.width // 3, self.height // 2), eye_size)
+        
+        # Right eye
+        pygame.draw.circle(surface, eye_color, 
+                          (2 * self.width // 3, self.height // 2), eye_size)
+        
+        # Draw mouth (straight line)
+        mouth_y = 2 * self.height // 3
+        pygame.draw.line(surface, eye_color, 
+                        (self.width // 3, mouth_y), 
+                        (2 * self.width // 3, mouth_y), 3)
+    
+    def _create_happy_face(self, surface):
+        """Create a happy face."""
+        # Draw eyes
+        eye_color = self.eye_color
+        eye_size = min(self.width, self.height) // 16
+        
+        # Left eye
+        pygame.draw.circle(surface, eye_color, 
+                          (self.width // 3, self.height // 2), eye_size)
+        
+        # Right eye
+        pygame.draw.circle(surface, eye_color, 
+                          (2 * self.width // 3, self.height // 2), eye_size)
+        
+        # Draw mouth (smile)
+        mouth_y = 2 * self.height // 3
+        pygame.draw.arc(surface, eye_color, 
+                       (self.width // 3, mouth_y - 20, 
+                        self.width // 3, 40), 0, 3.14, 3)
+    
+    def _create_sad_face(self, surface):
+        """Create a sad face."""
+        # Draw eyes
+        eye_color = self.eye_color
+        eye_size = min(self.width, self.height) // 16
+        
+        # Left eye
+        pygame.draw.circle(surface, eye_color, 
+                          (self.width // 3, self.height // 2), eye_size)
+        
+        # Right eye
+        pygame.draw.circle(surface, eye_color, 
+                          (2 * self.width // 3, self.height // 2), eye_size)
+        
+        # Draw mouth (frown)
+        mouth_y = 2 * self.height // 3
+        pygame.draw.arc(surface, eye_color, 
+                       (self.width // 3, mouth_y - 20, 
+                        self.width // 3, 40), 3.14, 6.28, 3)
+    
+    def _create_angry_face(self, surface):
+        """Create an angry face."""
+        # Draw eyes
+        eye_color = self.eye_color
+        eye_size = min(self.width, self.height) // 16
+        
+        # Left eye
+        pygame.draw.circle(surface, eye_color, 
+                          (self.width // 3, self.height // 2), eye_size)
+        
+        # Right eye
+        pygame.draw.circle(surface, eye_color, 
+                          (2 * self.width // 3, self.height // 2), eye_size)
+        
+        # Draw eyebrows
+        pygame.draw.line(surface, eye_color, 
+                        (self.width // 3 - 20, self.height // 2 - 20), 
+                        (self.width // 3 + 20, self.height // 2 - 10), 3)
+        
+        pygame.draw.line(surface, eye_color, 
+                        (2 * self.width // 3 - 20, self.height // 2 - 10), 
+                        (2 * self.width // 3 + 20, self.height // 2 - 20), 3)
+        
+        # Draw mouth (straight line)
+        mouth_y = 2 * self.height // 3
+        pygame.draw.line(surface, eye_color, 
+                        (self.width // 3, mouth_y), 
+                        (2 * self.width // 3, mouth_y), 3)
+    
+    def _create_surprised_face(self, surface):
+        """Create a surprised face."""
+        # Draw eyes
+        eye_color = self.eye_color
+        eye_size = min(self.width, self.height) // 16
+        
+        # Left eye
+        pygame.draw.circle(surface, eye_color, 
+                          (self.width // 3, self.height // 2), eye_size)
+        
+        # Right eye
+        pygame.draw.circle(surface, eye_color, 
+                          (2 * self.width // 3, self.height // 2), eye_size)
+        
+        # Draw mouth (O shape)
+        mouth_y = 2 * self.height // 3
+        pygame.draw.circle(surface, eye_color, 
+                          (self.width // 2, mouth_y), 20, 3)
+    
+    def _create_fearful_face(self, surface):
+        """Create a fearful face."""
+        # Draw eyes
+        eye_color = self.eye_color
+        eye_size = min(self.width, self.height) // 16
+        
+        # Left eye
+        pygame.draw.circle(surface, eye_color, 
+                          (self.width // 3, self.height // 2), eye_size)
+        
+        # Right eye
+        pygame.draw.circle(surface, eye_color, 
+                          (2 * self.width // 3, self.height // 2), eye_size)
+        
+        # Draw eyebrows
+        pygame.draw.line(surface, eye_color, 
+                        (self.width // 3 - 20, self.height // 2 - 10), 
+                        (self.width // 3 + 20, self.height // 2 - 20), 3)
+        
+        pygame.draw.line(surface, eye_color, 
+                        (2 * self.width // 3 - 20, self.height // 2 - 20), 
+                        (2 * self.width // 3 + 20, self.height // 2 - 10), 3)
+        
+        # Draw mouth (open)
+        mouth_y = 2 * self.height // 3
+        pygame.draw.ellipse(surface, eye_color, 
+                          (self.width // 2 - 20, mouth_y - 10, 40, 20), 3)
+    
+    def _create_disgusted_face(self, surface):
+        """Create a disgusted face."""
+        # Draw eyes
+        eye_color = self.eye_color
+        eye_size = min(self.width, self.height) // 16
+        
+        # Left eye
+        pygame.draw.circle(surface, eye_color, 
+                          (self.width // 3, self.height // 2), eye_size)
+        
+        # Right eye
+        pygame.draw.circle(surface, eye_color, 
+                          (2 * self.width // 3, self.height // 2), eye_size)
+        
+        # Draw mouth (disgusted)
+        mouth_y = 2 * self.height // 3
+        pygame.draw.arc(surface, eye_color, 
+                       (self.width // 3, mouth_y - 20, 
+                        self.width // 3, 40), 0, 3.14, 3)
+        
+        # Draw tongue
+        pygame.draw.line(surface, eye_color, 
+                        (self.width // 2, mouth_y + 10), 
+                        (self.width // 2, mouth_y + 30), 3)
+    
+    def _create_blink_face(self, surface):
+        """Create a blinking face."""
+        # Draw eyes (closed)
+        eye_color = self.eye_color
+        
+        # Left eye (closed)
+        pygame.draw.line(surface, eye_color, 
+                        (self.width // 3 - 20, self.height // 2), 
+                        (self.width // 3 + 20, self.height // 2), 3)
+        
+        # Right eye (closed)
+        pygame.draw.line(surface, eye_color, 
+                        (2 * self.width // 3 - 20, self.height // 2), 
+                        (2 * self.width // 3 + 20, self.height // 2), 3)
+        
+        # Draw mouth (straight line)
+        mouth_y = 2 * self.height // 3
+        pygame.draw.line(surface, eye_color, 
+                        (self.width // 3, mouth_y), 
+                        (2 * self.width // 3, mouth_y), 3)
+
     def _signal_handler(self, signum, frame):
         """Handle CTRL+C signal."""
         self.logger.info("Received CTRL+C signal")
@@ -158,7 +507,8 @@ class LCDController:
             self._draw_debug_menu(is_listening)
         
         # Update display
-        pygame.display.flip()
+        if not self.headless_mode:
+            pygame.display.flip()
         
         # Save current frame if path is set
         if self.current_frame_path:
@@ -365,45 +715,6 @@ class LCDController:
                 return (255, 255, 255)
         return (255, 255, 255)
 
-    def _init_display(self):
-        """Initialize the display with current settings."""
-        try:
-            pygame.init()
-            
-            # Set window position (centered)
-            os.environ['SDL_VIDEO_CENTERED'] = '1'
-            
-            # Create the window with a title
-            pygame.display.set_caption("EVE2 Display")
-            
-            # Initialize the display
-            flags = pygame.FULLSCREEN if self.fullscreen else 0
-            self.screen = pygame.display.set_mode((self.width, self.height), flags)
-            
-            # Initialize clock
-            self.clock = pygame.time.Clock()
-            
-            # Load images
-            self._load_emotion_images()
-            
-            # Initial display update
-            self.screen.fill(self.background_color)
-            pygame.display.flip()
-            
-            self.logger.info("Display initialized successfully")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to initialize display: {e}")
-            self._init_fallback_mode()
-
-    def _init_fallback_mode(self):
-        """Initialize a fallback mode for headless operation."""
-        logger.info("Initializing display in fallback mode")
-        pygame.init()
-        self.screen = pygame.Surface((self.width, self.height))
-        self.clock = pygame.time.Clock()
-        self._load_emotion_images()
-
     def _rotate_surface(self, surface: pygame.Surface) -> pygame.Surface:
         """Rotate a surface according to the display rotation setting."""
         if self.rotation == 0:
@@ -427,44 +738,6 @@ class LCDController:
         
         return new_surface
 
-    def _load_emotion_images(self):
-        """Load all emotion images into memory."""
-        self.emotion_images = {}
-        
-        # Create assets directory if it doesn't exist
-        os.makedirs(self.asset_dir, exist_ok=True)
-        
-        for emotion in Emotion:
-            try:
-                # Construct the image path using the asset directory and emotion filename
-                image_path = os.path.join(self.asset_dir, emotion.filename)
-                
-                # Check if file exists
-                if not os.path.exists(image_path):
-                    self.logger.warning(f"Emotion image not found: {image_path}")
-                    # Create a fallback surface with emotion color
-                    surface = pygame.Surface((self.width, self.height))
-                    surface.fill(self._get_fallback_color(emotion))
-                    self.emotion_images[emotion] = surface
-                    continue
-                
-                original = pygame.image.load(image_path)
-                
-                # Scale image if needed
-                if original.get_size() != (self.width, self.height):
-                    original = pygame.transform.scale(original, (self.width, self.height))
-                
-                # Apply eye color
-                colored = self._apply_eye_color(original, self.eye_color)
-                self.emotion_images[emotion] = colored
-                
-            except Exception as e:
-                self.logger.warning(f"Failed to load emotion image for {emotion.name}: {e}")
-                # Create a fallback surface
-                surface = pygame.Surface((self.width, self.height))
-                surface.fill(self._get_fallback_color(emotion))
-                self.emotion_images[emotion] = surface
-
     def _get_fallback_color(self, emotion: Emotion) -> Tuple[int, int, int]:
         """Get a fallback color for an emotion."""
         colors = {
@@ -482,13 +755,19 @@ class LCDController:
     def start(self) -> bool:
         """Start the display controller."""
         try:
-            logger.info("Starting LCD Controller...")
+            self.logger.info("Starting LCD Controller...")
+            
             # Initial display update
             self.update()
-            logger.info("LCD Controller started successfully")
+            
+            # In headless mode, we don't need to wait for display events
+            if self.headless_mode:
+                self.logger.info("Running in headless mode - display updates will be simulated")
+            
+            self.logger.info("LCD Controller started successfully")
             return True
         except Exception as e:
-            logger.error(f"Failed to start LCD Controller: {e}")
+            self.logger.error(f"Failed to start LCD Controller: {e}")
             return False
 
     def stop(self):
