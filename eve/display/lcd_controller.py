@@ -19,8 +19,7 @@ from PIL import Image, ImageDraw
 import cv2
 
 from eve import config
-from eve.config.display import Emotion, DisplayConfig
-from eve.emotion.emotion import Emotion as EveEmotion
+from eve.emotion.emotion import Emotion
 
 logger = logging.getLogger(__name__)
 
@@ -583,49 +582,6 @@ class LCDController:
                 self.update()
             time.sleep(0.01)  # Wait between checks
 
-    def _show_debug_mode_menu(self):
-        """Show the debug mode selection menu."""
-        self.screen.fill(self.background_color)
-        
-        # Draw menu title
-        font = pygame.font.Font(None, 36)
-        title = font.render("Debug Mode Selection", True, self.text_color)
-        title_rect = title.get_rect(center=(self.width // 2, self.height // 3))
-        self.screen.blit(title, title_rect)
-        
-        # Draw options
-        font = pygame.font.Font(None, 24)
-        video_option = font.render("1. Video Debug (Object Detection)", True, self.text_color)
-        audio_option = font.render("2. Audio Debug (Voice Detection)", True, self.text_color)
-        exit_option = font.render("3. Exit Menu", True, self.text_color)
-        
-        video_rect = video_option.get_rect(center=(self.width // 2, self.height // 2))
-        audio_rect = audio_option.get_rect(center=(self.width // 2, self.height // 2 + 40))
-        exit_rect = exit_option.get_rect(center=(self.width // 2, self.height // 2 + 80))
-        
-        self.screen.blit(video_option, video_rect)
-        self.screen.blit(audio_option, audio_rect)
-        self.screen.blit(exit_option, exit_rect)
-        
-        pygame.display.flip()
-        
-        # Wait for selection
-        waiting = True
-        while waiting and self.running:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.running = False
-                    waiting = False
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_1:
-                        self.debug_mode = 'video'
-                        waiting = False
-                    elif event.key == pygame.K_2:
-                        self.debug_mode = 'audio'
-                        waiting = False
-                    elif event.key == pygame.K_3 or event.key == pygame.K_ESCAPE:
-                        waiting = False
-    
     def _update_video_debug(self):
         """Update the video debug display."""
         # Clear screen
