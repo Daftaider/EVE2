@@ -89,6 +89,7 @@ class EVEApplication:
         self._setup_signal_handlers()
         self.clock = pygame.time.Clock()
         self.display_controller = None
+        self.logger = logging.getLogger(__name__)  # Add logger attribute
 
     def _setup_signal_handlers(self):
         """Register signal handlers for graceful shutdown."""
@@ -254,13 +255,23 @@ class EVEApplication:
                 # 6. Run Main Loop (Pygame events or wait)
                 logger.info("EVE application running. Press Ctrl+C to exit.")
                 if self.display_controller and pygame_initialized:
-                    self._pygame_event_loop()
+                    try:
+                        self._pygame_event_loop()
+                    except Exception as e:
+                        logger.error(f"Error in Pygame event loop: {str(e)}")
+                        logger.error(traceback.format_exc())
+                        # Fall back to basic update loop
+                        logger.info("Falling back to basic update loop due to Pygame error...")
+                        while self._running:
+                            if self.orchestrator:
+                                self.orchestrator.update()
+                            time.sleep(0.1)
                 else:
                     # Fallback: Call update() periodically if no display/pygame
                     logger.info("No display or Pygame, running basic update loop...")
                     while self._running:
                         if self.orchestrator:
-                             self.orchestrator.update() # Call orchestrator update
+                            self.orchestrator.update() # Call orchestrator update
                         # Sleep for a short interval (e.g., 100ms)
                         # Avoid sleeping too long, otherwise audio queue might fill
                         time.sleep(0.1)
@@ -312,11 +323,17 @@ class EVEApplication:
                         if event.mod & pygame.KMOD_SHIFT: mod_keys.append('SHIFT')
                         if event.mod & pygame.KMOD_ALT: mod_keys.append('ALT')
                         mod_str = '+'.join(mod_keys) if mod_keys else 'NO_MOD'
-                        self.logger.debug(f"Key event: {key_name}, Modifiers: {mod_str}")
+                        try:
+                            self.logger.debug(f"Key event: {key_name}, Modifiers: {mod_str}")
+                        except AttributeError:
+                            logger.debug(f"Key event: {key_name}, Modifiers: {mod_str}")
                     
                     # Log mouse events for debugging
                     elif event.type == pygame.MOUSEBUTTONDOWN:
-                        self.logger.debug(f"Mouse button {event.button} clicked at {event.pos}")
+                        try:
+                            self.logger.debug(f"Mouse button {event.button} clicked at {event.pos}")
+                        except AttributeError:
+                            logger.debug(f"Mouse button {event.button} clicked at {event.pos}")
                     
                     # Pass event to LCD controller if available
                     if self.display_controller:
@@ -337,10 +354,17 @@ class EVEApplication:
                 self.clock.tick(60)
                 
         except Exception as e:
-            self.logger.error(f"Error in Pygame event loop: {str(e)}")
-            self.logger.error(traceback.format_exc())
+            try:
+                self.logger.error(f"Error in Pygame event loop: {str(e)}")
+                self.logger.error(traceback.format_exc())
+            except AttributeError:
+                logger.error(f"Error in Pygame event loop: {str(e)}")
+                logger.error(traceback.format_exc())
         finally:
-            self.logger.info("Pygame event loop stopped")
+            try:
+                self.logger.info("Pygame event loop stopped")
+            except AttributeError:
+                logger.info("Pygame event loop stopped")
             self._running = False
 
 # cleanup() method is no longer needed as pygame quit moved to run() finally
