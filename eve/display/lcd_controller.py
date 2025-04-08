@@ -579,7 +579,7 @@ class LCDController:
             return
         
         # Process all pending events first
-        self._process_events()
+        events_handled = self._process_events()
         
         # Clear screen
         self.screen.fill(self.background_color)
@@ -626,6 +626,11 @@ class LCDController:
         current_fps = self.clock.get_fps()
         if current_fps > 0:
             self.logger.debug(f"Current FPS: {int(current_fps)}")
+        
+        # If events were handled, force a display update
+        if events_handled and not self.headless_mode:
+            pygame.display.flip()
+            self.clock.tick(self.fps)  # Ensure we maintain frame rate
     
     def _show_debug_mode_menu(self):
         """Show the debug mode selection menu."""
