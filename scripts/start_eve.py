@@ -288,6 +288,19 @@ class EVEApplication:
                     
                     # Pass events to LCD controller if available
                     if self.orchestrator and self.orchestrator.display_controller:
+                        # Log the event for debugging
+                        if event.type == pygame.KEYDOWN:
+                            key_name = pygame.key.name(event.key)
+                            mod_keys = []
+                            if event.mod & pygame.KMOD_CTRL: mod_keys.append('CTRL')
+                            if event.mod & pygame.KMOD_SHIFT: mod_keys.append('SHIFT')
+                            if event.mod & pygame.KMOD_ALT: mod_keys.append('ALT')
+                            mod_str = '+'.join(mod_keys) if mod_keys else 'NO_MOD'
+                            logger.debug(f"Passing key event to LCD controller: {key_name}, Modifiers: {mod_str}")
+                        elif event.type == pygame.MOUSEBUTTONDOWN:
+                            logger.debug(f"Passing mouse event to LCD controller: Button {event.button} at {event.pos}")
+                        
+                        # Pass the event to the LCD controller
                         self.orchestrator.display_controller.handle_event(event)
                 
                 # Update orchestrator

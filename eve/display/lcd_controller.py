@@ -1080,6 +1080,17 @@ class LCDController:
                     pygame.quit()
                     sys.exit(0)
                 handled = True
+            
+            # Handle number keys in debug menu
+            elif self.debug_mode is None and event.key in [pygame.K_1, pygame.K_2, pygame.K_3]:
+                self.logger.info(f"Number key {event.key - pygame.K_1 + 1} pressed in debug menu")
+                if event.key == pygame.K_1:
+                    self.debug_mode = 'video'
+                elif event.key == pygame.K_2:
+                    self.debug_mode = 'audio'
+                elif event.key == pygame.K_3:
+                    self.debug_mode = None
+                handled = True
         
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1:  # Left mouse button
