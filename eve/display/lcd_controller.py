@@ -1126,65 +1126,48 @@ class LCDController:
             self.logger.error(traceback.format_exc())
 
     def _update_video_debug(self):
-        """Update the video debug display with live feed and object detection."""
+        """Update the display with video debug information."""
         try:
-            # Clear screen
-            self.screen.fill(self.background_color)
-            
-            # Get the latest frame from the camera
-            if self.camera:
-                frame = self.camera.get_frame()
-                if frame is not None:
-                    # Convert frame to pygame surface
+            if not self.camera:
+                logger.warning("No camera available for video debug")
+                return
+
+            # Get the latest frame based on camera type
+            if isinstance(self.camera, RPiAICamera):
+                frame = self.camera.get_latest_frame()
+            else:
+                _, frame = self.camera.get_frame()
+
+            if frame is None:
+                logger.warning("No frame available for video debug")
+                return
+
+            # Convert frame to RGB if needed
+            if len(frame.shape) == 3 and frame.shape[2] == 3:
+                if frame.dtype == np.uint8:
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    frame = np.rot90(frame)
-                    frame = pygame.surfarray.make_surface(frame)
-                    
-                    # Scale frame to fit screen
-                    frame = pygame.transform.scale(frame, (self.width, self.height))
-                    self.screen.blit(frame, (0, 0))
                 else:
-                    # Draw error message if no frame available
-                    error_text = self.font.render("No video feed available", True, (255, 0, 0))
-                    self.screen.blit(error_text, (10, 10))
-            else:
-                # Draw error message if no camera available
-                error_text = self.font.render("Camera not initialized", True, (255, 0, 0))
-                self.screen.blit(error_text, (10, 10))
-            
-            # Draw object detection boxes if available
-            if self.object_detector:
-                detections = self.object_detector.get_latest_detections()
-                if detections:
-                    for detection in detections:
-                        # Get box coordinates
-                        x1, y1, x2, y2 = detection['box']
-                        confidence = detection['confidence']
-                        label = detection['label']
-                        
-                        # Draw box
-                        pygame.draw.rect(self.screen, (0, 255, 0), (x1, y1, x2-x1, y2-y1), 2)
-                        
-                        # Draw label and confidence
-                        text = f"{label}: {confidence:.2f}"
-                        if 'name' in detection:
-                            text = f"{detection['name']} ({text})"
-                        text_surface = self.font.render(text, True, (0, 255, 0))
-                        self.screen.blit(text_surface, (x1, y1 - 20))
-            else:
-                # Draw error message if no object detector available
-                error_text = self.font.render("Object detector not initialized", True, (255, 0, 0))
-                self.screen.blit(error_text, (10, 40))
-            
+                    frame = (frame * 255).astype(np.uint8)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+            # Resize frame to match display size
+            frame = cv2.resize(frame, (self.width, self.height))
+
+            # Convert to Pygame surface
+            frame_surface = pygame.surfarray.make_surface(frame)
+
+            # Clear screen and draw frame
+            self.screen.fill((0, 0, 0))
+            self.screen.blit(frame_surface, (0, 0))
+
             # Draw debug info overlay
             self._draw_debug_overlay()
-            
+
             # Update display
             pygame.display.flip()
-            
+
         except Exception as e:
-            self.logger.error(f"Error updating video debug: {str(e)}")
-            self.logger.error(traceback.format_exc())
+            logger.error(f"Error updating video debug: {e}", exc_info=True)
 
     def _draw_debug_overlay(self):
         """Draw debug information overlay."""
