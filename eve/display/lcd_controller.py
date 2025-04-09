@@ -24,6 +24,7 @@ import cv2
 from eve import config
 from eve.emotion.emotion import Emotion
 from eve.config.config import DisplayConfig
+from eve.vision.rpi_ai_camera import RPiAICamera
 
 logger = logging.getLogger(__name__)
 
