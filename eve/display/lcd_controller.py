@@ -712,7 +712,7 @@ class LCDController:
                 self._draw_debug_menu(display_state)
             
             # Update display
-            pygame.display.update()
+            pygame.display.flip()
             
             # Save current frame if path is set
             if self.current_frame_path:
@@ -1077,6 +1077,10 @@ class LCDController:
                 if self.debug_mode:
                     self._draw_debug_info()
             
+            # Update display
+            if not self.headless_mode:
+                pygame.display.flip()
+                
         except Exception as e:
             self.logger.error(f"Error drawing emotion: {str(e)}")
             self.logger.error(traceback.format_exc())
@@ -1096,74 +1100,90 @@ class LCDController:
 
     def _update_video_debug(self):
         """Update the video debug display."""
-        # Draw title
-        title = self.font.render("Video Debug Mode", True, (255, 255, 255))
-        title_rect = title.get_rect(center=(self.width // 2, 30))
-        self.screen.blit(title, title_rect)
-        
-        # Draw instructions
-        instructions = [
-            "Press ESC to exit debug mode",
-            "Click on objects to submit corrections",
-            "Double-click to toggle debug menu"
-        ]
-        
-        y = 60
-        for instruction in instructions:
-            text = self.font.render(instruction, True, (200, 200, 200))
-            text_rect = text.get_rect(center=(self.width // 2, y))
-            self.screen.blit(text, text_rect)
-            y += 30
-        
-        # Draw current emotion
-        emotion_text = self.font.render(f"Current Emotion: {self.current_emotion}", True, (255, 255, 255))
-        emotion_rect = emotion_text.get_rect(center=(self.width // 2, y + 30))
-        self.screen.blit(emotion_text, emotion_rect)
-        
-        # Draw FPS
-        fps_text = self.font.render(f"FPS: {int(self.clock.get_fps())}", True, (255, 255, 255))
-        fps_rect = fps_text.get_rect(center=(self.width // 2, y + 60))
-        self.screen.blit(fps_text, fps_rect)
-        
-        # Update display
-        if not self.headless_mode:
-            pygame.display.flip()
-    
+        try:
+            # Clear screen
+            self.screen.fill(self.background_color)
+            
+            # Draw title
+            title = self.font.render("Video Debug Mode", True, (255, 255, 255))
+            title_rect = title.get_rect(center=(self.width // 2, 30))
+            self.screen.blit(title, title_rect)
+            
+            # Draw instructions
+            instructions = [
+                "Press ESC to exit debug mode",
+                "Click on objects to submit corrections",
+                "Double-click to toggle debug menu"
+            ]
+            
+            y = 60
+            for instruction in instructions:
+                text = self.font.render(instruction, True, (200, 200, 200))
+                text_rect = text.get_rect(center=(self.width // 2, y))
+                self.screen.blit(text, text_rect)
+                y += 30
+            
+            # Draw current emotion
+            emotion_text = self.font.render(f"Current Emotion: {self.current_emotion}", True, (255, 255, 255))
+            emotion_rect = emotion_text.get_rect(center=(self.width // 2, y + 30))
+            self.screen.blit(emotion_text, emotion_rect)
+            
+            # Draw FPS
+            fps_text = self.font.render(f"FPS: {int(self.clock.get_fps())}", True, (255, 255, 255))
+            fps_rect = fps_text.get_rect(center=(self.width // 2, y + 60))
+            self.screen.blit(fps_text, fps_rect)
+            
+            # Update display
+            if not self.headless_mode:
+                pygame.display.flip()
+                
+        except Exception as e:
+            self.logger.error(f"Error updating video debug: {str(e)}")
+            self.logger.error(traceback.format_exc())
+
     def _update_audio_debug(self):
         """Update the audio debug display."""
-        # Draw title
-        title = self.font.render("Audio Debug Mode", True, (255, 255, 255))
-        title_rect = title.get_rect(center=(self.width // 2, 30))
-        self.screen.blit(title, title_rect)
-        
-        # Draw instructions
-        instructions = [
-            "Press ESC to exit debug mode",
-            "Speak to see audio levels",
-            "Double-click to toggle debug menu"
-        ]
-        
-        y = 60
-        for instruction in instructions:
-            text = self.font.render(instruction, True, (200, 200, 200))
-            text_rect = text.get_rect(center=(self.width // 2, y))
-            self.screen.blit(text, text_rect)
-            y += 30
-        
-        # Draw current emotion
-        emotion_text = self.font.render(f"Current Emotion: {self.current_emotion}", True, (255, 255, 255))
-        emotion_rect = emotion_text.get_rect(center=(self.width // 2, y + 30))
-        self.screen.blit(emotion_text, emotion_rect)
-        
-        # Draw FPS
-        fps_text = self.font.render(f"FPS: {int(self.clock.get_fps())}", True, (255, 255, 255))
-        fps_rect = fps_text.get_rect(center=(self.width // 2, y + 60))
-        self.screen.blit(fps_text, fps_rect)
-        
-        # Update display
-        if not self.headless_mode:
-            pygame.display.flip()
-    
+        try:
+            # Clear screen
+            self.screen.fill(self.background_color)
+            
+            # Draw title
+            title = self.font.render("Audio Debug Mode", True, (255, 255, 255))
+            title_rect = title.get_rect(center=(self.width // 2, 30))
+            self.screen.blit(title, title_rect)
+            
+            # Draw instructions
+            instructions = [
+                "Press ESC to exit debug mode",
+                "Speak to see audio levels",
+                "Double-click to toggle debug menu"
+            ]
+            
+            y = 60
+            for instruction in instructions:
+                text = self.font.render(instruction, True, (200, 200, 200))
+                text_rect = text.get_rect(center=(self.width // 2, y))
+                self.screen.blit(text, text_rect)
+                y += 30
+            
+            # Draw current emotion
+            emotion_text = self.font.render(f"Current Emotion: {self.current_emotion}", True, (255, 255, 255))
+            emotion_rect = emotion_text.get_rect(center=(self.width // 2, y + 30))
+            self.screen.blit(emotion_text, emotion_rect)
+            
+            # Draw FPS
+            fps_text = self.font.render(f"FPS: {int(self.clock.get_fps())}", True, (255, 255, 255))
+            fps_rect = fps_text.get_rect(center=(self.width // 2, y + 60))
+            self.screen.blit(fps_text, fps_rect)
+            
+            # Update display
+            if not self.headless_mode:
+                pygame.display.flip()
+                
+        except Exception as e:
+            self.logger.error(f"Error updating audio debug: {str(e)}")
+            self.logger.error(traceback.format_exc())
+
     def _draw_debug_info(self):
         """Draw debug information on the screen."""
         # Implementation of _draw_debug_info method
