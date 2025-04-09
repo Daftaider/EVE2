@@ -646,11 +646,86 @@ class LCDController:
                     self.debug_mode = None
                     return True
             
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:  # Left click
+                if self.debug_mode == 'video':
+                    # Check rotation controls
+                    if hasattr(self, '_debug_controls'):
+                        pos = event.pos
+                        if self._debug_controls['left_button'].collidepoint(pos):
+                            self.rotation = (self.rotation - 90) % 360
+                            logger.info(f"Camera rotated to {self.rotation}°")
+                            return True
+                        elif self._debug_controls['right_button'].collidepoint(pos):
+                            self.rotation = (self.rotation + 90) % 360
+                            logger.info(f"Camera rotated to {self.rotation}°")
+                            return True
+                        elif self._debug_controls['save_button'].collidepoint(pos):
+                            self._save_rotation()
+                            return True
+                    
+                    # Check for person detection and training
+                    if self.object_detector is not None:
+                        try:
+                            detections = self.object_detector.get_latest_detections()
+                            if detections:
+                                for detection in detections:
+                                    # Check if click is on a person detection
+                                    if detection.get('label', '').lower() == 'person':
+                                        # Check if click is on the detection box
+                                        if 'box' in detection:
+                                            x1, y1, x2, y2 = detection['box']
+                                            if (x1 <= event.pos[0] <= x2 and 
+                                                y1 <= event.pos[1] <= y2):
+                                                # Check if click is on train button
+                                                if 'train_button' in detection and detection['train_button'].collidepoint(event.pos):
+                                                    self._train_person(detection)
+                                                    return True
+                                                # Otherwise prompt for name
+                                                else:
+                                                    name = self._prompt_for_name()
+                                                    if name:
+                                                        detection['name'] = name
+                                                        return True
+                        except Exception as e:
+                            logger.error(f"Error handling detection click: {e}", exc_info=True)
+            
             return False
             
         except Exception as e:
             logger.error(f"Error handling event: {e}", exc_info=True)
             return False
+
+    def _train_person(self, detection):
+        """Train EVE to recognize a person."""
+        try:
+            if not self.camera:
+                logger.warning("No camera available for training")
+                return
+            
+            # Get current frame
+            if isinstance(self.camera, RPiAICamera):
+                frame = self.camera.get_latest_frame()
+            else:
+                _, frame = self.camera.get_frame()
+            
+            if frame is None:
+                logger.warning("No frame available for training")
+                return
+            
+            # Extract face region
+            x1, y1, x2, y2 = detection['box']
+            face_region = frame[y1:y2, x1:x2]
+            
+            # TODO: Implement face training logic here
+            # This would involve:
+            # 1. Extracting face features
+            # 2. Storing the features with the person's name
+            # 3. Updating the face recognition system
+            
+            logger.info(f"Training initiated for person in box {detection['box']}")
+            
+        except Exception as e:
+            logger.error(f"Error training person: {e}", exc_info=True)
 
     def update(self, display_state=None):
         """Update the display.
@@ -1128,15 +1203,23 @@ class LCDController:
                 elif self.rotation == 270:
                     frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
-            # Resize frame to match display size
-            frame = cv2.resize(frame, (self.width, self.height))
+            # Calculate video display area (centered, 80% of screen width)
+            video_width = int(self.width * 0.8)
+            video_height = int(video_width * frame.shape[0] / frame.shape[1])
+            video_x = (self.width - video_width) // 2
+            video_y = (self.height - video_height) // 2
+
+            # Resize frame to fit display area
+            frame = cv2.resize(frame, (video_width, video_height))
 
             # Convert to Pygame surface
             frame_surface = pygame.surfarray.make_surface(frame)
 
-            # Clear screen and draw frame
+            # Clear screen
             self.screen.fill((0, 0, 0))
-            self.screen.blit(frame_surface, (0, 0))
+
+            # Draw video frame
+            self.screen.blit(frame_surface, (video_x, video_y))
 
             # Draw object detection boxes if available
             if self.object_detector is not None:
@@ -1152,18 +1235,18 @@ class LCDController:
                             else:
                                 logger.warning(f"Invalid detection format: {detection}")
                                 continue
-                                
-                            # Get label and confidence - handle different field names
+                            
+                            # Scale coordinates to match video display area
+                            x1 = int(x1 * video_width / frame.shape[1]) + video_x
+                            y1 = int(y1 * video_height / frame.shape[0]) + video_y
+                            x2 = int(x2 * video_width / frame.shape[1]) + video_x
+                            y2 = int(y2 * video_height / frame.shape[0]) + video_y
+                            
+                            # Get label and confidence
                             confidence = detection.get('confidence', 0.0)
                             label = detection.get('label', 'unknown')
                             if 'class' in detection:
                                 label = detection['class']
-                            
-                            # Scale coordinates to match display size
-                            x1 = int(x1 * self.width / frame.shape[1])
-                            y1 = int(y1 * self.height / frame.shape[0])
-                            x2 = int(x2 * self.width / frame.shape[1])
-                            y2 = int(y2 * self.height / frame.shape[0])
                             
                             # Draw box
                             pygame.draw.rect(self.screen, (0, 255, 0), (x1, y1, x2-x1, y2-y1), 2)
@@ -1174,23 +1257,80 @@ class LCDController:
                                 text = f"{detection['name']} ({text})"
                             text_surface = self.font.render(text, True, (0, 255, 0))
                             self.screen.blit(text_surface, (x1, y1 - 20))
+
+                            # Draw training button for person detections
+                            if label.lower() == 'person' and not detection.get('name'):
+                                train_button = pygame.Rect(x2 + 5, y1, 80, 30)
+                                pygame.draw.rect(self.screen, (255, 165, 0), train_button)
+                                train_text = self.font.render("Train", True, (0, 0, 0))
+                                self.screen.blit(train_text, (train_button.x + 10, train_button.y + 5))
+                                # Store button rect for click detection
+                                detection['train_button'] = train_button
                 except Exception as e:
                     logger.error(f"Error drawing detections: {e}", exc_info=True)
 
-            # Draw rotation arrows
-            arrow_size = 30
-            arrow_color = (255, 255, 255)
-            
-            # Left arrow
-            left_points = [(10, self.height//2), (30, self.height//2 - 15), (30, self.height//2 + 15)]
-            pygame.draw.polygon(self.screen, arrow_color, left_points)
-            
-            # Right arrow
-            right_points = [(self.width - 10, self.height//2), (self.width - 30, self.height//2 - 15), (self.width - 30, self.height//2 + 15)]
-            pygame.draw.polygon(self.screen, arrow_color, right_points)
+            # Draw rotation controls panel on the right
+            panel_width = self.width - video_width - video_x
+            panel_x = video_x + video_width + 10
+            panel_y = video_y
+            panel_height = video_height
 
-            # Draw debug info overlay
-            self._draw_debug_overlay()
+            # Draw panel background
+            pygame.draw.rect(self.screen, (40, 40, 40), (panel_x, panel_y, panel_width, panel_height))
+
+            # Draw rotation controls
+            control_y = panel_y + 20
+            control_spacing = 50
+
+            # Title
+            title = self.font.render("Camera Controls", True, (255, 255, 255))
+            self.screen.blit(title, (panel_x + 10, control_y))
+            control_y += control_spacing
+
+            # Current rotation
+            rotation_text = self.font.render(f"Rotation: {self.rotation}°", True, (255, 255, 255))
+            self.screen.blit(rotation_text, (panel_x + 10, control_y))
+            control_y += control_spacing
+
+            # Rotation buttons
+            left_button = pygame.Rect(panel_x + 10, control_y, 40, 40)
+            right_button = pygame.Rect(panel_x + 60, control_y, 40, 40)
+            pygame.draw.rect(self.screen, (100, 100, 100), left_button)
+            pygame.draw.rect(self.screen, (100, 100, 100), right_button)
+            
+            # Draw arrow symbols
+            left_arrow = self.font.render("←", True, (255, 255, 255))
+            right_arrow = self.font.render("→", True, (255, 255, 255))
+            self.screen.blit(left_arrow, (left_button.x + 10, left_button.y + 5))
+            self.screen.blit(right_arrow, (right_button.x + 10, right_button.y + 5))
+            control_y += control_spacing
+
+            # Save button
+            save_button = pygame.Rect(panel_x + 10, control_y, 90, 40)
+            pygame.draw.rect(self.screen, (0, 200, 0), save_button)
+            save_text = self.font.render("Save", True, (0, 0, 0))
+            self.screen.blit(save_text, (save_button.x + 20, save_button.y + 10))
+
+            # Store button rects for click detection
+            self._debug_controls = {
+                'left_button': left_button,
+                'right_button': right_button,
+                'save_button': save_button
+            }
+
+            # Draw instructions
+            instructions = [
+                "Click on person to assign name",
+                "Press 'Train' to learn face",
+                "Use arrows to rotate",
+                "Press 'Save' to keep rotation"
+            ]
+            
+            control_y += control_spacing
+            for instruction in instructions:
+                text = self.font.render(instruction, True, (200, 200, 200))
+                self.screen.blit(text, (panel_x + 10, control_y))
+                control_y += 30
 
             # Update display
             pygame.display.flip()
