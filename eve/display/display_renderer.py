@@ -3,9 +3,11 @@ Display rendering for the LCD display.
 """
 import pygame
 import logging
-from typing import Optional, Tuple, List
+import numpy as np
+from typing import Optional, Tuple, List, Dict, Any
 from dataclasses import dataclass
 from .display_state import DisplayState, DisplayMode
+from .ui_components import VideoPanel, ControlPanel
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,10 @@ class DisplayRenderer:
         self.state = state
         self.config = RenderConfig()
         self.font = pygame.font.Font(None, self.config.font_size)
+        
+        # Initialize UI components
+        self.video_panel = VideoPanel(screen, self.font, screen.get_width(), screen.get_height())
+        self.control_panel = ControlPanel(screen, self.font, self.video_panel)
         
     def clear_screen(self) -> None:
         """Clear the screen with the background color."""
@@ -112,6 +118,27 @@ class DisplayRenderer:
             self.draw_text(text, (position[0], y))
             y += self.config.line_height
             
+    def update_video_frame(self, frame: np.ndarray) -> None:
+        """Update the video frame."""
+        self.video_panel.update_frame(frame)
+        
+    def update_detections(self, detections: List[Dict]) -> None:
+        """Update object detections."""
+        self.video_panel.update_detections(detections)
+        
+    def handle_event(self, event: pygame.event.Event) -> bool:
+        """Handle pygame events."""
+        if self.state.mode == DisplayMode.DEBUG:
+            # Handle video panel events
+            if self.video_panel.handle_event(event):
+                return True
+                
+            # Handle control panel events
+            if self.control_panel.handle_event(event):
+                return True
+                
+        return False
+        
     def update(self) -> None:
         """Update the display based on the current state."""
         self.clear_screen()
@@ -120,7 +147,13 @@ class DisplayRenderer:
             # Draw normal display elements
             pass
         elif self.state.mode == DisplayMode.DEBUG:
-            # Draw debug information
+            # Draw video panel with detections
+            self.video_panel.draw()
+            
+            # Draw control panel
+            self.control_panel.draw()
+            
+            # Draw debug overlay
             self.draw_fps((self.config.margin, self.config.margin))
             self.draw_listening_indicator((self.screen.get_width() - self.config.margin,
                                          self.config.margin))

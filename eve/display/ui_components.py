@@ -48,11 +48,11 @@ class VideoPanel(UIComponent):
             elif self.rotation == 270:
                 frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
                 
-        # Calculate display area
-        video_width = int(self.width * 0.8)
+        # Calculate display area - use 70% of screen width for video
+        video_width = int(self.width * 0.7)
         video_height = int(video_width * frame.shape[0] / frame.shape[1])
-        video_x = (self.width - video_width) // 2
-        video_y = (self.height - video_height) // 2
+        video_x = 10  # Fixed margin from left
+        video_y = (self.height - video_height) // 2  # Center vertically
         
         # Resize and convert frame
         frame = cv2.resize(frame, (video_width, video_height))
@@ -91,7 +91,7 @@ class VideoPanel(UIComponent):
                 logger.warning(f"Invalid detection format: {detection}")
                 return
                 
-            # Scale coordinates
+            # Scale coordinates to video panel size
             x1 = int(x1 * self.rect.width / self.frame.get_width()) + self.rect.x
             y1 = int(y1 * self.rect.height / self.frame.get_height()) + self.rect.y
             x2 = int(x2 * self.rect.width / self.frame.get_width()) + self.rect.x
@@ -114,9 +114,13 @@ class VideoPanel(UIComponent):
             text_surface = self.font.render(text, True, (0, 255, 0))
             text_rect = text_surface.get_rect()
             
-            bg_rect = pygame.Rect(x1, y1 - 25, text_rect.width + 10, text_rect.height + 10)
+            # Position label above the box
+            label_x = x1
+            label_y = max(0, y1 - 25)  # Ensure label doesn't go off screen top
+            
+            bg_rect = pygame.Rect(label_x, label_y, text_rect.width + 10, text_rect.height + 10)
             pygame.draw.rect(self.screen, (0, 0, 0), bg_rect)
-            self.screen.blit(text_surface, (x1 + 5, y1 - 20))
+            self.screen.blit(text_surface, (label_x + 5, label_y + 5))
             
             # Draw train button for person detections
             if label.lower() == 'person' and not detection.get('name'):
@@ -141,10 +145,10 @@ class ControlPanel(UIComponent):
         if not self.video_panel.rect:
             return
             
-        # Calculate panel position
-        panel_width = self.screen.get_width() - self.video_panel.rect.width - self.video_panel.rect.x
+        # Calculate panel position - place to the right of video panel
         panel_x = self.video_panel.rect.x + self.video_panel.rect.width + 10
         panel_y = self.video_panel.rect.y
+        panel_width = self.screen.get_width() - panel_x - 10
         panel_height = self.video_panel.rect.height
         
         # Draw panel background
