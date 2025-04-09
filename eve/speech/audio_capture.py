@@ -61,26 +61,43 @@ class AudioCapture:
             return
 
         try:
-            # --- Explicitly attempt model download first --- 
+            # --- Check available models first ---
+            from openwakeword.utils import get_model_paths
+            available_models = get_model_paths()
+            logger.info(f"Available OpenWakeWord models: {available_models}")
+            
+            # Try to use a known working model
+            target_model = "hey_jarvis_v0.1"  # More likely to be available
+            if target_model not in available_models:
+                # Fall back to any available model
+                if available_models:
+                    target_model = list(available_models.keys())[0]
+                    logger.info(f"Using fallback model: {target_model}")
+                else:
+                    logger.warning("No OpenWakeWord models available, disabling wake word detection")
+                    self.oww_model = None
+                    return
+
+            # --- Attempt model download ---
             from openwakeword.utils import download_models
-            target_model = "hey_mycroft_v0.1" # Keep using this known model for now
-            logger.info(f"Explicitly attempting download/cache check for model: {target_model}")
+            logger.info(f"Attempting download/cache check for model: {target_model}")
             try:
                 download_models(model_names=[target_model])
                 logger.info(f"Download/cache check for {target_model} completed.")
             except Exception as dl_err:
-                logger.error(f"Error during explicit model download/cache check: {dl_err}", exc_info=True)
+                logger.error(f"Error during model download/cache check: {dl_err}", exc_info=True)
                 # Continue anyway, maybe the model exists despite the error
-            # -----------------------------------------------
 
+            # --- Initialize model ---
             logger.info(f"Initializing OpenWakeWord model ({target_model})...")
             self.oww_model = OpenWakeWordModel(
                 inference_framework='onnx',
-                wakeword_models=[target_model] # Load ONLY this model
+                wakeword_models=[target_model]
             )
             logger.info(f"OpenWakeWord model '{target_model}' initialized successfully.")
         except Exception as e:
             logger.error(f"Error initializing OpenWakeWord model: {e}", exc_info=True)
+            self.oww_model = None  # Ensure model is None on failure
 
     def _audio_callback(self, indata: np.ndarray, frames: int, time_info, status: sd.CallbackFlags):
         """Callback function for sounddevice InputStream."""
@@ -202,15 +219,35 @@ class AudioCapture:
                 logger.warning("Audio recording is already active.")
                 return
             if self.stream is not None:
-                 logger.warning("Stream object exists before start. Attempting cleanup.")
-                 self._close_stream_internal()
+                logger.warning("Stream object exists before start. Attempting cleanup.")
+                self._close_stream_internal()
+
             try:
+                # --- List available audio devices ---
+                devices = sd.query_devices()
+                logger.info("Available audio devices:")
+                for i, device in enumerate(devices):
+                    logger.info(f"Device {i}: {device['name']} (Input: {device['max_input_channels']} channels, Output: {device['max_output_channels']} channels)")
+
+                # --- Select appropriate device ---
+                if self.device_index is None:
+                    # Find first input device
+                    for i, device in enumerate(devices):
+                        if device['max_input_channels'] > 0:
+                            self.device_index = i
+                            logger.info(f"Using default input device: {device['name']}")
+                            break
+                    if self.device_index is None:
+                        raise RuntimeError("No input devices found")
+
+                # --- Start stream ---
                 logger.info("Starting audio stream...")
                 self._stop_event.clear()
                 self.is_recording = True
                 while not self.audio_queue.empty():
-                     try: self.audio_queue.get_nowait()
-                     except queue.Empty: break
+                    try: self.audio_queue.get_nowait()
+                    except queue.Empty: break
+
                 self.stream = sd.InputStream(
                     samplerate=self.sample_rate,
                     channels=self.channels,
