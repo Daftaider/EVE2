@@ -595,19 +595,22 @@ class LCDController:
                         self.last_click_pos = None
                     else:
                         # Handle single click for person name assignment
-                        if self.debug_mode == 'video' and hasattr(self, 'object_detector'):
-                            detections = self.object_detector.get_latest_detections()
-                            if detections:
-                                for detection in detections:
-                                    x1, y1, x2, y2 = detection['box']
-                                    if (x1 <= current_pos[0] <= x2 and 
-                                        y1 <= current_pos[1] <= y2 and 
-                                        detection['label'] == 'person'):
-                                        # Prompt for name
-                                        name = self._prompt_for_name()
-                                        if name:
-                                            detection['name'] = name
-                                            handled = True
+                        if self.debug_mode == 'video' and self.object_detector is not None:  # Add check for object_detector
+                            try:
+                                detections = self.object_detector.get_latest_detections()
+                                if detections:
+                                    for detection in detections:
+                                        x1, y1, x2, y2 = detection['box']
+                                        if (x1 <= current_pos[0] <= x2 and 
+                                            y1 <= current_pos[1] <= y2 and 
+                                            detection['label'] == 'person'):
+                                            # Prompt for name
+                                            name = self._prompt_for_name()
+                                            if name:
+                                                detection['name'] = name
+                                                handled = True
+                            except Exception as e:
+                                self.logger.error(f"Error getting detections: {e}", exc_info=True)
                         # Update last click time and position
                         self.last_click_time = current_time
                         self.last_click_pos = current_pos
