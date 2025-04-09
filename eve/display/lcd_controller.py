@@ -1170,29 +1170,17 @@ class LCDController:
             self.logger.error(traceback.format_exc())
 
     def _update_video_debug(self):
-        """Update the display with video debug information."""
+        """Update the video debug display with camera feed and object detection."""
         try:
-            if not self.camera:
+            if self.camera is None:
                 logger.warning("No camera available for video debug")
                 return
 
-            # Get the latest frame based on camera type
-            if isinstance(self.camera, RPiAICamera):
-                frame = self.camera.get_latest_frame()
-            else:
-                _, frame = self.camera.get_frame()
-
+            # Get latest frame from camera
+            frame = self.camera.get_latest_frame()
             if frame is None:
-                logger.warning("No frame available for video debug")
+                logger.warning("No frame available from camera")
                 return
-
-            # Convert frame to RGB if needed
-            if len(frame.shape) == 3 and frame.shape[2] == 3:
-                if frame.dtype == np.uint8:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                else:
-                    frame = (frame * 255).astype(np.uint8)
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
             # Apply rotation if needed
             if self.rotation != 0:
@@ -1211,6 +1199,11 @@ class LCDController:
 
             # Resize frame to fit display area
             frame = cv2.resize(frame, (video_width, video_height))
+
+            # Convert BGR to RGB for Pygame
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame = np.rot90(frame)
+            frame = np.flipud(frame)
 
             # Convert to Pygame surface
             frame_surface = pygame.surfarray.make_surface(frame)
@@ -1248,15 +1241,24 @@ class LCDController:
                             if 'class' in detection:
                                 label = detection['class']
                             
-                            # Draw box
-                            pygame.draw.rect(self.screen, (0, 255, 0), (x1, y1, x2-x1, y2-y1), 2)
+                            # Draw box with thicker line
+                            pygame.draw.rect(self.screen, (0, 255, 0), (x1, y1, x2-x1, y2-y1), 3)
                             
-                            # Draw label and confidence
+                            # Draw label and confidence with background for better visibility
                             text = f"{label}: {confidence:.2f}"
                             if 'name' in detection:
                                 text = f"{detection['name']} ({text})"
+                            
+                            # Create text surface
                             text_surface = self.font.render(text, True, (0, 255, 0))
-                            self.screen.blit(text_surface, (x1, y1 - 20))
+                            text_rect = text_surface.get_rect()
+                            
+                            # Draw background rectangle for text
+                            bg_rect = pygame.Rect(x1, y1 - 25, text_rect.width + 10, text_rect.height + 10)
+                            pygame.draw.rect(self.screen, (0, 0, 0), bg_rect)
+                            
+                            # Draw text
+                            self.screen.blit(text_surface, (x1 + 5, y1 - 20))
 
                             # Draw training button for person detections
                             if label.lower() == 'person' and not detection.get('name'):
