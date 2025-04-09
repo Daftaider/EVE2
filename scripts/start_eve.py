@@ -167,14 +167,10 @@ class EVEApplication:
                     camera = RPiAICamera(self.config)
                 elif self.config.hardware.camera_type == 'picamera':
                     logger.info("Initializing legacy Picamera...")
-                    # camera = Camera(self.config) # Assuming old Camera class handles picamera
-                    logger.warning("Legacy picamera type selected, but Camera class might need update for Picamera2 compatibility if not already done.")
-                    # Fallback to RPiAICamera for now if legacy isn't updated?
-                    # Or use OpenCV for generic Pi cam access?
-                    camera = Camera(self.config) # Keep using old Camera class for now
+                    camera = Camera(self.config)
                 elif self.config.hardware.camera_type == 'opencv':
                     logger.info("Initializing OpenCV Camera...")
-                    camera = Camera(self.config) # Assuming old Camera class handles opencv
+                    camera = Camera(self.config)
                 else:
                     logger.warning(f"Unsupported camera_type: {self.config.hardware.camera_type}")
                 
@@ -196,117 +192,48 @@ class EVEApplication:
                  
                  if self.config.vision.object_detection_enabled:
                      object_detector = ObjectDetector(config=self.config)
-                     # Add start() if object_detector needs it later
+                     if object_detector and not object_detector.start(): object_detector = None # Start and check
                  
                  if self.config.vision.emotion_detection_enabled:
-                     emotion_analyzer = EmotionAnalyzer(self.config)
-            elif camera and self.config.hardware.camera_type == 'rpi_ai':
-                 logger.info("RPi AI Camera selected. Skipping initialization of host-based detectors (Face, Object, Emotion).")
-            # -----------------------------------------
+                     emotion_analyzer = EmotionAnalyzer(config=self.config)
+                     if emotion_analyzer and not emotion_analyzer.start(): emotion_analyzer = None # Start and check
 
-            # --- RE-ENABLE VisionDisplay --- 
-            from eve.display.lcd_controller import LCDController
-            if self.display_controller and not self.display_controller.start(): self.display_controller = None # Start and check
-            # -----------------------------
+            # Set up camera and object detector for display controller
+            if self.display_controller:
+                if camera:
+                    self.display_controller.set_camera(camera)
+                if object_detector:
+                    self.display_controller.set_object_detector(object_detector)
 
-            # --- Audio Subsystems --- 
-            audio_capture = AudioCapture(self.config.speech) if self.config.hardware.audio_input_enabled else None
-            speech_recognizer = None # Initialize as None
-            if audio_capture:
-                audio_capture.start_recording() # Start stream
-                if self.config.speech.recognition_enabled:
-                    logger.info("Initializing SpeechRecognizer...")
-                    try:
-                        # Create recognizer, passing the audio queue
-                        speech_recognizer = SpeechRecognizer(self.config.speech, audio_capture.audio_queue)
-                        logger.info("SpeechRecognizer initialized.")
-                    except Exception as e:
-                        logger.error(f"Failed SpeechRecognizer init: {e}", exc_info=True)
-                        speech_recognizer = None # Ensure it's None on error
-                else:
-                    logger.info("Speech Recognition disabled by config.")
-                    speech_recognizer = None
-            else:
-                 logger.warning("AudioCapture not available. Speech Recognition disabled.")
-                 speech_recognizer = None
-
-            tts = TextToSpeech(self.config.speech) if self.config.speech.tts_enabled else None
-            if tts and not tts.start(): tts = None # Start and check
-
-            llm_processor = LLMProcessor(self.config.speech) if self.config.speech.llm_enabled else None
-
-            # 5. Create and Run Orchestrator
-            logger.info("Creating EVE Orchestrator...")
-            with EVEOrchestrator(
-                config=self.config, camera=camera, face_detector=face_detector,
-                object_detector=object_detector, emotion_analyzer=emotion_analyzer,
-                audio_capture=audio_capture, speech_recognizer=speech_recognizer,
-                llm_processor=llm_processor, tts=tts, display_controller=self.display_controller
-            ) as self.orchestrator:
-                logger.info("Starting Orchestrator...")
-                
-                # Set the command callback AFTER orchestrator is created
-                if speech_recognizer and hasattr(self.orchestrator, '_handle_command'):
-                    logger.debug("Setting SpeechRecognizer command callback to Orchestrator._handle_command")
-                    speech_recognizer.set_command_callback(self.orchestrator._handle_command)
-                
-                self.orchestrator.start()
-
-                # 6. Run Main Loop (Pygame events or wait)
-                logger.info("EVE application running. Press Ctrl+C to exit.")
-                if self.display_controller and pygame_initialized:
-                    try:
-                        self._pygame_event_loop()
-                    except Exception as e:
-                        logger.error(f"Error in Pygame event loop: {str(e)}")
-                        logger.error(traceback.format_exc())
-                        # Fall back to basic update loop
-                        logger.info("Falling back to basic update loop due to Pygame error...")
-                        while self._running:
-                            if self.orchestrator:
-                                self.orchestrator.update()
-                            time.sleep(0.1)
-                else:
-                    # Fallback: Call update() periodically if no display/pygame
-                    logger.info("No display or Pygame, running basic update loop...")
-                    while self._running:
-                        if self.orchestrator:
-                            self.orchestrator.update() # Call orchestrator update
-                        # Sleep for a short interval (e.g., 100ms)
-                        # Avoid sleeping too long, otherwise audio queue might fill
-                        time.sleep(0.1)
-
-        except SystemExit as se:
-             logger.info(f"SystemExit caught with code: {se.code}")
-             exit_code = se.code
-        except KeyboardInterrupt:
-             logger.info("KeyboardInterrupt caught in run method.")
-             self._signal_handler(signal.SIGINT, None)
-             exit_code = 0 # Treat as graceful shutdown request
+            # 5. Initialize Orchestrator
+            self.orchestrator = EVEOrchestrator(
+                config=self.config,
+                camera=camera,
+                face_detector=face_detector,
+                object_detector=object_detector,
+                emotion_analyzer=emotion_analyzer,
+                display_controller=self.display_controller
+            )
+            
+            # 6. Start Orchestrator
+            if not self.orchestrator.start():
+                logger.critical("Failed to start orchestrator. Exiting.")
+                sys.exit(1)
+            
+            # 7. Main Event Loop
+            self._pygame_event_loop()
+            
         except Exception as e:
-            logger.critical(f"Fatal error during EVE initialization or runtime: {e}", exc_info=True)
+            logger.critical(f"Unhandled exception in run(): {e}", exc_info=True)
             exit_code = 1
-            # Attempt orchestrator stop even on fatal error before finally block
-            if self.orchestrator and hasattr(self.orchestrator, 'stop'):
-                 try: self.orchestrator.stop()
-                 except Exception as stop_err:
-                      logger.error(f"Error during orchestrator cleanup attempt after fatal error: {stop_err}")
         finally:
-            logger.info(f"--- EVE Application Run Method Reached Finally Block (Exit Code Hint: {exit_code}) ---")
-            # Orchestrator stop is handled by 'with' statement's __exit__
-            # Pygame quit should happen here if initialized
-            if pygame_initialized: # This should now be true if display enabled
-                logger.info("Attempting Pygame quit...")
-                try:
-                     pygame.quit()
-                     logger.info("Pygame quit successful.")
-                except Exception as e:
-                     logger.error(f"Error during pygame quit: {e}")
-            else:
-                 logger.info("Pygame was not initialized (or disabled for test), skipping quit.")
-
-            logger.info("--- EVE Main Application Shutdown Complete --- Returning from run() ---")
-            # Return exit code to main()
+            # 8. Cleanup
+            if self.orchestrator:
+                self.orchestrator.stop()
+            if self.display_controller:
+                self.display_controller.cleanup()
+            pygame.quit()
+            logger.info("Application shutdown complete")
             return exit_code
 
     def _pygame_event_loop(self):

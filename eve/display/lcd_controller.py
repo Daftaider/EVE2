@@ -132,6 +132,10 @@ class LCDController:
             # Start blink thread
             self._start_blink_thread()
             
+            # Initialize camera and object detector references
+            self.camera = None
+            self.object_detector = None
+            
             self.logger.info("LCD Controller initialized successfully")
             
         except Exception as e:
@@ -1040,6 +1044,11 @@ class LCDController:
         try:
             while self.running and not self._blink_stop_event.is_set():
                 try:
+                    # Skip blinking if in debug mode
+                    if self.debug_mode is not None:
+                        time.sleep(0.1)  # Small sleep to prevent CPU hogging
+                        continue
+                        
                     # Signal main thread to perform blink
                     self._blink_queue.put(('blink', None))
                     # Wait for next blink
@@ -1123,7 +1132,7 @@ class LCDController:
             self.screen.fill(self.background_color)
             
             # Get the latest frame from the camera
-            if hasattr(self, 'camera') and self.camera:
+            if self.camera:
                 frame = self.camera.get_frame()
                 if frame is not None:
                     # Convert frame to pygame surface
@@ -1134,9 +1143,17 @@ class LCDController:
                     # Scale frame to fit screen
                     frame = pygame.transform.scale(frame, (self.width, self.height))
                     self.screen.blit(frame, (0, 0))
+                else:
+                    # Draw error message if no frame available
+                    error_text = self.font.render("No video feed available", True, (255, 0, 0))
+                    self.screen.blit(error_text, (10, 10))
+            else:
+                # Draw error message if no camera available
+                error_text = self.font.render("Camera not initialized", True, (255, 0, 0))
+                self.screen.blit(error_text, (10, 10))
             
             # Draw object detection boxes if available
-            if hasattr(self, 'object_detector') and self.object_detector:
+            if self.object_detector:
                 detections = self.object_detector.get_latest_detections()
                 if detections:
                     for detection in detections:
@@ -1154,6 +1171,10 @@ class LCDController:
                             text = f"{detection['name']} ({text})"
                         text_surface = self.font.render(text, True, (0, 255, 0))
                         self.screen.blit(text_surface, (x1, y1 - 20))
+            else:
+                # Draw error message if no object detector available
+                error_text = self.font.render("Object detector not initialized", True, (255, 0, 0))
+                self.screen.blit(error_text, (10, 40))
             
             # Draw debug info overlay
             self._draw_debug_overlay()
@@ -1280,4 +1301,14 @@ class LCDController:
         except Exception as e:
             self.logger.error(f"Error in name prompt: {str(e)}")
             self.logger.error(traceback.format_exc())
-            return None 
+            return None
+
+    def set_camera(self, camera):
+        """Set the camera reference for video debug mode."""
+        self.camera = camera
+        self.logger.info("Camera reference set for video debug mode")
+
+    def set_object_detector(self, detector):
+        """Set the object detector reference for video debug mode."""
+        self.object_detector = detector
+        self.logger.info("Object detector reference set for video debug mode") 
