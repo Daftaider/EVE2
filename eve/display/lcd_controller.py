@@ -690,10 +690,10 @@ class LCDController:
             # Handle different display modes
             if self.debug_mode == 'video':
                 # Draw video debug info
-                self._draw_video_debug()
+                self._update_video_debug()
             elif self.debug_mode == 'audio':
                 # Draw audio debug info
-                self._draw_audio_debug()
+                self._update_audio_debug()
             else:
                 # Normal display mode
                 if self.current_emotion in self.emotion_images:
