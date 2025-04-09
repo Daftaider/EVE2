@@ -633,11 +633,11 @@ class LCDController:
             
             elif event.type == pygame.KEYDOWN:
                 # Handle camera rotation
-                if event.key == pygame.K_r:  # Rotate right
+                if event.key == pygame.K_RIGHT:  # Rotate right
                     self.rotation = (self.rotation + 90) % 360
                     logger.info(f"Camera rotated to {self.rotation}°")
                     return True
-                elif event.key == pygame.K_l:  # Rotate left
+                elif event.key == pygame.K_LEFT:  # Rotate left
                     self.rotation = (self.rotation - 90) % 360
                     logger.info(f"Camera rotated to {self.rotation}°")
                     return True
@@ -652,56 +652,6 @@ class LCDController:
                 elif event.key == pygame.K_s and event.mod & pygame.KMOD_CTRL:
                     self.debug_mode = None
                     return True
-            
-            return False
-            
-            # Handle key events
-            if event.type == pygame.KEYDOWN:
-                # Log key event
-                key_name = pygame.key.name(event.key)
-                mod_keys = []
-                if event.mod & pygame.KMOD_CTRL: mod_keys.append('CTRL')
-                if event.mod & pygame.KMOD_SHIFT: mod_keys.append('SHIFT')
-                if event.mod & pygame.KMOD_ALT: mod_keys.append('ALT')
-                mod_str = '+'.join(mod_keys) if mod_keys else 'NO_MOD'
-                self.logger.debug(f"Key event: {key_name}, Modifiers: {mod_str}")
-                
-                # Handle CTRL+C
-                if event.key == pygame.K_c and event.mod & pygame.KMOD_CTRL:
-                    self.running = False
-                    return True
-                
-                # Handle CTRL+S
-                if event.key == pygame.K_s and event.mod & pygame.KMOD_CTRL:
-                    self.debug_mode = not self.debug_mode
-                    self.logger.info(f"Debug mode {'enabled' if self.debug_mode else 'disabled'}")
-                    return True
-                
-                # Handle ESC
-                if event.key == pygame.K_ESCAPE:
-                    self.running = False
-                    return True
-            
-            # Handle mouse events
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                # Log mouse event
-                self.logger.debug(f"Mouse button {event.button} clicked at {event.pos}")
-                
-                # Handle double-click
-                current_time = time.time()
-                if (self.last_click_time and 
-                    current_time - self.last_click_time < self.double_click_threshold and
-                    self.last_click_pos and
-                    abs(event.pos[0] - self.last_click_pos[0]) < 10 and
-                    abs(event.pos[1] - self.last_click_pos[1]) < 10):
-                    self.logger.info("Double-click detected")
-                    # Handle double-click action here
-                    self.last_click_time = 0  # Reset click tracking
-                    return True
-                
-                # Update click tracking
-                self.last_click_time = current_time
-                self.last_click_pos = event.pos
             
             return False
             
@@ -1177,6 +1127,15 @@ class LCDController:
                     frame = (frame * 255).astype(np.uint8)
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
+            # Apply rotation if needed
+            if self.rotation != 0:
+                if self.rotation == 90:
+                    frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+                elif self.rotation == 180:
+                    frame = cv2.rotate(frame, cv2.ROTATE_180)
+                elif self.rotation == 270:
+                    frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
             # Resize frame to match display size
             frame = cv2.resize(frame, (self.width, self.height))
 
@@ -1186,6 +1145,41 @@ class LCDController:
             # Clear screen and draw frame
             self.screen.fill((0, 0, 0))
             self.screen.blit(frame_surface, (0, 0))
+
+            # Draw object detection boxes if available
+            if self.object_detector is not None:
+                try:
+                    detections = self.object_detector.get_latest_detections()
+                    if detections:
+                        for detection in detections:
+                            # Get box coordinates
+                            x1, y1, x2, y2 = detection['box']
+                            confidence = detection['confidence']
+                            label = detection['label']
+                            
+                            # Draw box
+                            pygame.draw.rect(self.screen, (0, 255, 0), (x1, y1, x2-x1, y2-y1), 2)
+                            
+                            # Draw label and confidence
+                            text = f"{label}: {confidence:.2f}"
+                            if 'name' in detection:
+                                text = f"{detection['name']} ({text})"
+                            text_surface = self.font.render(text, True, (0, 255, 0))
+                            self.screen.blit(text_surface, (x1, y1 - 20))
+                except Exception as e:
+                    logger.error(f"Error drawing detections: {e}", exc_info=True)
+
+            # Draw rotation arrows
+            arrow_size = 30
+            arrow_color = (255, 255, 255)
+            
+            # Left arrow
+            left_points = [(10, self.height//2), (30, self.height//2 - 15), (30, self.height//2 + 15)]
+            pygame.draw.polygon(self.screen, arrow_color, left_points)
+            
+            # Right arrow
+            right_points = [(self.width - 10, self.height//2), (self.width - 30, self.height//2 - 15), (self.width - 30, self.height//2 + 15)]
+            pygame.draw.polygon(self.screen, arrow_color, right_points)
 
             # Draw debug info overlay
             self._draw_debug_overlay()
@@ -1203,15 +1197,22 @@ class LCDController:
         fps_surface = self.font.render(fps_text, True, (255, 255, 255))
         self.screen.blit(fps_surface, (10, 10))
         
+        # Draw camera rotation info
+        rotation_text = f"Rotation: {self.rotation}°"
+        rotation_surface = self.font.render(rotation_text, True, (255, 255, 255))
+        self.screen.blit(rotation_surface, (10, 40))
+        
         # Draw instructions
         instructions = [
             "ESC: Exit debug mode",
             "Double-click: Toggle debug menu",
             "Click on person: Assign name",
-            "CTRL+S: Toggle debug mode"
+            "CTRL+S: Toggle debug mode",
+            "←/→: Rotate camera",
+            "S: Save rotation"
         ]
         
-        y = 40
+        y = 70
         for instruction in instructions:
             text_surface = self.font.render(instruction, True, (255, 255, 255))
             self.screen.blit(text_surface, (10, y))
