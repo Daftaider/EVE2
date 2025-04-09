@@ -627,10 +627,33 @@ class LCDController:
             bool: True if the event was handled and should stop propagation
         """
         try:
-            # Handle quit event
             if event.type == pygame.QUIT:
                 self.running = False
                 return True
+            
+            elif event.type == pygame.KEYDOWN:
+                # Handle camera rotation
+                if event.key == pygame.K_r:  # Rotate right
+                    self.rotation = (self.rotation + 90) % 360
+                    logger.info(f"Camera rotated to {self.rotation}°")
+                    return True
+                elif event.key == pygame.K_l:  # Rotate left
+                    self.rotation = (self.rotation - 90) % 360
+                    logger.info(f"Camera rotated to {self.rotation}°")
+                    return True
+                elif event.key == pygame.K_s and not (event.mod & pygame.KMOD_CTRL):  # Save rotation
+                    self._save_rotation()
+                    return True
+                
+                # Handle other key events
+                if event.key == pygame.K_ESCAPE:
+                    self.debug_mode = None
+                    return True
+                elif event.key == pygame.K_s and event.mod & pygame.KMOD_CTRL:
+                    self.debug_mode = None
+                    return True
+            
+            return False
             
             # Handle key events
             if event.type == pygame.KEYDOWN:
