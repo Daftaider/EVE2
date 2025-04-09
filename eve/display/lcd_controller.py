@@ -673,7 +673,7 @@ class LCDController:
         """
         try:
             # Process any pending events
-            self._process_events()
+            handled = self._process_events()
             
             # Check for blink requests from blink thread
             try:
@@ -730,6 +730,10 @@ class LCDController:
             
             # Cap frame rate
             self.clock.tick(self.fps)
+            
+            # Force display update if events were handled
+            if handled:
+                pygame.display.flip()
             
         except Exception as e:
             self.logger.error(f"Error updating display: {str(e)}")
