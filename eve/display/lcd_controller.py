@@ -589,6 +589,20 @@ class LCDController:
                         self.last_click_time = None
                         self.last_click_pos = None
                     else:
+                        # Handle single click for person name assignment
+                        if self.debug_mode == 'video' and hasattr(self, 'object_detector'):
+                            detections = self.object_detector.get_latest_detections()
+                            if detections:
+                                for detection in detections:
+                                    x1, y1, x2, y2 = detection['box']
+                                    if (x1 <= current_pos[0] <= x2 and 
+                                        y1 <= current_pos[1] <= y2 and 
+                                        detection['label'] == 'person'):
+                                        # Prompt for name
+                                        name = self._prompt_for_name()
+                                        if name:
+                                            detection['name'] = name
+                                            handled = True
                         # Update last click time and position
                         self.last_click_time = current_time
                         self.last_click_pos = current_pos
@@ -1103,47 +1117,74 @@ class LCDController:
             self.logger.error(traceback.format_exc())
 
     def _update_video_debug(self):
-        """Update the video debug display."""
+        """Update the video debug display with live feed and object detection."""
         try:
             # Clear screen
             self.screen.fill(self.background_color)
             
-            # Draw title
-            title = self.font.render("Video Debug Mode", True, (255, 255, 255))
-            title_rect = title.get_rect(center=(self.width // 2, 30))
-            self.screen.blit(title, title_rect)
+            # Get the latest frame from the camera
+            if hasattr(self, 'camera') and self.camera:
+                frame = self.camera.get_frame()
+                if frame is not None:
+                    # Convert frame to pygame surface
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    frame = np.rot90(frame)
+                    frame = pygame.surfarray.make_surface(frame)
+                    
+                    # Scale frame to fit screen
+                    frame = pygame.transform.scale(frame, (self.width, self.height))
+                    self.screen.blit(frame, (0, 0))
             
-            # Draw instructions
-            instructions = [
-                "Press ESC to exit debug mode",
-                "Click on objects to submit corrections",
-                "Double-click to toggle debug menu"
-            ]
+            # Draw object detection boxes if available
+            if hasattr(self, 'object_detector') and self.object_detector:
+                detections = self.object_detector.get_latest_detections()
+                if detections:
+                    for detection in detections:
+                        # Get box coordinates
+                        x1, y1, x2, y2 = detection['box']
+                        confidence = detection['confidence']
+                        label = detection['label']
+                        
+                        # Draw box
+                        pygame.draw.rect(self.screen, (0, 255, 0), (x1, y1, x2-x1, y2-y1), 2)
+                        
+                        # Draw label and confidence
+                        text = f"{label}: {confidence:.2f}"
+                        if 'name' in detection:
+                            text = f"{detection['name']} ({text})"
+                        text_surface = self.font.render(text, True, (0, 255, 0))
+                        self.screen.blit(text_surface, (x1, y1 - 20))
             
-            y = 60
-            for instruction in instructions:
-                text = self.font.render(instruction, True, (200, 200, 200))
-                text_rect = text.get_rect(center=(self.width // 2, y))
-                self.screen.blit(text, text_rect)
-                y += 30
-            
-            # Draw current emotion
-            emotion_text = self.font.render(f"Current Emotion: {self.current_emotion}", True, (255, 255, 255))
-            emotion_rect = emotion_text.get_rect(center=(self.width // 2, y + 30))
-            self.screen.blit(emotion_text, emotion_rect)
-            
-            # Draw FPS
-            fps_text = self.font.render(f"FPS: {int(self.clock.get_fps())}", True, (255, 255, 255))
-            fps_rect = fps_text.get_rect(center=(self.width // 2, y + 60))
-            self.screen.blit(fps_text, fps_rect)
+            # Draw debug info overlay
+            self._draw_debug_overlay()
             
             # Update display
-            if not self.headless_mode:
-                pygame.display.flip()
-                
+            pygame.display.flip()
+            
         except Exception as e:
             self.logger.error(f"Error updating video debug: {str(e)}")
             self.logger.error(traceback.format_exc())
+
+    def _draw_debug_overlay(self):
+        """Draw debug information overlay."""
+        # Draw FPS counter
+        fps_text = f"FPS: {self.current_fps}"
+        fps_surface = self.font.render(fps_text, True, (255, 255, 255))
+        self.screen.blit(fps_surface, (10, 10))
+        
+        # Draw instructions
+        instructions = [
+            "ESC: Exit debug mode",
+            "Double-click: Toggle debug menu",
+            "Click on person: Assign name",
+            "CTRL+S: Toggle debug mode"
+        ]
+        
+        y = 40
+        for instruction in instructions:
+            text_surface = self.font.render(instruction, True, (255, 255, 255))
+            self.screen.blit(text_surface, (10, y))
+            y += 20
 
     def _update_audio_debug(self):
         """Update the audio debug display."""
@@ -1195,4 +1236,48 @@ class LCDController:
 
     def _blink_stop_event(self):
         """Stop the blink animation."""
-        self._blink_stop_event.set() 
+        self._blink_stop_event.set()
+
+    def _prompt_for_name(self):
+        """Show a prompt for entering a person's name."""
+        try:
+            # Create input box
+            input_box = pygame.Rect(self.width//2 - 100, self.height//2 - 15, 200, 30)
+            color_inactive = pygame.Color('lightskyblue3')
+            color_active = pygame.Color('dodgerblue2')
+            color = color_inactive
+            active = False
+            text = ''
+            done = False
+            
+            while not done and self.running:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        return None
+                    if event.type == pygame.MOUSEBUTTONDOWN:
+                        active = input_box.collidepoint(event.pos)
+                        color = color_active if active else color_inactive
+                    if event.type == pygame.KEYDOWN:
+                        if active:
+                            if event.key == pygame.K_RETURN:
+                                done = True
+                            elif event.key == pygame.K_BACKSPACE:
+                                text = text[:-1]
+                            else:
+                                text += event.unicode
+                
+                # Draw input box
+                self.screen.fill(self.background_color)
+                txt_surface = self.font.render("Enter name:", True, (255, 255, 255))
+                self.screen.blit(txt_surface, (input_box.x, input_box.y - 30))
+                pygame.draw.rect(self.screen, color, input_box, 2)
+                txt_surface = self.font.render(text, True, (255, 255, 255))
+                self.screen.blit(txt_surface, (input_box.x + 5, input_box.y + 5))
+                pygame.display.flip()
+            
+            return text if text else None
+            
+        except Exception as e:
+            self.logger.error(f"Error in name prompt: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            return None 
