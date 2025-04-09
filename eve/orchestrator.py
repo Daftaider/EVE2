@@ -19,6 +19,7 @@ import os
 import json
 import sounddevice as sd
 from enum import Enum # Import Enum
+import traceback
 
 # --- Corrected Config Import --- 
 # Import the main SystemConfig and potentially needed nested types directly
@@ -554,56 +555,71 @@ class EVEOrchestrator:
 
     # --- Start / Stop / Cleanup --- 
     def start(self):
-        # ... (Ensure correct indentation below)
+        """Start the EVE Orchestrator and all its subsystems."""
         if self._running:
             self.logger.warning("Orchestrator already running.")
-            return
+            return True
 
         self.logger.info("Starting EVE Orchestrator...")
         self._running = True
 
-        # Start Camera (Assumes camera object has start method if needed)
-        if self.camera and hasattr(self.camera, 'start'):
-             if not self.camera.start():
-                  self.logger.error("Failed to start Camera subsystem! Vision may not work.")
+        try:
+            # Start Camera (Assumes camera object has start method if needed)
+            if self.camera and hasattr(self.camera, 'start'):
+                if not self.camera.start():
+                    self.logger.error("Failed to start Camera subsystem! Vision may not work.")
+                    return False
 
-        # Start Face Detector Thread
-        if self.face_detector and hasattr(self.face_detector, 'start'):
-             if not self.face_detector.start():
-                  self.logger.error("Failed to start FaceDetector thread!")
+            # Start Face Detector Thread
+            if self.face_detector and hasattr(self.face_detector, 'start'):
+                if not self.face_detector.start():
+                    self.logger.error("Failed to start FaceDetector thread!")
+                    return False
 
-        # Start Object Detector Thread (if it runs threaded)
-        if self.object_detector and hasattr(self.object_detector, 'start'):
-             if not self.object_detector.start():
-                  self.logger.error("Failed to start ObjectDetector thread!")
+            # Start Object Detector Thread (if it runs threaded)
+            if self.object_detector and hasattr(self.object_detector, 'start'):
+                if not self.object_detector.start():
+                    self.logger.error("Failed to start ObjectDetector thread!")
+                    return False
 
-        # Start Audio Capture and Processing Thread
-        if self.audio_capture:
-             # Start recognizer thread if it runs separately
-             if self.speech_recognizer and hasattr(self.speech_recognizer, 'start'):
-                  self.logger.debug("Starting Speech Recognizer thread (if applicable)...")
-                  self.speech_recognizer.start()
-        elif not self.config.hardware.audio_input_enabled:
-             self.logger.info("Audio input is explicitly disabled in config.")
-        else:
-             self.logger.warning("AudioCapture not available or not started externally. Audio input disabled.")
+            # Start Audio Capture and Processing Thread
+            if self.audio_capture:
+                # Start recognizer thread if it runs separately
+                if self.speech_recognizer and hasattr(self.speech_recognizer, 'start'):
+                    self.logger.debug("Starting Speech Recognizer thread (if applicable)...")
+                    if not self.speech_recognizer.start():
+                        self.logger.error("Failed to start Speech Recognizer!")
+                        return False
+            elif not self.config.hardware.audio_input_enabled:
+                self.logger.info("Audio input is explicitly disabled in config.")
+            else:
+                self.logger.warning("AudioCapture not available or not started externally. Audio input disabled.")
 
-        # Start Display Controller/Thread (if applicable)
-        if self.display_controller and hasattr(self.display_controller, 'start'):
-            self.display_controller.start()
+            # Start Display Controller/Thread (if applicable)
+            if self.display_controller and hasattr(self.display_controller, 'start'):
+                if not self.display_controller.start():
+                    self.logger.error("Failed to start Display Controller!")
+                    return False
 
-        # Start the internal event processing loop
-        if not self._event_thread or not self._event_thread.is_alive():
-            self._event_thread = threading.Thread(target=self._process_event_queue_loop, daemon=True)
-            self._event_thread.start()
-            self.logger.info("Orchestrator event processing thread started.")
+            # Start the internal event processing loop
+            if not self._event_thread or not self._event_thread.is_alive():
+                self._event_thread = threading.Thread(target=self._process_event_queue_loop, daemon=True)
+                self._event_thread.start()
+                self.logger.info("Orchestrator event processing thread started.")
 
-        self.logger.info("EVE Orchestrator started.")
-        # Play startup sound after starting TTS subsystem if needed
-        if self.tts and hasattr(self.tts, 'play_startup_sound'):
-             self.tts.play_startup_sound()
-        elif self.tts and hasattr(self.tts, 'speak_sync'): # Fallback
-             self.tts.speak_sync("System initialized.")
+            self.logger.info("EVE Orchestrator started successfully.")
+            # Play startup sound after starting TTS subsystem if needed
+            if self.tts and hasattr(self.tts, 'play_startup_sound'):
+                self.tts.play_startup_sound()
+            elif self.tts and hasattr(self.tts, 'speak_sync'): # Fallback
+                self.tts.speak_sync("System initialized.")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error starting orchestrator: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            self._running = False
+            return False
 
     def stop(self):
         # ... (Refactored implementation using injected subsystems) ...
