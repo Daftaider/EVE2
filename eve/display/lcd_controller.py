@@ -618,14 +618,7 @@ class LCDController:
         return handled
 
     def handle_event(self, event):
-        """Handle a Pygame event.
-        
-        Args:
-            event: The Pygame event to handle
-            
-        Returns:
-            bool: True if the event was handled and should stop propagation
-        """
+        """Handle a Pygame event."""
         try:
             if event.type == pygame.QUIT:
                 self.running = False
@@ -656,8 +649,7 @@ class LCDController:
             return False
             
         except Exception as e:
-            self.logger.error(f"Error handling event: {str(e)}")
-            self.logger.error(traceback.format_exc())
+            logger.error(f"Error handling event: {e}", exc_info=True)
             return False
 
     def update(self, display_state=None):
@@ -1156,6 +1148,12 @@ class LCDController:
                             x1, y1, x2, y2 = detection['box']
                             confidence = detection['confidence']
                             label = detection['label']
+                            
+                            # Scale coordinates to match display size
+                            x1 = int(x1 * self.width / frame.shape[1])
+                            y1 = int(y1 * self.height / frame.shape[0])
+                            x2 = int(x2 * self.width / frame.shape[1])
+                            y2 = int(y2 * self.height / frame.shape[0])
                             
                             # Draw box
                             pygame.draw.rect(self.screen, (0, 255, 0), (x1, y1, x2-x1, y2-y1), 2)
