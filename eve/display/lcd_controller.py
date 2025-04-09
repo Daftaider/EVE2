@@ -123,6 +123,9 @@ class LCDController:
             # Initialize pygame and display
             self._init_display()
             
+            # Initialize font
+            self.font = pygame.font.Font(None, self.debug_font_size)
+            
             # Set up signal handler for CTRL+C
             signal.signal(signal.SIGINT, self._signal_handler)
             
@@ -153,7 +156,7 @@ class LCDController:
                     return True
         
         return False
-    
+
     def _init_display(self):
         """Initialize the display with current settings."""
         try:
@@ -244,7 +247,7 @@ class LCDController:
             self.logger.error(traceback.format_exc())
             self._init_fallback_mode()
             return False
-    
+
     def _init_fallback_mode(self):
         """Initialize a fallback mode for headless operation."""
         self.logger.info("Initializing display in fallback mode")
@@ -253,7 +256,7 @@ class LCDController:
         self.clock = pygame.time.Clock()
         self._load_emotion_images()
         self.headless_mode = True
-    
+
     def _load_emotion_images(self):
         """Load all emotion images into memory."""
         self.emotion_images = {}
@@ -294,7 +297,7 @@ class LCDController:
                 surface = pygame.Surface((self.width, self.height))
                 surface.fill(self._get_fallback_color(emotion))
                 self.emotion_images[emotion] = surface
-    
+
     def _create_default_emotion_images(self):
         """Create default emotion images if they don't exist."""
         # Define basic shapes for each emotion
@@ -734,78 +737,83 @@ class LCDController:
 
     def _show_debug_mode_menu(self):
         """Show the debug mode selection menu."""
-        self.screen.fill(self.background_color)
-        
-        # Draw menu title
-        title = self.font.render("Debug Mode Selection", True, (255, 255, 255))
-        title_rect = title.get_rect(center=(self.width // 2, self.height // 3))
-        self.screen.blit(title, title_rect)
-        
-        # Draw options
-        video_option = self.font.render("1. Video Debug (Object Detection)", True, (255, 255, 255))
-        audio_option = self.font.render("2. Audio Debug (Voice Detection)", True, (255, 255, 255))
-        exit_option = self.font.render("3. Exit Menu", True, (255, 255, 255))
-        
-        video_rect = video_option.get_rect(center=(self.width // 2, self.height // 2))
-        audio_rect = audio_option.get_rect(center=(self.width // 2, self.height // 2 + 40))
-        exit_rect = exit_option.get_rect(center=(self.width // 2, self.height // 2 + 80))
-        
-        self.screen.blit(video_option, video_rect)
-        self.screen.blit(audio_option, audio_rect)
-        self.screen.blit(exit_option, exit_rect)
-        
-        # Update display
-        if not self.headless_mode:
-            pygame.display.flip()
-        
-        # Wait for selection
-        waiting = True
-        while waiting and self.running:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.running = False
-                    waiting = False
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_1:
-                        self.debug_mode = 'video'
-                        self.logger.info("Selected Video Debug Mode")
-                        waiting = False
-                    elif event.key == pygame.K_2:
-                        self.debug_mode = 'audio'
-                        self.logger.info("Selected Audio Debug Mode")
-                        waiting = False
-                    elif event.key == pygame.K_3 or event.key == pygame.K_ESCAPE:
-                        self.debug_mode = None
-                        self.logger.info("Exiting Debug Menu")
-                        waiting = False
-                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    # Check if click is within the video option area
-                    if video_rect.collidepoint(event.pos):
-                        self.debug_mode = 'video'
-                        self.logger.info("Selected Video Debug Mode")
-                        waiting = False
-                    # Check if click is within the audio option area
-                    elif audio_rect.collidepoint(event.pos):
-                        self.debug_mode = 'audio'
-                        self.logger.info("Selected Audio Debug Mode")
-                        waiting = False
-                    # Check if click is within the exit option area
-                    elif exit_rect.collidepoint(event.pos):
-                        self.debug_mode = None
-                        self.logger.info("Exiting Debug Menu")
-                        waiting = False
+        try:
+            self.screen.fill(self.background_color)
             
-            # Small sleep to prevent CPU hogging
-            time.sleep(0.01)
-        
-        # Update the display based on the selected debug mode
-        if self.debug_mode == 'video':
-            self._update_video_debug()
-        elif self.debug_mode == 'audio':
-            self._update_audio_debug()
-        else:
-            # Return to normal display
-            self.update()
+            # Draw menu title
+            title = self.font.render("Debug Mode Selection", True, (255, 255, 255))
+            title_rect = title.get_rect(center=(self.width // 2, self.height // 3))
+            self.screen.blit(title, title_rect)
+            
+            # Draw options
+            video_option = self.font.render("1. Video Debug (Object Detection)", True, (255, 255, 255))
+            audio_option = self.font.render("2. Audio Debug (Voice Detection)", True, (255, 255, 255))
+            exit_option = self.font.render("3. Exit Menu", True, (255, 255, 255))
+            
+            video_rect = video_option.get_rect(center=(self.width // 2, self.height // 2))
+            audio_rect = audio_option.get_rect(center=(self.width // 2, self.height // 2 + 40))
+            exit_rect = exit_option.get_rect(center=(self.width // 2, self.height // 2 + 80))
+            
+            self.screen.blit(video_option, video_rect)
+            self.screen.blit(audio_option, audio_rect)
+            self.screen.blit(exit_option, exit_rect)
+            
+            # Update display
+            if not self.headless_mode:
+                pygame.display.flip()
+            
+            # Wait for selection
+            waiting = True
+            while waiting and self.running:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        self.running = False
+                        waiting = False
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_1:
+                            self.debug_mode = 'video'
+                            self.logger.info("Selected Video Debug Mode")
+                            waiting = False
+                        elif event.key == pygame.K_2:
+                            self.debug_mode = 'audio'
+                            self.logger.info("Selected Audio Debug Mode")
+                            waiting = False
+                        elif event.key == pygame.K_3 or event.key == pygame.K_ESCAPE:
+                            self.debug_mode = None
+                            self.logger.info("Exiting Debug Menu")
+                            waiting = False
+                    elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                        # Check if click is within the video option area
+                        if video_rect.collidepoint(event.pos):
+                            self.debug_mode = 'video'
+                            self.logger.info("Selected Video Debug Mode")
+                            waiting = False
+                        # Check if click is within the audio option area
+                        elif audio_rect.collidepoint(event.pos):
+                            self.debug_mode = 'audio'
+                            self.logger.info("Selected Audio Debug Mode")
+                            waiting = False
+                        # Check if click is within the exit option area
+                        elif exit_rect.collidepoint(event.pos):
+                            self.debug_mode = None
+                            self.logger.info("Exiting Debug Menu")
+                            waiting = False
+                
+                # Small sleep to prevent CPU hogging
+                time.sleep(0.01)
+            
+            # Update the display based on the selected debug mode
+            if self.debug_mode == 'video':
+                self._update_video_debug()
+            elif self.debug_mode == 'audio':
+                self._update_audio_debug()
+            else:
+                # Return to normal display
+                self.update()
+                
+        except Exception as e:
+            self.logger.error(f"Error showing debug mode menu: {str(e)}")
+            self.logger.error(traceback.format_exc())
 
     def _draw_debug_menu(self, display_state=None):
         """Draw the debug menu on the screen.
@@ -1068,7 +1076,7 @@ class LCDController:
                 # Draw debug info if enabled
                 if self.debug_mode:
                     self._draw_debug_info()
-                    
+            
         except Exception as e:
             self.logger.error(f"Error drawing emotion: {str(e)}")
             self.logger.error(traceback.format_exc())
