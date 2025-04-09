@@ -337,14 +337,25 @@ class EVEApplication:
                     
                     # Pass event to LCD controller if available
                     if self.display_controller:
-                        if self.display_controller.handle_event(event):
-                            # Event was handled by LCD controller
-                            continue
+                        try:
+                            # Process event in LCD controller
+                            self.display_controller._process_events()
+                        except Exception as e:
+                            self.logger.error(f"Error processing event in LCD controller: {str(e)}")
+                            self.logger.error(traceback.format_exc())
                     
                     # Handle quit event
                     if event.type == pygame.QUIT:
                         self._running = False
                         break
+                
+                # Update display controller
+                if self.display_controller:
+                    try:
+                        self.display_controller.update()
+                    except Exception as e:
+                        self.logger.error(f"Error updating display controller: {str(e)}")
+                        self.logger.error(traceback.format_exc())
                 
                 # Update orchestrator
                 if self.orchestrator:
