@@ -1144,10 +1144,20 @@ class LCDController:
                     detections = self.object_detector.get_latest_detections()
                     if detections:
                         for detection in detections:
-                            # Get box coordinates
-                            x1, y1, x2, y2 = detection['box']
-                            confidence = detection['confidence']
-                            label = detection['label']
+                            # Get box coordinates - handle both 'box' and 'bbox' formats
+                            if 'box' in detection:
+                                x1, y1, x2, y2 = detection['box']
+                            elif 'bbox' in detection:
+                                x1, y1, x2, y2 = detection['bbox']
+                            else:
+                                logger.warning(f"Invalid detection format: {detection}")
+                                continue
+                                
+                            # Get label and confidence - handle different field names
+                            confidence = detection.get('confidence', 0.0)
+                            label = detection.get('label', 'unknown')
+                            if 'class' in detection:
+                                label = detection['class']
                             
                             # Scale coordinates to match display size
                             x1 = int(x1 * self.width / frame.shape[1])
