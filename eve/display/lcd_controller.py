@@ -127,6 +127,22 @@ class LCDController:
             # Initialize font
             self.font = pygame.font.Font(None, self.debug_font_size)
             
+            # Initialize display state and renderer
+            from .display_state import DisplayState, DisplayMode
+            from .display_renderer import DisplayRenderer
+            
+            self.display_state = DisplayState(
+                mode=DisplayMode.NORMAL,
+                rotation=self.rotation,
+                hardware_display=self.use_hardware_display,
+                eye_color=self.eye_color,
+                background_color=self.background_color,
+                fps=self.current_fps,
+                listening=False
+            )
+            
+            self.display_renderer = DisplayRenderer(self.screen, self.display_state)
+            
             # Set up signal handler for CTRL+C
             signal.signal(signal.SIGINT, self._signal_handler)
             
@@ -1182,163 +1198,23 @@ class LCDController:
                 logger.warning("No frame available from camera")
                 return
 
-            # Apply rotation if needed
-            if self.rotation != 0:
-                if self.rotation == 90:
-                    frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-                elif self.rotation == 180:
-                    frame = cv2.rotate(frame, cv2.ROTATE_180)
-                elif self.rotation == 270:
-                    frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            # Update video frame in display renderer
+            self.display_renderer.update_video_frame(frame)
 
-            # Calculate video display area (centered, 80% of screen width)
-            video_width = int(self.width * 0.8)
-            video_height = int(video_width * frame.shape[0] / frame.shape[1])
-            video_x = (self.width - video_width) // 2
-            video_y = (self.height - video_height) // 2
-
-            # Resize frame to fit display area
-            frame = cv2.resize(frame, (video_width, video_height))
-
-            # Convert BGR to RGB for Pygame
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame = np.rot90(frame)
-            frame = np.flipud(frame)
-
-            # Convert to Pygame surface
-            frame_surface = pygame.surfarray.make_surface(frame)
-
-            # Clear screen
-            self.screen.fill((0, 0, 0))
-
-            # Draw video frame
-            self.screen.blit(frame_surface, (video_x, video_y))
-
-            # Draw object detection boxes if available
+            # Update detections if available
             if self.object_detector is not None:
                 try:
                     detections = self.object_detector.get_latest_detections()
                     if detections:
-                        for detection in detections:
-                            # Get box coordinates - handle both 'box' and 'bbox' formats
-                            if 'box' in detection:
-                                x1, y1, x2, y2 = detection['box']
-                            elif 'bbox' in detection:
-                                x1, y1, x2, y2 = detection['bbox']
-                            else:
-                                logger.warning(f"Invalid detection format: {detection}")
-                                continue
-                            
-                            # Scale coordinates to match video display area
-                            x1 = int(x1 * video_width / frame.shape[1]) + video_x
-                            y1 = int(y1 * video_height / frame.shape[0]) + video_y
-                            x2 = int(x2 * video_width / frame.shape[1]) + video_x
-                            y2 = int(y2 * video_height / frame.shape[0]) + video_y
-                            
-                            # Get label and confidence
-                            confidence = detection.get('confidence', 0.0)
-                            label = detection.get('label', 'unknown')
-                            if 'class' in detection:
-                                label = detection['class']
-                            
-                            # Draw box with thicker line
-                            pygame.draw.rect(self.screen, (0, 255, 0), (x1, y1, x2-x1, y2-y1), 3)
-                            
-                            # Draw label and confidence with background for better visibility
-                            text = f"{label}: {confidence:.2f}"
-                            if 'name' in detection:
-                                text = f"{detection['name']} ({text})"
-                            
-                            # Create text surface
-                            text_surface = self.font.render(text, True, (0, 255, 0))
-                            text_rect = text_surface.get_rect()
-                            
-                            # Draw background rectangle for text
-                            bg_rect = pygame.Rect(x1, y1 - 25, text_rect.width + 10, text_rect.height + 10)
-                            pygame.draw.rect(self.screen, (0, 0, 0), bg_rect)
-                            
-                            # Draw text
-                            self.screen.blit(text_surface, (x1 + 5, y1 - 20))
-
-                            # Draw training button for person detections
-                            if label.lower() == 'person' and not detection.get('name'):
-                                train_button = pygame.Rect(x2 + 5, y1, 80, 30)
-                                pygame.draw.rect(self.screen, (255, 165, 0), train_button)
-                                train_text = self.font.render("Train", True, (0, 0, 0))
-                                self.screen.blit(train_text, (train_button.x + 10, train_button.y + 5))
-                                # Store button rect for click detection
-                                detection['train_button'] = train_button
+                        self.display_renderer.update_detections(detections)
                 except Exception as e:
-                    logger.error(f"Error drawing detections: {e}", exc_info=True)
-
-            # Draw rotation controls panel on the right
-            panel_width = self.width - video_width - video_x
-            panel_x = video_x + video_width + 10
-            panel_y = video_y
-            panel_height = video_height
-
-            # Draw panel background
-            pygame.draw.rect(self.screen, (40, 40, 40), (panel_x, panel_y, panel_width, panel_height))
-
-            # Draw rotation controls
-            control_y = panel_y + 20
-            control_spacing = 50
-
-            # Title
-            title = self.font.render("Camera Controls", True, (255, 255, 255))
-            self.screen.blit(title, (panel_x + 10, control_y))
-            control_y += control_spacing
-
-            # Current rotation
-            rotation_text = self.font.render(f"Rotation: {self.rotation}°", True, (255, 255, 255))
-            self.screen.blit(rotation_text, (panel_x + 10, control_y))
-            control_y += control_spacing
-
-            # Rotation buttons
-            left_button = pygame.Rect(panel_x + 10, control_y, 40, 40)
-            right_button = pygame.Rect(panel_x + 60, control_y, 40, 40)
-            pygame.draw.rect(self.screen, (100, 100, 100), left_button)
-            pygame.draw.rect(self.screen, (100, 100, 100), right_button)
-            
-            # Draw arrow symbols
-            left_arrow = self.font.render("←", True, (255, 255, 255))
-            right_arrow = self.font.render("→", True, (255, 255, 255))
-            self.screen.blit(left_arrow, (left_button.x + 10, left_button.y + 5))
-            self.screen.blit(right_arrow, (right_button.x + 10, right_button.y + 5))
-            control_y += control_spacing
-
-            # Save button
-            save_button = pygame.Rect(panel_x + 10, control_y, 90, 40)
-            pygame.draw.rect(self.screen, (0, 200, 0), save_button)
-            save_text = self.font.render("Save", True, (0, 0, 0))
-            self.screen.blit(save_text, (save_button.x + 20, save_button.y + 10))
-
-            # Store button rects for click detection
-            self._debug_controls = {
-                'left_button': left_button,
-                'right_button': right_button,
-                'save_button': save_button
-            }
-
-            # Draw instructions
-            instructions = [
-                "Click on person to assign name",
-                "Press 'Train' to learn face",
-                "Use arrows to rotate",
-                "Press 'Save' to keep rotation"
-            ]
-            
-            control_y += control_spacing
-            for instruction in instructions:
-                text = self.font.render(instruction, True, (200, 200, 200))
-                self.screen.blit(text, (panel_x + 10, control_y))
-                control_y += 30
+                    logger.error(f"Error updating detections: {e}", exc_info=True)
 
             # Update display
-            pygame.display.flip()
+            self.display_renderer.update()
 
         except Exception as e:
-            logger.error(f"Error updating video debug: {e}", exc_info=True)
+            logger.error(f"Error in video debug update: {e}", exc_info=True)
 
     def _draw_debug_overlay(self):
         """Draw debug information overlay."""
