@@ -1,102 +1,88 @@
 # ✅ Project EVE – To-Do List
 
-## 🖥️ Hardware Setup
-- [x] Assemble Raspberry Pi 5 (8GB)
-- [x] Install Raspberry Pi AI Kit (M.2 HAT+ with Hailo-8L)
-- [x] Connect and test Raspberry Pi AI Camera (IMX500)
-- [x] Mount and connect LCD display (for eyes)
-- [x] Set up speaker and microphone
-- [ ] Optional: Network setup for additional Raspberry Pi nodes
-
----
-
 ## 💾 System & Environment Setup
-- [x] Install 64-bit Raspberry Pi OS (Bookworm recommended)
-- [x] Enable camera and hardware acceleration (via raspi-config)
-- [x] Install Python 3.11+ and venv
-- [x] Create and activate Python virtual environment
-- [x] Install required dependencies:
-  - [x] `opencv-python`, `pillow`, `pygame`, `deepface`, `dlib`
-  - [x] `piper-tts` or `coqui-tts`
-  - [x] `llama-cpp-python`, `gpt4all`
-  - [x] `zeromq` or `paho-mqtt`
-  - [x] `sqlite3`
+- [ ] Install required dependencies:
+  - [ ] `opencv-python`, `pillow`, `pygame`, `deepface`, `dlib`
+  - [ ] `piper-tts` or `coqui-tts`
+  - [ ] `llama-cpp-python`, `gpt4all`
+  - [ ] `zeromq` or `paho-mqtt`
+  - [ ] `sqlite3`
 
 ---
 
 ## 🧠 Core Modules Development
 ### 🔍 Face Recognition
-- [x] Create `face_service.py`
-  - [x] Use IMX500 camera + Hailo-8L for real-time detection
-  - [x] Store and match embeddings
+- [ ] Create `face_service.py`
+  - [ ] Use IMX500 camera + Hailo-8L for real-time detection
+  - [ ] Store and match embeddings
   - [ ] Implement user enrolment mode
 
 ### 😊 Emotion Detection
-- [x] Create `emotion_service.py`
-  - [x] Integrate ONNX or DeepFace emotion model
-  - [x] Run inference on Hailo-8L
-  - [x] Link to face ID where known
+- [ ] Create `emotion_service.py`
+  - [ ] Integrate ONNX or DeepFace emotion model
+  - [ ] Run inference on Hailo-8L
+  - [ ] Link to face ID where known
 
 ### 👁️ Eye Display
-- [x] Create `eye_display.py`
-  - [x] Animate emotions on LCD
-  - [x] Design 5–6 eye sprite sets (happy, sad, neutral, angry, surprise, sleepy)
-  - [x] Implement smooth transitions (blinks, idle animations)
-  - [x] Add hardware display support with proper rotation
-  - [x] Implement proper cleanup on shutdown
-  - [x] Add display-specific configuration options
+- [ ] Create `eye_display.py`
+  - [ ] Animate emotions on LCD
+  - [ ] Design 5–6 eye sprite sets (happy, sad, neutral, angry, surprise, sleepy)
+  - [ ] Implement smooth transitions (blinks, idle animations)
+  - [ ] Add hardware display support with proper rotation
+  - [ ] Implement proper cleanup on shutdown
+  - [ ] Add display-specific configuration options
 
 ### 🔊 Voice Synthesis
-- [x] Create `voice_synth.py`
-  - [x] Integrate `piper` or `coqui-tts`
-  - [x] Add support for multiple emotional tones (if possible)
-  - [x] Play responses via speaker
+- [ ] Create `voice_synth.py`
+  - [ ] Integrate `piper` or `coqui-tts`
+  - [ ] Add support for multiple emotional tones (if possible)
+  - [ ] Play responses via speaker
 
 ### 💬 Language Model (LLM)
-- [x] Create `llm_response.py`
-  - [x] Load quantised model (e.g., TinyLlama, Mistral-7B)
-  - [x] Process prompt and return response
-  - [x] Use emotion + user as context inputs
+- [ ] Create `llm_response.py`
+  - [ ] Load quantised model (e.g., TinyLlama, Mistral-7B)
+  - [ ] Process prompt and return response
+  - [ ] Use emotion + user as context inputs
 
 ### 🧠 Interaction Logic
-- [x] Create `interaction_manager.py`
-  - [x] Handle decision-making flow
-  - [x] Pass emotion to eye display and voice engine
-  - [x] Track user sessions and log data
+- [ ] Create `interaction_manager.py`
+  - [ ] Handle decision-making flow
+  - [ ] Pass emotion to eye display and voice engine
+  - [ ] Track user sessions and log data
 
 ---
 
 ## 🧱 Infrastructure
-- [x] Create communication layer (ZeroMQ or MQTT)
-- [x] Build configuration system (YAML/JSON)
-- [x] Add SQLite DB for face embeddings + logs
-- [x] Setup module launcher (`main.py`)
+- [ ] Create communication layer (ZeroMQ or MQTT)
+- [ ] Build configuration system (YAML/JSON)
+- [ ] Add SQLite DB for face embeddings + logs
+- [ ] Setup module launcher (`main.py`)
 
 ---
 
 ## 🧪 Testing & Debugging
-- [x] Test camera stream & face detection
-- [x] Test emotion classification with test images
-- [x] Test TTS output quality and latency
-- [x] Test LLM interaction latency on-device
-- [x] Test eye display frame rate + emotion sync
+- [ ] Test camera stream & face detection
+- [ ] Test emotion classification with test images
+- [ ] Test TTS output quality and latency
+- [ ] Test LLM interaction latency on-device
+- [ ] Test eye display frame rate + emotion sync
 - [ ] Perform end-to-end dry run with known face
 
 ---
 
 ## 🚀 Final Touches
-- [x] Add logging for interactions and diagnostics
+- [ ] Add logging for interactions and diagnostics
 - [ ] Optional: Build a lightweight web dashboard
-- [x] Write a simple CLI config tool
-- [x] Document setup and user enrolment flow
+- [ ] Write a simple CLI config tool
+- [ ] Document setup and user enrolment flow
 - [ ] Record demo interaction videos
 
 ---
 
 ## 🔄 Stretch Goals
-- [x] Add wake word detection (e.g., Porcupine)
-- [x] Implement local voice command recognition
+- [ ] Add wake word detection (e.g., Porcupine)
+- [ ] Implement local voice command recognition
 - [ ] Enable OTA model updates (via USB or LAN)
-- [x] Add "sleep mode" (auto-dim LCD, power saving)
+- [ ] Add "sleep mode" (auto-dim LCD, power saving)
 - [ ] Integrate mobile app or web config panel
 

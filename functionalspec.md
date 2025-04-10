@@ -9,7 +9,7 @@ A locally intelligent, emotionally expressive, people-aware assistant inspired b
 | Component                            | Purpose                                                           |
 |-------------------------------------|-------------------------------------------------------------------|
 | **Raspberry Pi 5 (8GB)**            | Primary processing unit                                           |
-| **Raspberry Pi AI Kit**             | Includes M.2 HAT+ and Hailo-8L AI Accelerator (13 TOPS)           |
+| **Raspberry Pi AI Kit**             | Includes M.2 HAT+ and Hailo-8L AI Accelerator (26 TOPS)           |
 | **Raspberry Pi AI Camera (IMX500)** | Captures images and performs local CV tasks (face, expression)   |
 | **LCD Display (SPI or HDMI)**       | Animated digital eyes for emotional expression                   |
 | **Speaker & Microphone**            | Audio output/input for voice synthesis and optional voice input  |
@@ -23,9 +23,10 @@ Project EVE is a standalone or distributed assistant that:
 - Recognises and remembers users
 - Detects facial expressions and adjusts emotional responses
 - Displays expressive, animated eyes on an LCD
-- Speaks naturally using TTS
+- Speaks naturally using TTS or multimodal LLM
+- Understands human speech and responds is comversational
 - Interacts using a lightweight local LLM
-
+- Debug UI for video stream correction, audio correction and user facial training
 ---
 
 ## ⚙️ Software Components
@@ -43,11 +44,10 @@ Project EVE is a standalone or distributed assistant that:
 
 ### 2. 🧍 Facial Recognition & Learning
 **Function**: Identify known users; learn new ones.
-
 - **Camera**: AI Camera (IMX500) for real-time facial detection
-- **Inference**: Hailo-8L runs a facial recognition model (e.g., FaceNet)
+- **Inference**: Hailo-8L runs a facial recognition model using MobileNetSSD
 - **Storage**: `SQLite` DB or flat embeddings per user
-- **Learning Mode**: Via GPIO, CLI, or voice command
+- **Learning Mode**: Via UI or voice command
 
 ---
 
@@ -67,7 +67,7 @@ Project EVE is a standalone or distributed assistant that:
 - **Engine Options**: `piper` (lightweight) or `coqui-tts` (high-quality)
 - **Voice**: Female, soft UK English
 - **Tone Awareness**: Use emotion context for empathetic phrasing
-- **Audio Output**: 3.5mm jack, USB DAC, or HDMI audio
+- **Audio Output**: waveshare audio hat
 
 ---
 
@@ -160,7 +160,7 @@ coqui-tts or piper-tts
 llama-cpp-python or gpt4all
 zeromq or paho-mqtt
 sqlite3
-RPi.GPIO (optional)
+
 
 🛠 Stretch Goals
  Wake-word detection (Porcupine/Snowboy)

@@ -1,0 +1,54 @@
+# EVE2 Configuration
+
+# Display Settings
+display:
+  width: 800
+  height: 480
+  fps: 30
+  rotation: 0  # 0, 90, 180, or 270 degrees
+
+# Camera Settings
+camera:
+  device_index: 0
+  resolution:
+    width: 800
+    height: 480
+  fps: 30
+
+# Face Recognition Settings
+face_recognition:
+  model_path: models/face/face_detection_model
+  confidence_threshold: 0.6
+  database_path: data/faces.db
+
+# Emotion Detection Settings
+emotion_detection:
+  model_path: models/emotion/emotion_model
+  emotions:
+    - neutral
+    - happy
+    - sad
+    - angry
+    - surprised
+    - sleepy
+
+# Voice Settings
+voice:
+  engine: piper  # or coqui-tts
+  model_path: models/voice/en_GB-northern_english_male-medium.onnx
+  sample_rate: 22050
+  speaker_id: 0
+
+# Language Model Settings
+llm:
+  model_path: models/llm/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+  context_window: 2048
+  max_tokens: 512
+  temperature: 0.7
+
+# Logging Settings
+logging:
+  level: INFO
+  file: logs/eve.log
+  max_size: 10485760  # 10MB
+  backup_count: 5 
