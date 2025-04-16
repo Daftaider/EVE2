@@ -6,6 +6,7 @@ import queue
 import threading
 import time
 import os
+import platform
 from typing import Optional, Dict, Any
 
 import pyttsx3
@@ -26,14 +27,15 @@ class VoiceSynth:
         self.input_queue = queue.Queue()
         self.thread = None
         
-        # Set ALSA configuration
-        os.environ['ALSA_CARD'] = '0'  # Use first available card
-        os.environ['ALSA_PCM_CARD'] = '0'
-        os.environ['ALSA_PCM_DEVICE'] = '0'
-        
-        # Try to use PulseAudio if available
-        if os.path.exists('/usr/bin/pulseaudio'):
-            os.environ['PULSE_SERVER'] = 'unix:/run/user/1000/pulse/native'
+        # Platform-specific audio configuration
+        if platform.system() == 'Windows':
+            # Windows-specific settings
+            os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'  # Hide pygame welcome message
+        else:
+            # Linux/Unix settings
+            os.environ['ALSA_CARD'] = 'Generic'
+            os.environ['ALSA_PCM_CARD'] = '0'
+            os.environ['ALSA_PCM_DEVICE'] = '0'
             
     def start(self) -> bool:
         """Start the voice synthesis service."""
@@ -44,7 +46,17 @@ class VoiceSynth:
             # Set voice properties
             voices = self.engine.getProperty('voices')
             if voices:
-                self.engine.setProperty('voice', voices[0].id)  # Use first available voice
+                # Try to find a female voice on Windows
+                if platform.system() == 'Windows':
+                    for voice in voices:
+                        if 'female' in voice.name.lower():
+                            self.engine.setProperty('voice', voice.id)
+                            break
+                    else:
+                        self.engine.setProperty('voice', voices[0].id)
+                else:
+                    self.engine.setProperty('voice', voices[0].id)
+                    
             self.engine.setProperty('rate', 150)  # Speed of speech
             self.engine.setProperty('volume', 0.9)  # Volume (0.0 to 1.0)
             
@@ -68,10 +80,17 @@ class VoiceSynth:
                     # Try to use the first available microphone
                     device_index = None
                     for idx, name in enumerate(mic_list):
-                        if 'default' in name.lower() or 'pulse' in name.lower():
-                            device_index = idx
-                            break
-                            
+                        if platform.system() == 'Windows':
+                            # On Windows, prefer the default microphone
+                            if 'default' in name.lower():
+                                device_index = idx
+                                break
+                        else:
+                            # On Linux/Unix, try to find a working microphone
+                            if 'pulse' in name.lower() or 'default' in name.lower():
+                                device_index = idx
+                                break
+                                
                     if device_index is None and mic_list:
                         device_index = 0  # Use first microphone if no default found
                         
