@@ -6,21 +6,30 @@ import cv2
 import numpy as np
 import sqlite3
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Literal
 import yaml
+import hailo_platform as hpf
 
 logger = logging.getLogger(__name__)
 
 class FaceService:
-    """Face recognition service for detecting and recognizing faces."""
+    """Face recognition service for detecting and recognizing faces, with support for user enrolment and multiple inference backends."""
     
-    def __init__(self, config_path: str = "config/settings.yaml"):
-        """Initialize face recognition service."""
+    def __init__(self, config_path: str = "config/settings.yaml", backend: Literal["cpu", "hailo"] = "cpu"):
+        """
+        Initialize face recognition service.
+        Args:
+            config_path: Path to YAML config
+            backend: 'cpu' (OpenCV) or 'hailo' (Hailo-8L, not yet implemented)
+        """
         self.config = self._load_config(config_path)
+        self.backend = backend
         self.face_cascade = None
         self.face_recognizer = None
         self.db_conn = None
         self.known_faces: Dict[str, np.ndarray] = {}
+        logger.info(f"FaceService initialized with backend: {backend}")
+        # TODO: Add Hailo-8L backend support
         
     def _load_config(self, config_path: str) -> dict:
         """Load configuration from YAML file."""
@@ -34,26 +43,57 @@ class FaceService:
     def start(self) -> bool:
         """Start the face recognition service."""
         try:
-            # Initialize face detection
             self.face_cascade = cv2.CascadeClassifier(
                 cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
             )
-            
-            # Initialize face recognition
-            self.face_recognizer = cv2.face.LBPHFaceRecognizer_create()
-            
-            # Initialize database
+            self.hailo_ready = False
+            self.hailo_context = None
+            self.hailo_input_shape = None
+            self.hailo_output_shape = None
+            self.hailo_input_name = None
+            self.hailo_output_name = None
+            self.hailo_infer_pipeline = None
+            self.hailo_vdevice = None
+            self.hailo_network_group = None
+            self.hailo_network_group_params = None
+            if self.backend == "hailo":
+                try:
+                    hef_path = self.config.get('face_recognition', {}).get('hef_path', 'src/models/face/model.hef')
+                    self.hailo_hef = hpf.HEF(hef_path)
+                    self.hailo_vdevice = hpf.VDevice()
+                    configure_params = hpf.ConfigureParams.create_from_hef(self.hailo_hef, interface=hpf.HailoStreamInterface.PCIe)
+                    self.hailo_network_group = self.hailo_vdevice.configure(self.hailo_hef, configure_params)[0]
+                    self.hailo_network_group_params = self.hailo_network_group.create_params()
+                    input_vstream_info = self.hailo_hef.get_input_vstream_infos()[0]
+                    output_vstream_info = self.hailo_hef.get_output_vstream_infos()[0]
+                    self.hailo_input_name = input_vstream_info.name
+                    self.hailo_output_name = output_vstream_info.name
+                    self.hailo_input_shape = input_vstream_info.shape
+                    self.hailo_output_shape = output_vstream_info.shape
+                    input_vstreams_params = hpf.InputVStreamParams.make_from_network_group(self.hailo_network_group, quantized=False, format_type=hpf.FormatType.FLOAT32)
+                    output_vstreams_params = hpf.OutputVStreamParams.make_from_network_group(self.hailo_network_group, quantized=False, format_type=hpf.FormatType.FLOAT32)
+                    self.hailo_infer_pipeline = hpf.InferVStreams(self.hailo_network_group, input_vstreams_params, output_vstreams_params)
+                    self.hailo_ready = True
+                    logger.info(f"Hailo-8L initialized: input shape {self.hailo_input_shape}, output shape {self.hailo_output_shape}")
+                except Exception as e:
+                    logger.error(f"Failed to initialize Hailo-8L: {e}")
+                    self.hailo_ready = False
+            if self.backend == "cpu":
+                self.face_recognizer = cv2.face.LBPHFaceRecognizer_create()
+            elif self.backend == "hailo" and not self.hailo_ready:
+                logger.warning("Hailo-8L backend not ready. Falling back to CPU.")
+                self.face_recognizer = cv2.face.LBPHFaceRecognizer_create()
+            elif self.backend == "hailo" and self.hailo_ready:
+                self.face_recognizer = None  # Not used
+            else:
+                raise ValueError(f"Unknown backend: {self.backend}")
             db_path = self.config.get('face_recognition', {}).get('database_path', 'data/faces.db')
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
             self.db_conn = sqlite3.connect(db_path)
             self._init_database()
-            
-            # Load known faces
             self._load_known_faces()
-            
             logger.info("Face recognition service started successfully")
             return True
-            
         except Exception as e:
             logger.error(f"Error starting face recognition service: {e}")
             return False
@@ -77,12 +117,11 @@ class FaceService:
         for name, embedding_blob in cursor.fetchall():
             embedding = np.frombuffer(embedding_blob, dtype=np.float32)
             self.known_faces[name] = embedding
-            
+        
     def detect_faces(self, frame: np.ndarray) -> List[Tuple[int, int, int, int]]:
         """Detect faces in the frame."""
         if self.face_cascade is None:
             return []
-            
         try:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             faces = self.face_cascade.detectMultiScale(
@@ -92,54 +131,94 @@ class FaceService:
                 minSize=(30, 30)
             )
             return faces.tolist()
-            
         except Exception as e:
             logger.error(f"Error detecting faces: {e}")
             return []
-            
-    def recognize_face(self, face_roi: np.ndarray) -> Optional[str]:
-        """Recognize a face from the region of interest."""
-        if self.face_recognizer is None:
-            return None
-            
-        try:
+        
+    def extract_embedding(self, face_roi: np.ndarray) -> np.ndarray:
+        """
+        Extract a face embedding from the ROI using the selected backend.
+        Args:
+            face_roi: Face region of interest (BGR image)
+        Returns:
+            Embedding as a 1D np.ndarray (float32)
+        """
+        if self.backend == "cpu":
             gray = cv2.cvtColor(face_roi, cv2.COLOR_BGR2GRAY)
-            label, confidence = self.face_recognizer.predict(gray)
-            
-            if confidence < self.config.get('face_recognition', {}).get('confidence_threshold', 0.6):
-                return list(self.known_faces.keys())[label]
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error recognizing face: {e}")
-            return None
-            
-    def add_face(self, name: str, face_roi: np.ndarray) -> bool:
-        """Add a new face to the database."""
-        try:
+            return gray.flatten().astype(np.float32)
+        elif self.backend == "hailo" and self.hailo_ready:
+            try:
+                # Preprocess face_roi to match Hailo input shape
+                resized = cv2.resize(face_roi, (self.hailo_input_shape[2], self.hailo_input_shape[1]))
+                input_data = np.expand_dims(resized.astype(np.float32), axis=0)
+                input_dict = {self.hailo_input_name: input_data}
+                with self.hailo_network_group.activate(self.hailo_network_group_params):
+                    with self.hailo_infer_pipeline as infer_pipeline:
+                        results = infer_pipeline.infer(input_dict)
+                        output_data = results[self.hailo_output_name]
+                        embedding = output_data.flatten().astype(np.float32)
+                        return embedding
+            except Exception as e:
+                logger.error(f"Hailo-8L inference failed: {e}")
+                # Fallback to dummy embedding
+                gray = cv2.cvtColor(face_roi, cv2.COLOR_BGR2GRAY)
+                return gray.flatten().astype(np.float32)
+        elif self.backend == "hailo":
+            logger.warning("Hailo-8L backend not ready. Returning dummy embedding.")
             gray = cv2.cvtColor(face_roi, cv2.COLOR_BGR2GRAY)
-            
-            # Add to recognizer
-            self.face_recognizer.update([gray], [len(self.known_faces)])
-            
-            # Add to database
+            return gray.flatten().astype(np.float32)
+        else:
+            raise ValueError(f"Unknown backend: {self.backend}")
+
+    def enrol_user(self, name: str, face_roi: np.ndarray) -> bool:
+        """
+        Enrol a new user by capturing their face embedding and storing it in the database.
+        Args:
+            name: User's name
+            face_roi: Face region of interest (BGR image)
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            embedding = self.extract_embedding(face_roi)
             cursor = self.db_conn.cursor()
             cursor.execute(
                 'INSERT INTO faces (name, embedding) VALUES (?, ?)',
-                (name, gray.tobytes())
+                (name, embedding.tobytes())
             )
             self.db_conn.commit()
-            
-            # Add to known faces
-            self.known_faces[name] = gray
-            
-            logger.info(f"Added new face: {name}")
+            self.known_faces[name] = embedding
+            logger.info(f"Enrolled new user: {name}")
             return True
-            
         except Exception as e:
-            logger.error(f"Error adding face: {e}")
+            logger.error(f"Error enrolling user: {e}")
             return False
-            
+
+    def recognize_face(self, face_roi: np.ndarray) -> Optional[str]:
+        """
+        Recognize a face from the region of interest by comparing embeddings.
+        Args:
+            face_roi: Face region of interest (BGR image)
+        Returns:
+            Name of recognized user, or None if not recognized
+        """
+        try:
+            embedding = self.extract_embedding(face_roi)
+            min_dist = float('inf')
+            best_match = None
+            for name, known_emb in self.known_faces.items():
+                dist = np.linalg.norm(embedding - known_emb)
+                if dist < min_dist:
+                    min_dist = dist
+                    best_match = name
+            threshold = self.config.get('face_recognition', {}).get('embedding_distance_threshold', 1000.0)
+            if min_dist < threshold:
+                return best_match
+            return None
+        except Exception as e:
+            logger.error(f"Error recognizing face: {e}")
+            return None
+        
     def stop(self) -> None:
         """Stop the face recognition service."""
         if self.db_conn:
