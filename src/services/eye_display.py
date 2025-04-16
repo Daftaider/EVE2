@@ -64,11 +64,15 @@ class EyeDisplay:
     def _load_eye_sprites(self) -> None:
         """Load eye sprites for each emotion."""
         try:
-            assets_dir = Path("assets/eyes")
+            # Use src/assets/eyes directory
+            assets_dir = Path("src/assets/eyes")
             for emotion in Emotion:
                 sprite_path = assets_dir / f"{emotion.value}.png"
                 if sprite_path.exists():
-                    self.eye_sprites[emotion] = pygame.image.load(str(sprite_path))
+                    try:
+                        self.eye_sprites[emotion] = pygame.image.load(str(sprite_path))
+                    except Exception as e:
+                        logger.error(f"Failed to load sprite {sprite_path}: {e}")
                 else:
                     logger.warning(f"Missing sprite for emotion: {emotion.value}")
                     

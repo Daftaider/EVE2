@@ -1,94 +1,53 @@
-# EVE2 Configuration
-
-# Display settings
+animation:
+  blink_duration: 0.2
+  blink_interval: 3.0
+  emotion_transition_time: 0.5
+assets:
+  animations_dir: src/assets/animations
+  emotions_dir: src/assets/eyes
+debug:
+  enabled: true
+  font_size: 24
 display:
-  width: 800
-  height: 480
+  brightness: 100
+  contrast: 50
   fps: 30
-  rotation: 0  # 0, 90, 180, or 270 degrees
-  hardware_acceleration: true
-
-# Emotion sprites
-emotions:
-  neutral: assets/sprites/neutral.png
-  happy: assets/sprites/happy.png
-  sad: assets/sprites/sad.png
-  angry: assets/sprites/angry.png
-  surprised: assets/sprites/surprised.png
-  sleepy: assets/sprites/sleepy.png
-
-# Face detection settings
-face:
-  model_path: models/face/face_detection_model
-  confidence_threshold: 0.7
-  recognition_threshold: 0.6
-  max_faces: 5
-
-# Emotion detection settings
+  height: 480
+  saturation: 50
+  width: 800
 emotion:
-  model_path: models/emotion/emotion_model
-  confidence_threshold: 0.5
-  update_interval: 0.5  # seconds
-
-# Language model settings
+  min_confidence: 0.5
+  model_path: src/models/emotion/emotion_model.h5
+emotion_detection:
+  confidence_threshold: 0.6
+  emotions:
+  - happy
+  - sad
+  - angry
+  - surprised
+  - neutral
+  model_path: src/models/emotion/emotion_net
+face:
+  min_confidence: 0.5
+  model_path: src/models/face/haarcascade_frontalface_default.xml
+face_detection:
+  min_neighbors: 5
+  min_size: [30, 30]
+  model_path: src/models/face/haarcascade_frontalface_default.xml
+  scale_factor: 1.1
 llm:
-  model_path: models/llm/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
   context_window: 2048
   max_tokens: 512
+  model_path: src/models/llm/tinyllama
   temperature: 0.7
-
-# Voice settings
+  top_p: 0.9
+logging:
+  file: src/logs/eve2.log
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  level: INFO
 voice:
-  sample_rate: 16000
-  channels: 1
-  chunk_size: 1024
-  energy_threshold: 300
+  energy_threshold: 1000
+  non_speaking_duration: 0.5
   pause_threshold: 0.8
   phrase_threshold: 0.3
-  non_speaking_duration: 0.5
-
-# Logging settings
-logging:
-  level: INFO
-  file: logs/eve.log
-  max_size: 10485760  # 10MB
-  backup_count: 5
-
-# Camera Settings
-camera:
-  device_index: 0
-  resolution:
-    width: 800
-    height: 480
-  fps: 30
-
-# Face Recognition Settings
-face_recognition:
-  model_path: models/face/face_detection_model
-  confidence_threshold: 0.6
-  database_path: data/faces.db
-
-# Emotion Detection Settings
-emotion_detection:
-  model_path: models/emotion/emotion_model
-  emotions:
-    - neutral
-    - happy
-    - sad
-    - angry
-    - surprised
-    - sleepy
-
-# Language Model Settings
-llm:
-  model_path: models/llm/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
-  context_window: 2048
-  max_tokens: 512
-  temperature: 0.7
-
-# Logging Settings
-logging:
-  level: INFO
-  file: logs/eve.log
-  max_size: 10485760  # 10MB
-  backup_count: 5 
+  sample_rate: 16000
