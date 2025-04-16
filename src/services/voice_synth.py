@@ -27,7 +27,9 @@ class VoiceSynth:
         self.thread = None
         
         # Set ALSA configuration
-        os.environ['ALSA_CARD'] = 'Generic'
+        os.environ['ALSA_CARD'] = '0'  # Use first available card
+        os.environ['ALSA_PCM_CARD'] = '0'
+        os.environ['ALSA_PCM_DEVICE'] = '0'
         
     def start(self) -> bool:
         """Start the voice synthesis service."""
@@ -55,10 +57,28 @@ class VoiceSynth:
             # Try to find a working microphone
             for i in range(3):  # Try up to 3 times
                 try:
-                    self.microphone = sr.Microphone()
-                    with self.microphone as source:
-                        self.recognizer.adjust_for_ambient_noise(source, duration=1)
-                    break
+                    # List available microphones
+                    mic_list = sr.Microphone.list_microphone_names()
+                    logger.info(f"Available microphones: {mic_list}")
+                    
+                    # Try to use the first available microphone
+                    device_index = None
+                    for idx, name in enumerate(mic_list):
+                        if 'default' in name.lower() or 'pulse' in name.lower():
+                            device_index = idx
+                            break
+                            
+                    if device_index is None and mic_list:
+                        device_index = 0  # Use first microphone if no default found
+                        
+                    if device_index is not None:
+                        self.microphone = sr.Microphone(device_index=device_index)
+                        with self.microphone as source:
+                            self.recognizer.adjust_for_ambient_noise(source, duration=1)
+                        break
+                    else:
+                        logger.warning("No microphones found")
+                        
                 except Exception as e:
                     logger.warning(f"Failed to initialize microphone (attempt {i+1}): {e}")
                     time.sleep(1)

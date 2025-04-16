@@ -5,21 +5,37 @@ display:
   width: 800
   height: 480
   fps: 30
-  rotation: 0
-  hardware_display: true
+  rotation: 0  # 0, 90, 180, or 270 degrees
+  hardware_acceleration: true
+
+# Emotion sprites
+emotions:
+  neutral: assets/sprites/neutral.png
+  happy: assets/sprites/happy.png
+  sad: assets/sprites/sad.png
+  angry: assets/sprites/angry.png
+  surprised: assets/sprites/surprised.png
+  sleepy: assets/sprites/sleepy.png
 
 # Face detection settings
 face:
-  detection_interval: 0.1  # seconds
-  min_confidence: 0.6
-  model_path: "models/face_detection"
-  known_faces_path: "models/known_faces"
+  model_path: models/face/face_detection_model
+  confidence_threshold: 0.7
+  recognition_threshold: 0.6
+  max_faces: 5
 
 # Emotion detection settings
 emotion:
-  model_path: "models/emotion_detection"
-  detection_interval: 0.2  # seconds
-  min_confidence: 0.5
+  model_path: models/emotion/emotion_model
+  confidence_threshold: 0.5
+  update_interval: 0.5  # seconds
+
+# Language model settings
+llm:
+  model_path: models/llm/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+  context_window: 2048
+  max_tokens: 512
+  temperature: 0.7
 
 # Voice settings
 voice:
@@ -27,28 +43,16 @@ voice:
   channels: 1
   chunk_size: 1024
   energy_threshold: 300
-  dynamic_energy_threshold: true
   pause_threshold: 0.8
   phrase_threshold: 0.3
   non_speaking_duration: 0.5
 
-# LLM settings
-llm:
-  model_path: "models/llm"
-  max_tokens: 100
-  temperature: 0.7
-  top_p: 0.9
-  repetition_penalty: 1.2
-
-# Asset paths
-assets:
-  sprites:
-    neutral: "assets/sprites/neutral.png"
-    happy: "assets/sprites/happy.png"
-    sad: "assets/sprites/sad.png"
-    angry: "assets/sprites/angry.png"
-    surprised: "assets/sprites/surprised.png"
-    sleepy: "assets/sprites/sleepy.png"
+# Logging settings
+logging:
+  level: INFO
+  file: logs/eve.log
+  max_size: 10485760  # 10MB
+  backup_count: 5
 
 # Camera Settings
 camera:
