@@ -5,6 +5,7 @@ import logging
 import queue
 import threading
 import time
+import os
 from typing import Optional, Dict, Any
 
 import pyttsx3
@@ -25,19 +26,46 @@ class VoiceSynth:
         self.input_queue = queue.Queue()
         self.thread = None
         
+        # Set ALSA configuration
+        os.environ['ALSA_CARD'] = 'Generic'
+        
     def start(self) -> bool:
         """Start the voice synthesis service."""
         try:
             # Initialize text-to-speech engine
             self.engine = pyttsx3.init()
             
+            # Set voice properties
+            voices = self.engine.getProperty('voices')
+            if voices:
+                self.engine.setProperty('voice', voices[0].id)  # Use first available voice
+            self.engine.setProperty('rate', 150)  # Speed of speech
+            self.engine.setProperty('volume', 0.9)  # Volume (0.0 to 1.0)
+            
             # Initialize speech recognition
             self.recognizer = sr.Recognizer()
-            self.microphone = sr.Microphone()
             
-            # Adjust for ambient noise
-            with self.microphone as source:
-                self.recognizer.adjust_for_ambient_noise(source)
+            # Configure recognizer settings
+            self.recognizer.energy_threshold = 300
+            self.recognizer.dynamic_energy_threshold = True
+            self.recognizer.pause_threshold = 0.8
+            self.recognizer.phrase_threshold = 0.3
+            self.recognizer.non_speaking_duration = 0.5
+            
+            # Try to find a working microphone
+            for i in range(3):  # Try up to 3 times
+                try:
+                    self.microphone = sr.Microphone()
+                    with self.microphone as source:
+                        self.recognizer.adjust_for_ambient_noise(source, duration=1)
+                    break
+                except Exception as e:
+                    logger.warning(f"Failed to initialize microphone (attempt {i+1}): {e}")
+                    time.sleep(1)
+                    
+            if not self.microphone:
+                logger.error("Could not initialize microphone")
+                return False
                 
             # Start listening thread
             self.running = True
