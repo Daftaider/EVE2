@@ -28,15 +28,43 @@ class VoiceSynth:
         self.thread = None
         
         # Set ALSA configuration for Waveshare Audio Hat
-        os.environ['ALSA_CARD'] = 'wm8960soundcard'
-        os.environ['ALSA_PCM_CARD'] = '0'
-        os.environ['ALSA_PCM_DEVICE'] = '0'
+        config_dir = os.path.dirname(config_path)
+        alsa_config_path = os.path.join(config_dir, 'asound.conf')
         
-        # Set ALSA configuration file
-        os.environ['ALSA_CONFIG_PATH'] = os.path.join(os.path.dirname(config_path), 'asound.conf')
+        # Try different ALSA card names
+        alsa_card_names = ['wm8960soundcard', 'wm8960', 'default']
+        for card_name in alsa_card_names:
+            try:
+                os.environ['ALSA_CARD'] = card_name
+                os.environ['ALSA_PCM_CARD'] = card_name
+                os.environ['ALSA_PCM_DEVICE'] = '0'
+                os.environ['ALSA_CONFIG_PATH'] = alsa_config_path
+                
+                # Test if the card is available
+                if self._test_alsa_card(card_name):
+                    logger.info(f"Using ALSA card: {card_name}")
+                    break
+            except Exception as e:
+                logger.warning(f"Failed to set ALSA card {card_name}: {e}")
         
         # Disable PulseAudio to avoid conflicts with ALSA
         os.environ['PULSE_SERVER'] = ''
+        
+        # Disable JACK to avoid conflicts
+        os.environ['JACK_NO_AUDIO_RESERVATION'] = '1'
+            
+    def _test_alsa_card(self, card_name: str) -> bool:
+        """Test if an ALSA card is available."""
+        try:
+            # Try to list available devices
+            mic_list = sr.Microphone.list_microphone_names()
+            if mic_list:
+                logger.info(f"Found microphones with card {card_name}: {mic_list}")
+                return True
+            return False
+        except Exception as e:
+            logger.warning(f"Error testing ALSA card {card_name}: {e}")
+            return False
             
     def start(self) -> bool:
         """Start the voice synthesis service."""
@@ -71,16 +99,12 @@ class VoiceSynth:
                     # Try to use the first available microphone
                     device_index = None
                     for idx, name in enumerate(mic_list):
-                        # Look specifically for the Waveshare Audio Hat
-                        if 'wm8960' in name.lower():
+                        # Look for any available microphone
+                        if name:
                             device_index = idx
-                            logger.info(f"Found Waveshare Audio Hat at index {idx}")
+                            logger.info(f"Found microphone at index {idx}: {name}")
                             break
                             
-                    if device_index is None and mic_list:
-                        device_index = 0  # Use first microphone if no specific match found
-                        logger.warning("Waveshare Audio Hat not found, using first available microphone")
-                        
                     if device_index is not None:
                         self.microphone = sr.Microphone(device_index=device_index)
                         with self.microphone as source:
@@ -94,8 +118,8 @@ class VoiceSynth:
                     time.sleep(1)
                     
             if not self.microphone:
-                logger.error("Could not initialize microphone")
-                return False
+                logger.warning("Could not initialize microphone, running in text-only mode")
+                return True  # Return True to allow text-to-speech even without microphone
                 
             # Start listening thread
             self.running = True
