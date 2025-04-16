@@ -27,10 +27,13 @@ class VoiceSynth:
         self.input_queue = queue.Queue()
         self.thread = None
         
-        # Waveshare Audio Hat (WM8960) specific configuration
+        # Set ALSA configuration for Waveshare Audio Hat
         os.environ['ALSA_CARD'] = 'wm8960soundcard'
         os.environ['ALSA_PCM_CARD'] = '0'
         os.environ['ALSA_PCM_DEVICE'] = '0'
+        
+        # Set ALSA configuration file
+        os.environ['ALSA_CONFIG_PATH'] = os.path.join(os.path.dirname(config_path), 'asound.conf')
         
         # Disable PulseAudio to avoid conflicts with ALSA
         os.environ['PULSE_SERVER'] = ''
