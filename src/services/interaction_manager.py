@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class InteractionManager:
     """Manages interaction between all EVE2 services."""
     
-    def __init__(self, config_path: str = "config/settings.yaml"):
+    def __init__(self, config_path: str):
         """Initialize the interaction manager."""
         self.config_path = config_path
         self.running = False
@@ -30,7 +30,7 @@ class InteractionManager:
     def start(self) -> bool:
         """Start all services and begin interaction loop."""
         try:
-            # Initialize services
+            # Initialize services with the correct config path
             self.services = {
                 'display': EyeDisplay(self.config_path),
                 'face': FaceService(self.config_path),

@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class VoiceSynth:
     """Handles text-to-speech and speech recognition."""
     
-    def __init__(self, config_path: str = "config/settings.yaml"):
+    def __init__(self, config_path: str):
         """Initialize the voice synthesis service."""
         self.config_path = config_path
         self.running = False
@@ -31,6 +31,10 @@ class VoiceSynth:
         os.environ['ALSA_PCM_CARD'] = '0'
         os.environ['ALSA_PCM_DEVICE'] = '0'
         
+        # Try to use PulseAudio if available
+        if os.path.exists('/usr/bin/pulseaudio'):
+            os.environ['PULSE_SERVER'] = 'unix:/run/user/1000/pulse/native'
+            
     def start(self) -> bool:
         """Start the voice synthesis service."""
         try:

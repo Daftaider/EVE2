@@ -3,6 +3,8 @@ Main entry point for EVE2.
 """
 import logging
 import time
+import os
+from pathlib import Path
 from services.interaction_manager import InteractionManager
 
 # Set up logging
@@ -16,8 +18,11 @@ logger = logging.getLogger(__name__)
 def main():
     """Main entry point."""
     try:
-        # Create and start EVE2
-        with InteractionManager() as eve:
+        # Get the absolute path to the config file
+        config_path = os.path.join(os.path.dirname(__file__), 'config', 'settings.yaml')
+        
+        # Create and start EVE2 with the correct config path
+        with InteractionManager(config_path=config_path) as eve:
             # Main loop
             try:
                 while True:
