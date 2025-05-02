@@ -76,20 +76,57 @@ class InteractionManager:
         """Main interaction loop."""
         last_seen_time = time.time()
         no_face_emotion = Emotion.NEUTRAL
+        consecutive_camera_failures = 0  # Add failure counter
+        max_consecutive_failures = 30 # Allow ~1 second of failures @ 30fps before trying recovery
+        camera_reopened = False # Flag to prevent continuous reopening attempts
 
         while self.running:
             try:
                 if not self.camera or not self.camera.isOpened():
-                    logger.error("Camera not available, stopping loop.")
-                    time.sleep(1)
+                    logger.error("Camera not available or closed unexpectedly.")
+                    # Try to reopen once if not already attempted
+                    if not camera_reopened:
+                        logger.info("Attempting to reopen camera...")
+                        try:
+                            camera_index = self.services['face'].config.get('camera', {}).get('index', 0)
+                            self.camera = cv2.VideoCapture(camera_index)
+                            if self.camera.isOpened():
+                                logger.info("Camera reopened successfully.")
+                                camera_reopened = True # Mark as reopened (or attempt made)
+                                consecutive_camera_failures = 0 # Reset counter
+                            else:
+                                logger.error("Failed to reopen camera.")
+                                camera_reopened = True # Mark attempt failed
+                        except Exception as e:
+                            logger.error(f"Error trying to reopen camera: {e}")
+                            camera_reopened = True # Mark attempt failed
+                    
+                    time.sleep(1) # Wait before next check/attempt
                     continue
 
                 # Capture frame-by-frame
                 ret, frame = self.camera.read()
+                
                 if not ret or frame is None:
-                    logger.warning("Failed to grab frame from camera")
-                    time.sleep(0.1)
+                    consecutive_camera_failures += 1
+                    logger.warning(f"Failed to grab frame ({consecutive_camera_failures}/{max_consecutive_failures})")
+                    
+                    if consecutive_camera_failures >= max_consecutive_failures:
+                        logger.error("Too many consecutive camera read failures. Assuming camera issue.")
+                        # Optionally, try to release and flag for reopen on next loop iteration
+                        if self.camera:
+                             self.camera.release()
+                             logger.info("Camera released due to read failures.")
+                             self.camera = None # Ensure it triggers the reopen logic
+                             camera_reopened = False # Allow reopen attempt
+                        consecutive_camera_failures = 0 # Reset counter after handling
+                        
+                    time.sleep(0.1) # Small delay before retrying read
                     continue
+                
+                # If read was successful, reset counter
+                consecutive_camera_failures = 0
+                camera_reopened = False # Allow reopen attempt if it closes later
 
                 # Process face detection
                 faces = self.services['face'].detect_faces(frame)
