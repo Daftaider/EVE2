@@ -24,10 +24,16 @@ class LLMService:
     def _load_config(self, config_path: str) -> dict:
         """Load configuration from YAML file."""
         try:
+            logger.info(f"_load_config attempting to read: {config_path}")
             with open(config_path, 'r') as f:
-                return yaml.safe_load(f)
+                raw_content = f.read()
+                logger.debug(f"_load_config raw content:\n---\n{raw_content}\n---")
+                return yaml.safe_load(raw_content)
+        except FileNotFoundError:
+            logger.error(f"Configuration file not found at: {config_path}")
+            return {}
         except Exception as e:
-            logger.error(f"Error loading config: {e}")
+            logger.error(f"Error loading config from {config_path}: {e}")
             return {}
             
     def start(self) -> bool:
