@@ -1,9 +1,81 @@
+# Display settings
+display:
+  width: 800
+  height: 480
+  fps: 30
+  brightness: 100
+  contrast: 50
+  saturation: 50
+
+# Asset paths
+assets:
+  emotions_dir: src/assets/eyes
+  animations_dir: src/assets/animations
+
+# Animation settings
+animation:
+  blink_interval: 3.0
+  blink_duration: 0.2
+  emotion_transition_time: 0.5
+
+# Logging configuration
+logging:
+  level: INFO
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  file: src/logs/eve2.log
+
+# Face detection settings
+face_detection:
+  # Path to the Haar cascade file
+  model_path: src/models/face/haarcascade_frontalface_default.xml
+  # Detection parameters
+  scale_factor: 1.1
+  min_neighbors: 5
+  min_size: [30, 30]
+
+# Face recognition settings (Placeholder - Using detection model for now)
+face:
+  model_path: src/models/face/haarcascade_frontalface_default.xml # Placeholder
+  min_confidence: 0.5
+
+# Emotion detection settings
+emotion_detection:
+  # Path to the emotion detection model
+  model_path: src/models/emotion/emotion_net # Placeholder dir
+  # List of emotions the model can detect
+  emotions: ['happy', 'sad', 'angry', 'surprised', 'neutral']
+  # Confidence threshold
+  confidence_threshold: 0.6
+
+# Placeholder for more specific emotion model if needed
+emotion:
+  model_path: src/models/emotion/emotion_model.h5 # Placeholder file
+  min_confidence: 0.5
+
+# Voice settings
+voice:
+  # Speech recognition sensitivity
+  energy_threshold: 1000
+  pause_threshold: 0.8
+  non_speaking_duration: 0.5
+  phrase_threshold: 0.3
+  # Target sample rate
+  sample_rate: 16000
+
+# Language model settings
 llm:
   # Path to the GGUF model file
-  model_path: src/models/llm/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+  model_path: src/models/llm/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf # Correct path
   # Context window size
   context_window: 2048
   # Maximum tokens to generate in response
-  max_tokens: 256
+  max_tokens: 256 # Reduced for RPi
   # Sampling temperature
-  temperature: 0.7 
+  temperature: 0.7
+  # Top P sampling (optional, can comment out if not needed)
+  # top_p: 0.9
+
+# Debug settings
+debug:
+  enabled: True
+  font_size: 24 
