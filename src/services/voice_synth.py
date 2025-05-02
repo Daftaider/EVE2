@@ -70,15 +70,28 @@ class VoiceSynth:
         """Start the voice synthesis service."""
         try:
             # Initialize text-to-speech engine
-            self.engine = pyttsx3.init()
-            
-            # Set voice properties
-            voices = self.engine.getProperty('voices')
-            if voices:
-                self.engine.setProperty('voice', voices[0].id)  # Use first available voice
-            self.engine.setProperty('rate', 150)  # Speed of speech
-            self.engine.setProperty('volume', 0.9)  # Volume (0.0 to 1.0)
-            
+            try:
+                # Try forcing espeak driver on Linux, might be more stable with ALSA
+                if platform.system() == "Linux":
+                    logger.info("Attempting to initialize pyttsx3 with espeak driver...")
+                    self.engine = pyttsx3.init(driverName='espeak')
+                else:
+                    self.engine = pyttsx3.init()
+            except Exception as e:
+                logger.warning(f"Failed to init pyttsx3 with specific driver, falling back to default: {e}")
+                self.engine = pyttsx3.init() # Fallback to default driver
+
+            # Set voice properties (if engine initialized)
+            if self.engine:
+                voices = self.engine.getProperty('voices')
+                if voices:
+                    self.engine.setProperty('voice', voices[0].id)  # Use first available voice
+                self.engine.setProperty('rate', 150)  # Speed of speech
+                self.engine.setProperty('volume', 0.9)  # Volume (0.0 to 1.0)
+            else:
+                logger.error("Failed to initialize pyttsx3 engine.")
+                # Decide if we should continue without TTS? For now, we will.
+
             # Initialize speech recognition
             self.recognizer = sr.Recognizer()
             
@@ -89,49 +102,66 @@ class VoiceSynth:
             self.recognizer.phrase_threshold = 0.3
             self.recognizer.non_speaking_duration = 0.5
             
-            # Try to find a working microphone
-            for i in range(3):  # Try up to 3 times
-                try:
-                    # List available microphones
-                    mic_list = sr.Microphone.list_microphone_names()
-                    logger.info(f"Available microphones: {mic_list}")
-                    
-                    # Try to use the first available microphone
-                    device_index = None
-                    for idx, name in enumerate(mic_list):
-                        # Look for any available microphone
-                        if name:
-                            device_index = idx
-                            logger.info(f"Found microphone at index {idx}: {name}")
-                            break
-                            
-                    if device_index is not None:
-                        self.microphone = sr.Microphone(device_index=device_index)
-                        with self.microphone as source:
-                            self.recognizer.adjust_for_ambient_noise(source, duration=1)
-                        break
-                    else:
-                        logger.warning("No microphones found")
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to initialize microphone (attempt {i+1}): {e}")
-                    time.sleep(1)
-                    
-            if not self.microphone:
-                logger.warning("Could not initialize microphone, running in text-only mode")
-                return True  # Return True to allow text-to-speech even without microphone
+            # Find and initialize the target microphone
+            self.microphone = None
+            try:
+                mic_list = sr.Microphone.list_microphone_names()
+                logger.info(f"Available microphones: {mic_list}")
                 
-            # Start listening thread
-            self.running = True
-            self.thread = threading.Thread(target=self._listen_loop)
-            self.thread.daemon = True
-            self.thread.start()
-            
-            logger.info("Voice synthesis service started successfully")
-            return True
-            
+                device_index = None
+                target_mic_name_part = "wm8960" # Look for the specific sound card name
+                
+                # First, try to find the specific sound card by name
+                for idx, name in enumerate(mic_list):
+                    if target_mic_name_part in name.lower():
+                        device_index = idx
+                        logger.info(f"Found target microphone '{name}' at index {idx}")
+                        break
+                
+                # If specific card not found by name, fall back to the first available non-empty device
+                if device_index is None:
+                    logger.warning(f"Target microphone '{target_mic_name_part}' not found by name. Trying first available.")
+                    for idx, name in enumerate(mic_list):
+                        if name: # Check if name is not empty/None
+                            device_index = idx
+                            logger.info(f"Using first available microphone '{name}' at index {idx}")
+                            break
+
+                # Try initializing the selected microphone index
+                if device_index is not None:
+                    self.microphone = sr.Microphone(device_index=device_index)
+                    with self.microphone as source:
+                        logger.info(f"Adjusting for ambient noise on index {device_index}...")
+                        # Increase duration slightly? Sometimes helps initialization.
+                        self.recognizer.adjust_for_ambient_noise(source, duration=1.5)
+                    logger.info(f"Successfully initialized microphone index {device_index}")
+                else:
+                    logger.error("No suitable microphone device index found.")
+
+            except Exception as e:
+                logger.error(f"Failed during microphone search/initialization: {e}")
+                self.microphone = None # Ensure microphone is None if init fails
+
+            # Start listening thread ONLY if microphone was successfully initialized
+            if self.microphone:
+                self.running = True
+                self.thread = threading.Thread(target=self._listen_loop)
+                self.thread.daemon = True
+                self.thread.start()
+                logger.info("Voice synthesis service started successfully (with microphone)")
+            else:
+                logger.warning("Could not initialize microphone. Voice input disabled.")
+                # Continue running for text-to-speech functionality if engine is available
+
+            # Service start is considered successful if either TTS or STT (or both) are ready
+            if self.engine or self.microphone:
+                 return True
+            else:
+                 logger.error("Failed to initialize both TTS engine and microphone.")
+                 return False
+
         except Exception as e:
-            logger.error(f"Error starting voice synthesis service: {e}")
+            logger.exception(f"Critical error starting voice synthesis service: {e}") # Use exception for full traceback
             return False
             
     def _listen_loop(self) -> None:
