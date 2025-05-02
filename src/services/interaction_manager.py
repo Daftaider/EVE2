@@ -44,11 +44,19 @@ class InteractionManager:
             # Initialize camera capture
             try:
                 camera_index = self.services['face'].config.get('camera', {}).get('index', 0)
-                self.camera = cv2.VideoCapture(camera_index)
+                # Explicitly use V4L2 backend for potentially better compatibility on Linux/RPi
+                logger.info(f"Attempting to open camera {camera_index} using V4L2 backend...")
+                self.camera = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
+                
                 if not self.camera.isOpened():
-                    logger.error(f"Failed to open camera at index {camera_index}")
-                    return False
-                logger.info(f"Camera {camera_index} opened successfully")
+                    logger.error(f"Failed to open camera at index {camera_index} using V4L2. Trying default backend...")
+                    # Fallback to default if V4L2 fails
+                    self.camera = cv2.VideoCapture(camera_index)
+                    if not self.camera.isOpened():
+                         logger.error(f"Failed to open camera at index {camera_index} using default backend either.")
+                         return False
+                         
+                logger.info(f"Camera {camera_index} opened successfully (Backend: {'V4L2' if self.camera.getBackendName() == 'V4L2' else 'Default'})")
             except Exception as e:
                 logger.error(f"Error initializing camera: {e}")
                 return False
@@ -89,7 +97,12 @@ class InteractionManager:
                         logger.info("Attempting to reopen camera...")
                         try:
                             camera_index = self.services['face'].config.get('camera', {}).get('index', 0)
-                            self.camera = cv2.VideoCapture(camera_index)
+                            # Also use V4L2 when reopening
+                            self.camera = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
+                            if not self.camera.isOpened():
+                                 logger.warning("Failed to reopen with V4L2, trying default...")
+                                 self.camera = cv2.VideoCapture(camera_index)
+                                 
                             if self.camera.isOpened():
                                 logger.info("Camera reopened successfully.")
                                 camera_reopened = True # Mark as reopened (or attempt made)
