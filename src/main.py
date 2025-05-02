@@ -19,8 +19,11 @@ def main():
     """Main entry point."""
     try:
         # Get the absolute path to the config file
-        config_path = os.path.join(os.path.dirname(__file__), 'config', 'settings.yaml')
-        
+        # Go up one level from src/main.py location to the project root
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        config_path = os.path.join(project_root, 'config', 'settings.yaml')
+        logger.info(f"Using configuration file: {config_path}") # Log the resolved path
+
         # Create and start EVE2 with the correct config path
         with InteractionManager(config_path=config_path) as eve:
             # Main loop
