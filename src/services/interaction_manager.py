@@ -7,6 +7,7 @@ import queue
 import time
 from typing import Optional, Dict, Any
 from pathlib import Path
+import cv2
 
 from .eye_display import EyeDisplay, Emotion
 from .face_service import FaceService
@@ -24,6 +25,7 @@ class InteractionManager:
         self.config_path = config_path
         self.running = False
         self.services: Dict[str, Any] = {}
+        self.camera = None
         self.command_queue = queue.Queue()
         self.thread = None
         
@@ -38,6 +40,18 @@ class InteractionManager:
                 'voice': VoiceSynth(self.config_path),
                 'llm': LLMService(self.config_path)
             }
+            
+            # Initialize camera capture
+            try:
+                camera_index = self.services['face'].config.get('camera', {}).get('index', 0)
+                self.camera = cv2.VideoCapture(camera_index)
+                if not self.camera.isOpened():
+                    logger.error(f"Failed to open camera at index {camera_index}")
+                    return False
+                logger.info(f"Camera {camera_index} opened successfully")
+            except Exception as e:
+                logger.error(f"Error initializing camera: {e}")
+                return False
             
             # Start all services
             for name, service in self.services.items():
@@ -60,56 +74,107 @@ class InteractionManager:
             
     def _interaction_loop(self) -> None:
         """Main interaction loop."""
+        last_seen_time = time.time()
+        no_face_emotion = Emotion.NEUTRAL
+
         while self.running:
             try:
+                if not self.camera or not self.camera.isOpened():
+                    logger.error("Camera not available, stopping loop.")
+                    time.sleep(1)
+                    continue
+
+                # Capture frame-by-frame
+                ret, frame = self.camera.read()
+                if not ret or frame is None:
+                    logger.warning("Failed to grab frame from camera")
+                    time.sleep(0.1)
+                    continue
+
                 # Process face detection
-                faces = self.services['face'].detect_faces()
+                faces = self.services['face'].detect_faces(frame)
+                
+                current_name: Optional[str] = None
+                current_emotion: Optional[Emotion] = None
+
                 if faces:
-                    # Get first face
-                    face = faces[0]
+                    last_seen_time = time.time()
+                    # Get first face bounding box (x, y, w, h)
+                    x, y, w, h = faces[0]
                     
-                    # Recognize face
-                    name = self.services['face'].recognize_face(face)
-                    
-                    # Detect emotion
-                    emotion = self.services['emotion'].detect_emotion(face)
-                    
-                    # Update display
-                    self.services['display'].set_emotion(emotion)
-                    
-                    # Process voice input if available
-                    if self.services['voice'].has_input():
-                        text = self.services['voice'].get_input()
+                    # Extract face ROI
+                    # Ensure ROI coordinates are within frame bounds
+                    y1, y2 = max(0, y), min(frame.shape[0], y + h)
+                    x1, x2 = max(0, x), min(frame.shape[1], x + w)
+                    face_roi = frame[y1:y2, x1:x2]
+
+                    if face_roi.size > 0:
+                        # Recognize face
+                        current_name = self.services['face'].recognize_face(face_roi)
                         
+                        # Detect emotion
+                        current_emotion = self.services['emotion'].detect_emotion(face_roi)
+                    else:
+                        logger.warning("Detected face ROI was empty, skipping recognition/emotion.")
+
+                    # Update display emotion if detected
+                    if current_emotion:
+                        self.services['display'].set_emotion(current_emotion)
+                        no_face_emotion = Emotion.NEUTRAL
+                    else:
+                        self.services['display'].set_emotion(Emotion.NEUTRAL)
+                        
+                else:
+                    # No faces detected, check for inactivity -> Sleepy?
+                    idle_time = time.time() - last_seen_time
+                    sleep_threshold = self.services['face'].config.get('interaction', {}).get('sleep_after_seconds', 600)
+                    if idle_time > sleep_threshold:
+                         no_face_emotion = Emotion.SLEEPY
+                    
+                    self.services['display'].set_emotion(no_face_emotion)
+                    current_emotion = no_face_emotion
+
+                # Process voice input if available (regardless of face detection state)
+                if self.services['voice'].has_input():
+                    text = self.services['voice'].get_input()
+                    if text:
+                        logger.info(f"Received voice input: {text}")
                         # Generate response
                         response = self.services['llm'].generate_response(
                             text,
-                            user_name=name,
-                            emotion=emotion.value if emotion else None
+                            user_name=current_name,
+                            emotion=current_emotion.value if current_emotion else None
                         )
                         
                         if response:
+                            logger.info(f"LLM Response: {response}")
                             # Speak response
                             self.services['voice'].speak(response)
+                        else:
+                            logger.warning("LLM failed to generate response.")
                             
-                # Update display
+                # Update display rendering
                 self.services['display'].update()
                 
-                # Sleep to control update rate
-                time.sleep(1/30)  # 30 FPS
+                # Simple FPS control (adjust as needed)
+                time.sleep(1/30)
                 
             except Exception as e:
-                logger.error(f"Error in interaction loop: {e}")
-                time.sleep(1)  # Prevent tight loop on error
+                logger.exception(f"Error in interaction loop: {e}")
                 
     def stop(self) -> None:
         """Stop all services."""
         self.running = False
         if self.thread:
             self.thread.join()
+
+        # Release camera
+        if self.camera:
+            self.camera.release()
+            logger.info("Camera released")
             
         # Stop all services
-        for service in self.services.values():
+        for service_name, service in self.services.items():
             service.stop()
             
         logger.info("Interaction manager stopped")
