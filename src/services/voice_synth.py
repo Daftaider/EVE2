@@ -33,20 +33,25 @@ class VoiceSynth:
         
         # Try different ALSA card names
         alsa_card_names = ['wm8960soundcard', 'wm8960', 'default']
+        identified_card = False
         for card_name in alsa_card_names:
             try:
-                os.environ['ALSA_CARD'] = card_name
-                os.environ['ALSA_PCM_CARD'] = card_name
-                os.environ['ALSA_PCM_DEVICE'] = '0'
+                # os.environ['ALSA_CARD'] = card_name # Removed: Let system defaults handle card selection
+                # os.environ['ALSA_PCM_CARD'] = card_name # Removed
+                # os.environ['ALSA_PCM_DEVICE'] = '0' # Removed
                 # os.environ['ALSA_CONFIG_PATH'] = alsa_config_path # Removed: Let ALSA use default system config
                 
-                # Test if the card is available
-                if self._test_alsa_card(card_name):
-                    logger.info(f"Using ALSA card: {card_name}")
-                    break
+                # Test if the card seems available via sr listing
+                if not identified_card and self._test_alsa_card(card_name):
+                    logger.info(f"Identified potential working ALSA card via name: {card_name}")
+                    identified_card = True # Found one, no need to keep looping/setting env vars
+                    # We don't break here, just note that a potentially valid card name was found
             except Exception as e:
-                logger.warning(f"Failed to set ALSA card {card_name}: {e}")
+                logger.warning(f"Exception during ALSA card test for {card_name}: {e}")
         
+        if not identified_card:
+             logger.warning("Could not identify a specific working ALSA card name via testing. Relying on system defaults.")
+
         # Disable PulseAudio to avoid conflicts with ALSA
         os.environ['PULSE_SERVER'] = ''
         
