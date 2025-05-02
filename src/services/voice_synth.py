@@ -38,7 +38,7 @@ class VoiceSynth:
                 os.environ['ALSA_CARD'] = card_name
                 os.environ['ALSA_PCM_CARD'] = card_name
                 os.environ['ALSA_PCM_DEVICE'] = '0'
-                os.environ['ALSA_CONFIG_PATH'] = alsa_config_path
+                # os.environ['ALSA_CONFIG_PATH'] = alsa_config_path # Removed: Let ALSA use default system config
                 
                 # Test if the card is available
                 if self._test_alsa_card(card_name):
