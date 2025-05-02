@@ -33,11 +33,14 @@ class LLMService:
     def start(self) -> bool:
         """Start the language model service."""
         try:
+            logger.info(f"LLMService attempting to load config from: {self.config}")
             llm_config = self.config.get('llm', {})
             model_path = llm_config.get('model_path')
             
-            if not Path(model_path).exists():
-                logger.error(f"Language model not found at {model_path}")
+            logger.info(f"LLMService resolved model_path: {model_path}")
+
+            if not model_path or not Path(model_path).exists():
+                logger.error(f"Language model path '{model_path}' is invalid or file does not exist.")
                 return False
                 
             self.context_window = llm_config.get('context_window', 2048)
