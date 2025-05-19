@@ -66,9 +66,12 @@ class FaceService:
     def start(self) -> bool:
         """Start the face recognition service."""
         try:
-            self.face_cascade = cv2.CascadeClassifier(
-                cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-            )
+            # Ensure face_cascade is valid after __init__ attempt.
+            if self.face_cascade is None or self.face_cascade.empty():
+                logger.error("Face cascade is not properly loaded. Face detection will not work. Check __init__ logs and cascade_path in settings.yaml.")
+                # Optionally, you could prevent the service from starting fully or raise an error.
+                # For now, it will continue, but detect_faces will return empty.
+
             self.hailo_ready = False
             self.hailo_context = None
             self.hailo_input_shape = None
