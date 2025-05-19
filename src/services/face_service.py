@@ -31,7 +31,10 @@ class FaceService:
         self.known_faces_dir = Path(self.config.get('face_recognition', {}).get('known_faces_dir', 'data/known_faces'))
         self.face_database_file = self.known_faces_dir / self.config.get('face_recognition', {}).get('database_file', 'face_encodings.pkl')
         
-        cascade_path_str = self.config.get('face_detection', {}).get('cascade_path', 'config/haarcascade_frontalface_default.xml')
+        face_detection_config = self.config.get('face_detection', {})
+        logger.debug(f"FaceService __init__: Raw face_detection_config from settings: {face_detection_config}")
+        cascade_path_str = face_detection_config.get('model_path', 'config/haarcascade_frontalface_default.xml')
+        logger.debug(f"FaceService __init__: cascade_path_str after get: {cascade_path_str}")
         
         # Try to load the cascade classifier
         # Ensure the path is absolute or correctly relative to the project root
