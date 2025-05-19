@@ -44,7 +44,6 @@ class EyeDisplay:
         """Load eye sprites and prepare for rendering."""
         try:
             # Pygame.init() and screen creation are handled by InteractionManager
-            self._load_eye_sprites()
             self.running = True # Service is ready to have its update() called
             logger.info("Eye display resources prepared successfully")
             return True
@@ -60,13 +59,8 @@ class EyeDisplay:
                 sprite_path = assets_dir / f"{emotion.value}.png"
                 if sprite_path.exists():
                     try:
-                        # Ensure Pygame is initialized before loading images
-                        if pygame.get_init():
-                            self.eye_sprites[emotion] = pygame.image.load(str(sprite_path))
-                        else:
-                            logger.error("Pygame not initialized when trying to load eye sprites.")
-                            # Optionally, raise an error or handle this state
-                            return # Can't load sprites if Pygame isn't up
+                        # Pygame is assumed to be initialized by the caller (InteractionManager)
+                        self.eye_sprites[emotion] = pygame.image.load(str(sprite_path))
                     except Exception as e:
                         logger.error(f"Failed to load sprite {sprite_path}: {e}")
                 else:

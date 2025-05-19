@@ -408,10 +408,16 @@ class InteractionManager:
                 
                 self.services['display'].screen = self.screen # Provide screen to EyeDisplay service
                 
-                self._initialize_debug_font() # Initialize debug font now that Pygame font is ready
-                
                 self.pygame_initialized_in_thread = True
                 logger.info("Pygame initialized successfully within interaction thread.")
+
+                # Initialize debug font now that Pygame is fully initialized and flag is set
+                self._initialize_debug_font()
+
+                # Load eye sprites now that Pygame is fully initialized
+                if self.services.get('display'):
+                    logger.info("Attempting to load eye sprites via InteractionManager...")
+                    self.services['display']._load_eye_sprites()
                 
             except Exception as e_pygame_init:
                 logger.error(f"Fatal error initializing Pygame in interaction thread: {e_pygame_init}")
