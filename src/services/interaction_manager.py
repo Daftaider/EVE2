@@ -550,6 +550,7 @@ class InteractionManager:
             # --- Main Logic & Rendering ---
             display_service = self.services.get('display')
 
+            logger.debug(f"InteractionManager loop: self.debug_mode is currently: {self.debug_mode}") # Added log for state check
             if self.debug_mode:
                 self._render_debug_ui(current_cv_frame) 
             else: # Normal mode
