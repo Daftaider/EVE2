@@ -29,7 +29,7 @@ face_detection:
   # Path to the Haar cascade file
   model_path: src/models/face/haarcascade_frontalface_alt.xml
   # Detection parameters
-  scale_factor: 1.1
+  scale_factor: 1.05
   min_neighbors: 1
   min_size: [30, 30]
 
