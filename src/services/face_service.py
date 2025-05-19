@@ -24,10 +24,33 @@ class FaceService:
         """
         self.config = self._load_config(config_path)
         self.backend = backend
-        self.face_cascade = None
+        self.face_cascade: Optional[cv2.CascadeClassifier] = None
         self.face_recognizer = None
         self.db_conn = None
         self.known_faces: Dict[str, np.ndarray] = {}
+        self.known_faces_dir = Path(self.config.get('face_recognition', {}).get('known_faces_dir', 'data/known_faces'))
+        self.face_database_file = self.known_faces_dir / self.config.get('face_recognition', {}).get('database_file', 'face_encodings.pkl')
+        
+        cascade_path_str = self.config.get('face_detection', {}).get('cascade_path', 'config/haarcascade_frontalface_default.xml')
+        
+        # Try to load the cascade classifier
+        # Ensure the path is absolute or correctly relative to the project root
+        project_root = Path(__file__).resolve().parent.parent.parent 
+        cascade_file_path = project_root / cascade_path_str
+
+        logger.info(f"Attempting to load Haar cascade from: {cascade_file_path}")
+        if cascade_file_path.exists():
+            self.face_cascade = cv2.CascadeClassifier(str(cascade_file_path))
+            if self.face_cascade.empty():
+                logger.error(f"Failed to load Haar cascade from {cascade_file_path}. The CascadeClassifier is empty. Check the file integrity and path.")
+                self.face_cascade = None # Ensure it's None if loading failed
+            else:
+                logger.info(f"Haar cascade loaded successfully from {cascade_file_path}.")
+        else:
+            logger.error(f"Haar cascade file not found at {cascade_file_path}. Face detection will not work.")
+            self.face_cascade = None
+
+        self.known_face_encodings: List[np.ndarray] = []
         logger.info(f"FaceService initialized with backend: {backend}")
         # TODO: Add Hailo-8L backend support
         
