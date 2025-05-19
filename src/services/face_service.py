@@ -121,23 +121,46 @@ class FaceService:
     def detect_faces(self, frame: np.ndarray) -> List[Tuple[int, int, int, int]]:
         """Detect faces in the frame."""
         if self.face_cascade is None:
+            logger.warning("Face cascade is not loaded. Cannot detect faces.")
             return []
+        if frame is None:
+            logger.warning("Received a None frame. Cannot detect faces.")
+            return []
+        if frame.size == 0:
+            logger.warning("Received an empty frame (size 0). Cannot detect faces.")
+            return []
+            
         try:
+            logger.debug(f"FaceService.detect_faces: Input frame shape: {frame.shape}, dtype: {frame.dtype}, min_val: {frame.min()}, max_val: {frame.max()}")
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = self.face_cascade.detectMultiScale(
+            logger.debug(f"FaceService.detect_faces: Grayscale frame shape: {gray.shape}, dtype: {gray.dtype}, min_val: {gray.min()}, max_val: {gray.max()}")
+
+            # Get detection parameters from config, with defaults
+            detection_params = self.config.get('face_detection', {})
+            scale_factor = detection_params.get('scale_factor', 1.1)
+            min_neighbors = detection_params.get('min_neighbors', 5)
+            min_size_tuple = detection_params.get('min_size', [30, 30])
+            min_size = tuple(min_size_tuple) # Ensure it's a tuple
+
+            logger.debug(f"FaceService.detect_faces: Using detectMultiScale with scaleFactor={scale_factor}, minNeighbors={min_neighbors}, minSize={min_size}")
+
+            faces_output = self.face_cascade.detectMultiScale(
                 gray,
-                scaleFactor=1.1,
-                minNeighbors=5,
-                minSize=(30, 30)
+                scaleFactor=scale_factor,
+                minNeighbors=min_neighbors,
+                minSize=min_size
             )
-            # Check if faces is a numpy array before calling tolist()
-            if isinstance(faces, np.ndarray):
-                return faces.tolist()
+            logger.debug(f"FaceService.detect_faces: detectMultiScale raw output: {faces_output}, type: {type(faces_output)}")
+
+            if isinstance(faces_output, np.ndarray):
+                return faces_output.tolist()
             else:
-                # If faces is an empty tuple (no faces detected), return an empty list
                 return []
+        except cv2.error as cv2_err: # Catch OpenCV specific errors
+            logger.error(f"OpenCV error during face detection: {cv2_err}. Frame shape: {frame.shape}, dtype: {frame.dtype}")
+            return []
         except Exception as e:
-            logger.error(f"Error detecting faces: {e}")
+            logger.error(f"Generic error detecting faces: {e}. Frame shape: {frame.shape}, dtype: {frame.dtype}")
             return []
         
     def extract_embedding(self, face_roi: np.ndarray) -> np.ndarray:

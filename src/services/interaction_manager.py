@@ -377,8 +377,10 @@ class InteractionManager:
             raw_detected_faces: List[Tuple[int, int, int, int]] = []
 
             if frame is not None:
+                logger.debug(f"InteractionManager._render_debug_ui: Received frame for detection. Shape: {frame.shape}, dtype: {frame.dtype}, min: {frame.min()}, max: {frame.max()}")
                 frame_with_boxes = frame.copy() # For drawing boxes on
                 raw_detected_faces = self.services['face'].detect_faces(frame) # Get all face candidates
+                logger.debug(f"InteractionManager._render_debug_ui: detect_faces returned: {raw_detected_faces}")
 
                 for (fx, fy, fw, fh) in raw_detected_faces:
                     # Draw rectangle for every detected face candidate
