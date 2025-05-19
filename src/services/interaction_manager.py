@@ -251,12 +251,11 @@ class InteractionManager:
         self._render_button(screen, "< Back", 30, "back_to_main_menu", center_x_pos=80)
         self._render_text(screen, "Video Debug", (screen_width // 2, 30), center_x=True)
 
-        # Video display area (placeholder for now)
-        video_area_rect = pygame.Rect(50, 80, screen_width - 100, screen_height - 200)
-        pygame.draw.rect(screen, (50, 50, 50), video_area_rect) # Placeholder color
+        video_area_rect = pygame.Rect(50, 80, screen_width - 100, screen_height - 250) # Adjusted height for messages
+        pygame.draw.rect(screen, (50, 50, 50), video_area_rect)
 
         if frame is not None:
-            display_frame = frame.copy()
+            display_frame = frame.copy() # frame already has boxes if detected
             # Apply rotation
             if self.debug_rotation_angle == 90:
                 display_frame = cv2.rotate(display_frame, cv2.ROTATE_90_CLOCKWISE)
@@ -265,28 +264,18 @@ class InteractionManager:
             elif self.debug_rotation_angle == 270:
                 display_frame = cv2.rotate(display_frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
             
-            # Resize to fit video_area_rect, maintaining aspect ratio
             frame_h, frame_w = display_frame.shape[:2]
             target_w, target_h = video_area_rect.width, video_area_rect.height
-            scale = min(target_w / frame_w, target_h / frame_h)
+            scale = min(target_w / frame_w, target_h / frame_h) if frame_w > 0 and frame_h > 0 else 1
             new_w, new_h = int(frame_w * scale), int(frame_h * scale)
             
             if new_w > 0 and new_h > 0:
                 resized_frame = cv2.resize(display_frame, (new_w, new_h))
-                
-                # Convert BGR (OpenCV) to RGB (Pygame) and create surface
                 try:
-                    # Ensure frame is contiguous for Pygame surface creation
                     if not resized_frame.flags['C_CONTIGUOUS']:
                         resized_frame = np.ascontiguousarray(resized_frame)
-
-                    # Check if it's BGR or RGB (Picamera2 with RGB888 should be RGB, then we convert to BGR)
-                    # The frame capture logic currently does cvtColor(frame, cv2.COLOR_RGB2BGR)
-                    # So, resized_frame is BGR. For Pygame, we need RGB.
                     pygame_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
                     video_surface = pygame.surfarray.make_surface(pygame_frame.swapaxes(0, 1))
-                    
-                    # Center the video surface within video_area_rect
                     video_x = video_area_rect.left + (video_area_rect.width - new_w) // 2
                     video_y = video_area_rect.top + (video_area_rect.height - new_h) // 2
                     screen.blit(video_surface, (video_x, video_y))
@@ -295,32 +284,40 @@ class InteractionManager:
                     self._render_text(screen, "Error displaying frame", (video_area_rect.centerx, video_area_rect.centery), color=(255,0,0), center_x=True)
             else:
                  self._render_text(screen, "No video signal or invalid frame size", (video_area_rect.centerx, video_area_rect.centery), center_x=True)
-
-        else: # No frame
+        else:
             self._render_text(screen, "Camera not available or failed to capture frame", (video_area_rect.centerx, video_area_rect.centery), color=(255,255,0), center_x=True)
 
-        # Rotation buttons
-        bottom_y = screen_height - 50
-        self._render_button(screen, "Rot CW", bottom_y, "rotate_cw", center_x_pos=screen_width // 4)
-        self._render_text(screen, f"{self.debug_rotation_angle}°", (screen_width // 2, bottom_y -10 ), center_x=True) # Show current rotation
-        self._render_button(screen, "Rot CCW", bottom_y, "rotate_ccw", center_x_pos=3 * screen_width // 4)
+        bottom_controls_y = screen_height - 100 # Y-level for buttons below video
         
-        # Face enrolment placeholder
-        # Logic for self.debug_recognized_face_info will be added later
-        # For now, just a button if a generic face is detected (hypothetically)
-        # This needs detected_faces passed to _render_video_debug
-        # And then logic to select a face. For now, this is just a placeholder section.
+        # Rotation buttons
+        self._render_button(screen, "Rot CW", bottom_controls_y, "rotate_cw", center_x_pos=screen_width // 4)
+        self._render_text(screen, f"{self.debug_rotation_angle}°", (screen_width // 2, bottom_controls_y -10 ), center_x=True)
+        self._render_button(screen, "Rot CCW", bottom_controls_y, "rotate_ccw", center_x_pos=3 * screen_width // 4)
+        
+        # Face enrolment UI elements
+        enrol_elements_y = video_area_rect.bottom + 20
         if self.debug_active_input_field == "face_name":
-            input_rect = pygame.Rect(screen_width // 2 - 150, video_area_rect.bottom + 15, 300, 40)
-            pygame.draw.rect(screen, (200, 200, 200), input_rect) # Input field bg
-            pygame.draw.rect(screen, (100, 100, 100), input_rect, 2) # Border
+            input_rect = pygame.Rect(screen_width // 2 - 150, enrol_elements_y, 300, 40)
+            pygame.draw.rect(screen, (200, 200, 200), input_rect)
+            pygame.draw.rect(screen, (100, 100, 100), input_rect, 2)
             self._render_text(screen, self.debug_input_text, (input_rect.x + 5, input_rect.y + 5), color=(0,0,0))
             self._render_text(screen, "Enter Name & Press Enter", (screen_width//2, input_rect.bottom + 5), center_x=True, color=(200,200,200))
-
-        elif self.debug_recognized_face_info and self.debug_recognized_face_info.get('has_face'): # Placeholder condition
-            self._render_button(screen, "Enrol This Face", video_area_rect.bottom + 30, "enrol_face_input", center_x_pos=screen_width//2)
-            if self.debug_recognized_face_info.get('name'):
-                self._render_text(screen, f"Recognized: {self.debug_recognized_face_info['name']}", (screen_width//2, video_area_rect.bottom + 60), center_x=True)
+        elif self.debug_recognized_face_info:
+            if self.debug_recognized_face_info.get('multiple_faces'):
+                self._render_text(screen, "Multiple faces detected. Selection not yet implemented.", (screen_width//2, enrol_elements_y + 10), center_x=True, color=(255, 200, 0))
+            elif self.debug_recognized_face_info.get('has_face') and self.debug_recognized_face_info.get('roi_for_enrol') is not None:
+                 # Check if roi_for_enrol is actually a numpy array with size
+                 roi_check = self.debug_recognized_face_info.get('roi_for_enrol')
+                 if isinstance(roi_check, np.ndarray) and roi_check.size > 0:
+                    self._render_button(screen, "Enrol This Face", enrol_elements_y + 15, "enrol_face_input", center_x_pos=screen_width//2)
+                    if self.debug_recognized_face_info.get('name'): # This 'name' might be from a previous recognition attempt, not current detection
+                        self._render_text(screen, f"Previously Recognized: {self.debug_recognized_face_info['name']}", (screen_width//2, enrol_elements_y + 45), center_x=True)
+                 else: # ROI was empty or invalid
+                    self._render_text(screen, "Detected face ROI is empty.", (screen_width//2, enrol_elements_y + 10), center_x=True, color=(255, 200, 0))
+            elif self.debug_recognized_face_info.get('has_face') == False : # Explicitly no face
+                 self._render_text(screen, "No face detected for enrolment.", (screen_width//2, enrol_elements_y + 10), center_x=True, color=(255, 200, 0))
+        else: # No face info at all (e.g. camera off)
+            self._render_text(screen, "No face detected for enrolment.", (screen_width//2, enrol_elements_y + 10), center_x=True, color=(255, 200, 0))
 
     def _render_voice_debug_placeholder(self, screen: pygame.Surface):
         self.debug_buttons.clear()
@@ -341,22 +338,41 @@ class InteractionManager:
         if self.debug_mode == "main_menu":
             self._render_debug_main_menu(self.screen)
         elif self.debug_mode == "video_debug":
+            processed_frame_for_display = None # Frame with boxes drawn, ready for display pipeline
             detected_faces_list: List[Tuple[int, int, int, int]] = []
+
             if frame is not None:
-                detected_faces_list = self.services['face'].detect_faces(frame)
-                if detected_faces_list:
-                    if len(detected_faces_list) == 1 and not self.debug_active_input_field:
-                         x,y,w,h = detected_faces_list[0]
-                         y1, y2 = max(0, y), min(frame.shape[0], y + h)
-                         x1, x2 = max(0, x), min(frame.shape[1], x + w)
-                         face_roi = frame[y1:y2, x1:x2]
-                         if face_roi.size > 0:
-                            self.debug_recognized_face_info = {'has_face': True, 'roi_for_enrol': face_roi, 'box': detected_faces_list[0]}
-                         else:
-                            self.debug_recognized_face_info = {'has_face': False}
-                    elif not detected_faces_list and not self.debug_active_input_field :
+                # Make a copy to draw on, before any rotation/resizing for display
+                frame_with_boxes = frame.copy()
+                detected_faces_list = self.services['face'].detect_faces(frame) # Original detection on raw frame
+
+                for (fx, fy, fw, fh) in detected_faces_list:
+                    cv2.rectangle(frame_with_boxes, (fx, fy), (fx + fw, fy + fh), (0, 255, 0), 2)
+                
+                processed_frame_for_display = frame_with_boxes
+
+                # Update debug_recognized_face_info based on detection
+                if not self.debug_active_input_field: # Only update if not currently typing a name
+                    if len(detected_faces_list) == 1:
+                        x,y,w,h = detected_faces_list[0]
+                        # Ensure ROI coordinates are within frame bounds
+                        y1, y2 = max(0, y), min(frame.shape[0], y + h)
+                        x1, x2 = max(0, x), min(frame.shape[1], x + w)
+                        face_roi = frame[y1:y2, x1:x2] # ROI from original, undrawn frame for enrolment
+                        if face_roi.size > 0:
+                            self.debug_recognized_face_info = {'has_face': True, 'roi_for_enrol': face_roi, 'box': detected_faces_list[0], 'multiple_faces': False}
+                        else:
+                            self.debug_recognized_face_info = {'has_face': False, 'multiple_faces': False}
+                    elif len(detected_faces_list) > 1:
+                        self.debug_recognized_face_info = {'has_face': True, 'multiple_faces': True} # Indicate multiple faces
+                    else: # No faces
                         self.debug_recognized_face_info = None
-            self._render_video_debug(self.screen, frame)
+            else: # frame is None
+                 if not self.debug_active_input_field:
+                    self.debug_recognized_face_info = None
+
+
+            self._render_video_debug(self.screen, processed_frame_for_display) # Pass frame with boxes
         elif self.debug_mode == "voice_debug":
             self._render_voice_debug_placeholder(self.screen)
         
