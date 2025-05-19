@@ -30,7 +30,7 @@ face_detection:
   model_path: src/models/face/haarcascade_frontalface_alt.xml
   # Detection parameters
   scale_factor: 1.1
-  min_neighbors: 0
+  min_neighbors: 1
   min_size: [30, 30]
 
 # Face recognition settings (Placeholder - Using detection model for now)
