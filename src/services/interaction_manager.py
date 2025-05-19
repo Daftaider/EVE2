@@ -184,14 +184,16 @@ class InteractionManager:
             elif clicked_action == "rotate_ccw":
                 self.debug_rotation_angle = (self.debug_rotation_angle - 90 + 360) % 360
             elif clicked_action == "enrol_face_input":
-                 if self.debug_recognized_face_info and self.debug_recognized_face_info.get('roi_for_enrol'):
+                 # Check if ROI is valid for enrolment
+                 face_info = self.debug_recognized_face_info
+                 roi_for_enrolment = face_info.get('roi_for_enrol') if face_info else None
+                 if isinstance(roi_for_enrolment, np.ndarray) and roi_for_enrolment.size > 0:
                     self.debug_active_input_field = "face_name"
                     self.debug_input_text = "" # Clear for new input
                     logger.info("Activated face name input for enrolment.")
                  else:
-                    logger.warning("Cannot enrol: No face ROI captured for enrolment.")
+                    logger.warning("Cannot enrol: No face ROI captured or ROI is empty for enrolment.")
                     self.debug_message = "Error: No face ROI to enrol."
-                    self.debug_message_timer = time.time() + 3
             # More actions will be added (like submitting enrolment)
 
     def _render_text(self, screen: pygame.Surface, text: str, pos: Tuple[int, int], color: Tuple[int,int,int] = (255, 255, 255), center_x: bool = False):
