@@ -10,6 +10,7 @@ from pathlib import Path
 import cv2
 import os
 import pygame
+import numpy as np
 from picamera2 import Picamera2
 from picamera2.encoders import JpegEncoder
 from picamera2.outputs import FileOutput
