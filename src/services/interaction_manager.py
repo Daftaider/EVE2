@@ -45,29 +45,26 @@ class InteractionManager:
             # Initialize camera capture
             try:
                 camera_index = self.services['face'].config.get('camera', {}).get('index', 0)
-                # Explicitly use V4L2 backend for potentially better compatibility on Linux/RPi
-                logger.info(f"Attempting to open camera {camera_index} using V4L2 backend...")
-                
-                # Set camera format to RGB3 (24-bit RGB) before opening
-                os.environ['OPENCV_VIDEOIO_V4L2_DEBUG'] = '1'  # Enable V4L2 debug output
-                self.camera = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
-                
-                if self.camera.isOpened():
-                    # Set format to RGB3
-                    self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('R','G','B','3'))
-                    self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                    self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                    self.camera.set(cv2.CAP_PROP_FPS, 30)
+                # Try MMAL backend first (Raspberry Pi specific)
+                logger.info(f"Attempting to open camera {camera_index} using MMAL backend...")
+                self.camera = cv2.VideoCapture(camera_index, cv2.CAP_MMAL)
                 
                 if not self.camera.isOpened():
-                    logger.error(f"Failed to open camera at index {camera_index} using V4L2. Trying default backend...")
-                    # Fallback to default if V4L2 fails
-                    self.camera = cv2.VideoCapture(camera_index)
-                    if not self.camera.isOpened():
-                         logger.error(f"Failed to open camera at index {camera_index} using default backend either.")
-                         return False
+                    logger.warning("Failed to open camera with MMAL backend. Trying V4L2...")
+                    # Fallback to V4L2
+                    self.camera = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
+                    if self.camera.isOpened():
+                        # Set format to RGB3 for V4L2
+                        self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('R','G','B','3'))
+                        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                        self.camera.set(cv2.CAP_PROP_FPS, 30)
+                
+                if not self.camera.isOpened():
+                    logger.error(f"Failed to open camera at index {camera_index} using both MMAL and V4L2 backends.")
+                    return False
                          
-                logger.info(f"Camera {camera_index} opened successfully (Backend: {'V4L2' if self.camera.getBackendName() == 'V4L2' else 'Default'})")
+                logger.info(f"Camera {camera_index} opened successfully (Backend: {self.camera.getBackendName()})")
             except Exception as e:
                 logger.error(f"Error initializing camera: {e}")
                 return False
@@ -108,25 +105,27 @@ class InteractionManager:
                         logger.info("Attempting to reopen camera...")
                         try:
                             camera_index = self.services['face'].config.get('camera', {}).get('index', 0)
-                            # Also use V4L2 when reopening
-                            self.camera = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
-                            if self.camera.isOpened():
-                                # Set format to RGB3
-                                self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('R','G','B','3'))
-                                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                                self.camera.set(cv2.CAP_PROP_FPS, 30)
-                            else:
-                                logger.warning("Failed to reopen with V4L2, trying default...")
-                                self.camera = cv2.VideoCapture(camera_index)
+                            # Try MMAL backend first
+                            logger.info("Attempting to reopen camera with MMAL backend...")
+                            self.camera = cv2.VideoCapture(camera_index, cv2.CAP_MMAL)
+                            
+                            if not self.camera.isOpened():
+                                logger.warning("Failed to reopen with MMAL, trying V4L2...")
+                                self.camera = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
                                 if self.camera.isOpened():
-                                    # Set format to RGB3
+                                    # Set format to RGB3 for V4L2
                                     self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('R','G','B','3'))
                                     self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
                                     self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
                                     self.camera.set(cv2.CAP_PROP_FPS, 30)
-                            camera_reopened = True # Mark as reopened (or attempt made)
-                            consecutive_camera_failures = 0 # Reset counter
+                            
+                            if self.camera.isOpened():
+                                logger.info(f"Camera reopened successfully (Backend: {self.camera.getBackendName()})")
+                                camera_reopened = True
+                                consecutive_camera_failures = 0
+                            else:
+                                logger.error("Failed to reopen camera with both MMAL and V4L2 backends.")
+                                camera_reopened = True
                         except Exception as e:
                             logger.error(f"Error trying to reopen camera: {e}")
                             camera_reopened = True # Mark attempt failed
