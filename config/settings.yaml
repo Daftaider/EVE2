@@ -27,7 +27,7 @@ logging:
 # Face detection settings
 face_detection:
   # Path to the Haar cascade file
-  model_path: src/models/face/haarcascade_frontalface_default.xml
+  model_path: src/models/face/haarcascade_frontalface_alt.xml
   # Detection parameters
   scale_factor: 1.1
   min_neighbors: 2
@@ -35,7 +35,7 @@ face_detection:
 
 # Face recognition settings (Placeholder - Using detection model for now)
 face:
-  model_path: src/models/face/haarcascade_frontalface_default.xml # Placeholder
+  model_path: src/models/face/haarcascade_frontalface_alt.xml # Placeholder
   min_confidence: 0.5
 
 # Emotion detection settings
