@@ -113,35 +113,22 @@ class VoiceSynth:
                 mic_list = sr.Microphone.list_microphone_names()
                 logger.info(f"Available microphones: {mic_list}")
                 
-                device_index = None
-                target_mic_name_part = "wm8960" # Look for the specific sound card name
+                # Try each available microphone device index until one works
+                for i, mic_name in enumerate(mic_list):
+                    logger.info(f"Attempting to initialize microphone: {mic_name} (index {i})")
+                    try:
+                        temp_mic = sr.Microphone(device_index=i)
+                        with temp_mic as source:
+                            logger.info(f"Adjusting for ambient noise on {mic_name} (index {i})...")
+                            self.recognizer.adjust_for_ambient_noise(source, duration=1.0) # Reduced duration slightly
+                        self.microphone = temp_mic # Successfully initialized
+                        logger.info(f"Successfully initialized microphone: {mic_name} (index {i})")
+                        break # Found a working microphone
+                    except Exception as e_mic:
+                        logger.warning(f"Failed to initialize {mic_name} (index {i}): {e_mic}")
                 
-                # First, try to find the specific sound card by name
-                for idx, name in enumerate(mic_list):
-                    if target_mic_name_part in name.lower():
-                        device_index = idx
-                        logger.info(f"Found target microphone '{name}' at index {idx}")
-                        break
-                
-                # If specific card not found by name, fall back to the first available non-empty device
-                if device_index is None:
-                    logger.warning(f"Target microphone '{target_mic_name_part}' not found by name. Trying first available.")
-                    for idx, name in enumerate(mic_list):
-                        if name: # Check if name is not empty/None
-                            device_index = idx
-                            logger.info(f"Using first available microphone '{name}' at index {idx}")
-                            break
-
-                # Try initializing the selected microphone index
-                if device_index is not None:
-                    self.microphone = sr.Microphone(device_index=device_index)
-                    with self.microphone as source:
-                        logger.info(f"Adjusting for ambient noise on index {device_index}...")
-                        # Increase duration slightly? Sometimes helps initialization.
-                        self.recognizer.adjust_for_ambient_noise(source, duration=1.5)
-                    logger.info(f"Successfully initialized microphone index {device_index}")
-                else:
-                    logger.error("No suitable microphone device index found.")
+                if not self.microphone:
+                    logger.error("No suitable microphone device found after trying all available indices.")
 
             except Exception as e:
                 logger.error(f"Failed during microphone search/initialization: {e}")
