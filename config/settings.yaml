@@ -20,7 +20,7 @@ animation:
 
 # Logging configuration
 logging:
-  level: INFO
+  level: DEBUG
   format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
   file: src/logs/eve2.log
 
