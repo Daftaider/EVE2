@@ -8,6 +8,7 @@ import time
 from typing import Optional, Dict, Any
 from pathlib import Path
 import cv2
+import os
 
 from .eye_display import EyeDisplay, Emotion
 from .face_service import FaceService
@@ -46,7 +47,17 @@ class InteractionManager:
                 camera_index = self.services['face'].config.get('camera', {}).get('index', 0)
                 # Explicitly use V4L2 backend for potentially better compatibility on Linux/RPi
                 logger.info(f"Attempting to open camera {camera_index} using V4L2 backend...")
+                
+                # Set camera format to RGB3 (24-bit RGB) before opening
+                os.environ['OPENCV_VIDEOIO_V4L2_DEBUG'] = '1'  # Enable V4L2 debug output
                 self.camera = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
+                
+                if self.camera.isOpened():
+                    # Set format to RGB3
+                    self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('R','G','B','3'))
+                    self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    self.camera.set(cv2.CAP_PROP_FPS, 30)
                 
                 if not self.camera.isOpened():
                     logger.error(f"Failed to open camera at index {camera_index} using V4L2. Trying default backend...")
@@ -99,17 +110,23 @@ class InteractionManager:
                             camera_index = self.services['face'].config.get('camera', {}).get('index', 0)
                             # Also use V4L2 when reopening
                             self.camera = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
-                            if not self.camera.isOpened():
-                                 logger.warning("Failed to reopen with V4L2, trying default...")
-                                 self.camera = cv2.VideoCapture(camera_index)
-                                 
                             if self.camera.isOpened():
-                                logger.info("Camera reopened successfully.")
-                                camera_reopened = True # Mark as reopened (or attempt made)
-                                consecutive_camera_failures = 0 # Reset counter
+                                # Set format to RGB3
+                                self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('R','G','B','3'))
+                                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                                self.camera.set(cv2.CAP_PROP_FPS, 30)
                             else:
-                                logger.error("Failed to reopen camera.")
-                                camera_reopened = True # Mark attempt failed
+                                logger.warning("Failed to reopen with V4L2, trying default...")
+                                self.camera = cv2.VideoCapture(camera_index)
+                                if self.camera.isOpened():
+                                    # Set format to RGB3
+                                    self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('R','G','B','3'))
+                                    self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                                    self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                                    self.camera.set(cv2.CAP_PROP_FPS, 30)
+                            camera_reopened = True # Mark as reopened (or attempt made)
+                            consecutive_camera_failures = 0 # Reset counter
                         except Exception as e:
                             logger.error(f"Error trying to reopen camera: {e}")
                             camera_reopened = True # Mark attempt failed
