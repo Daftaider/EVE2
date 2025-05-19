@@ -40,7 +40,9 @@ class InteractionManager:
         self.last_mouse_click_time: float = 0.0
         self.num_mouse_clicks: int = 0
         self.double_click_interval: float = 0.3  # seconds
-        self.debug_font: Optional[pygame.font.Font] = None
+        self.pygame_initialized_in_thread: bool = False
+        self.screen: Optional[pygame.Surface] = None # Master screen surface
+        self.debug_font: Optional[pygame.font.Font] = None # Moved here from EyeDisplay
         self.debug_buttons: Dict[str, Dict[str, Any]] = {} # Store button rects and actions
         self.debug_rotation_angle: int = 0
         self.debug_input_text: str = ""
@@ -50,24 +52,23 @@ class InteractionManager:
         self.debug_message_timer: float = 0.0
         
     def _initialize_debug_font(self):
-        if self.debug_font is None:
+        # This now relies on self.pygame_initialized_in_thread being true
+        # and pygame.font.init() having been called.
+        if self.debug_font is None and self.pygame_initialized_in_thread:
             try:
-                # Pygame needs to be initialized before font can be used.
-                # EyeDisplay.start() calls pygame.init(). Ensure it's called before this.
-                if pygame.get_init(): # Check if Pygame is initialized
-                    self.debug_font = pygame.font.Font(None, 30)  # Default font, size 30
-                    if not self.debug_font: # Fallback if Font(None, ..) fails
-                         self.debug_font = pygame.font.SysFont('arial', 28)
-                else:
-                    logger.warning("Pygame not initialized when trying to load debug font.")
+                # pygame.font.init() should have been called
+                self.debug_font = pygame.font.Font(None, 30)
+                if not self.debug_font:
+                    self.debug_font = pygame.font.SysFont('arial', 28)
+                logger.info("Debug font initialized.")
             except Exception as e:
                 logger.error(f"Failed to load font for debug UI: {e}")
-                if pygame.get_init(): # Check again
-                    try:
-                        self.debug_font = pygame.font.SysFont('arial', 28) # Fallback
-                    except Exception as e_sysfont:
-                        logger.error(f"Failed to load system font for debug UI: {e_sysfont}")
-
+                try:
+                    self.debug_font = pygame.font.SysFont('arial', 28)
+                except Exception as e_sysfont:
+                    logger.error(f"Failed to load system font for debug UI: {e_sysfont}")
+        elif not self.pygame_initialized_in_thread:
+            logger.warning("Attempted to initialize debug font, but Pygame not yet initialized in thread.")
 
     def start(self) -> bool:
         """Start all services and begin interaction loop."""
@@ -80,42 +81,37 @@ class InteractionManager:
                 'llm': LLMService(self.config_path)
             }
             
-            # Start display service first as it initializes Pygame
-            if not self.services['display'].start():
-                logger.error("Failed to start EyeDisplay service")
+            # Prepare EyeDisplay resources (loads sprites) - NO Pygame init here
+            if not self.services['display'].prepare_resources():
+                logger.error("Failed to prepare EyeDisplay resources")
                 return False
             
-            # Initialize debug font after Pygame is initialized by EyeDisplay
-            self._initialize_debug_font()
-
+            # Camera initialization (remains largely the same)
             try:
                 logger.info(f"Attempting to initialize Picamera2...")
                 self.picam2 = Picamera2()
                 config = self.picam2.create_preview_configuration(
-                    main={"size": (640, 480), "format": "RGB888"}, # Using RGB888 for direct Pygame use
-                    # lores={"size": (320, 240), "format": "YUV420"} # lores stream not strictly needed for this
+                    main={"size": (640, 480), "format": "RGB888"}
                 )
                 self.picam2.configure(config)
                 self.picam2.start()
                 if not self.picam2.started:
                     logger.error("Failed to start Picamera2")
-                    # Continue without camera if other services can run
                 else:
                     logger.info("Picamera2 initialized successfully")
             except Exception as e:
                 logger.error(f"Error initializing Picamera2: {e}. Camera will be unavailable.")
-                self.picam2 = None # Ensure picam2 is None if it fails
+                self.picam2 = None
             
             # Start other services
             for name, service in self.services.items():
-                if name == 'display': continue # Already started
-                if hasattr(service, 'start') and not service.start(): # Check if service has start method
+                if name == 'display': continue # Already prepared
+                if hasattr(service, 'start') and not service.start():
                     logger.error(f"Failed to start {name} service")
-                    # Decide on recovery or abort
             
             self.running = True
             self.thread = threading.Thread(target=self._interaction_loop)
-            self.thread.daemon = True
+            self.thread.daemon = True # Ensure thread exits when main program exits
             self.thread.start()
             
             logger.info("Interaction manager started successfully")
@@ -333,33 +329,22 @@ class InteractionManager:
         self._render_text(screen, "Voice Debug - To be implemented", (screen_width // 2, screen_height // 2), center_x=True)
 
     def _render_debug_ui(self, frame: Optional[np.ndarray]):
-        screen = self.services['display'].screen
-        if screen is None or self.debug_font is None: # Ensure screen and font are available
-            if self.debug_font is None: self._initialize_debug_font() # Try to init font again
-            if screen is None or self.debug_font is None: # Still None
-                 logger.error("Debug UI cannot be rendered: screen or font not available.")
-                 return
-
-        screen.fill((30, 30, 30)) # Dark background for debug mode
-        self.debug_buttons.clear() # Clear buttons before each render pass
-
+        # Now uses self.screen directly, which is initialized in _interaction_loop
+        if not self.pygame_initialized_in_thread or self.screen is None or self.debug_font is None:
+            logger.error("Debug UI cannot be rendered: Pygame/screen/font not ready in thread.")
+            return
+        
+        self.screen.fill((30, 30, 30))
+        self.debug_buttons.clear()
         if self.debug_mode == "main_menu":
-            self._render_debug_main_menu(screen)
+            self._render_debug_main_menu(self.screen)
         elif self.debug_mode == "video_debug":
-            # We need to run face detection here if we want to show boxes and enable enrolment
             detected_faces_list: List[Tuple[int, int, int, int]] = []
             if frame is not None:
                 detected_faces_list = self.services['face'].detect_faces(frame)
-                # For video debug, we might want to update self.debug_recognized_face_info
-                # This part needs more thought on how a face is 'selected' for enrolment in debug
-                if detected_faces_list: # If any face is detected
-                    # For now, let's just say there's a face if one is detected.
-                    # We'd need a way to click on a face or cycle through them.
-                    # Simple approach: if one face, make it available for enrolment.
+                if detected_faces_list:
                     if len(detected_faces_list) == 1 and not self.debug_active_input_field:
-                         # Store the ROI of the first detected face if needed for enrolment later
                          x,y,w,h = detected_faces_list[0]
-                         # Ensure ROI coordinates are within frame bounds
                          y1, y2 = max(0, y), min(frame.shape[0], y + h)
                          x1, x2 = max(0, x), min(frame.shape[1], x + w)
                          face_roi = frame[y1:y2, x1:x2]
@@ -367,26 +352,14 @@ class InteractionManager:
                             self.debug_recognized_face_info = {'has_face': True, 'roi_for_enrol': face_roi, 'box': detected_faces_list[0]}
                          else:
                             self.debug_recognized_face_info = {'has_face': False}
-                    elif not detected_faces_list and not self.debug_active_input_field : # No faces, clear info
+                    elif not detected_faces_list and not self.debug_active_input_field :
                         self.debug_recognized_face_info = None
-
-                # Draw face boxes on the frame to be displayed (before rotation)
-                # This is tricky because the frame is passed to _render_video_debug, which then rotates it.
-                # We should draw boxes on the *rotated* frame or pass boxes and rotate them too.
-                # For now, _render_video_debug receives the raw frame. It should handle drawing boxes after rotation.
-                
-            self._render_video_debug(screen, frame) # frame is the BGR cv2 frame
-            
-            # Draw face boxes on the *displayed* (potentially rotated and resized) frame.
-            # This needs to happen inside _render_video_debug after the frame is prepared for display.
-            # Let's modify _render_video_debug to accept detected_faces_list.
-
+            self._render_video_debug(self.screen, frame)
         elif self.debug_mode == "voice_debug":
-            self._render_voice_debug_placeholder(screen)
+            self._render_voice_debug_placeholder(self.screen)
         
-        # Display timed messages
         if self.debug_message and time.time() < self.debug_message_timer:
-            self._render_text(screen, self.debug_message, (screen.get_width() // 2, screen.get_height() - 30), color=(255,200,0), center_x=True)
+            self._render_text(self.screen, self.debug_message, (self.screen.get_width() // 2, self.screen.get_height() - 30), color=(255,200,0), center_x=True)
         elif self.debug_message and time.time() >= self.debug_message_timer:
             self.debug_message = None
 
@@ -418,10 +391,33 @@ class InteractionManager:
         self.debug_recognized_face_info = None # Clear after attempt
 
     def _interaction_loop(self) -> None:
-        """Main interaction loop."""
-        # Initialize debug font (needs Pygame to be init by EyeDisplay.start())
-        # Moved to self.start() to ensure EyeDisplay.start() is called first.
+        """Main interaction loop. This thread handles Pygame init, events, and rendering."""
+        
+        # --- Pygame Initialization (within this thread) ---
+        if not self.pygame_initialized_in_thread:
+            try:
+                pygame.init() # Initialize all Pygame modules
+                pygame.font.init() # Initialize font module explicitly
+                
+                display_config = self.services['display'].config.get('display', {})
+                width = display_config.get('width', 800)
+                height = display_config.get('height', 480)
+                
+                self.screen = pygame.display.set_mode((width, height))
+                pygame.display.set_caption("EVE2 Interaction") # Caption can be more general now
+                
+                self.services['display'].screen = self.screen # Provide screen to EyeDisplay service
+                
+                self._initialize_debug_font() # Initialize debug font now that Pygame font is ready
+                
+                self.pygame_initialized_in_thread = True
+                logger.info("Pygame initialized successfully within interaction thread.")
+                
+            except Exception as e_pygame_init:
+                logger.error(f"Fatal error initializing Pygame in interaction thread: {e_pygame_init}")
+                self.running = False # Stop the loop if Pygame can't initialize
 
+        # ... (rest of the loop: last_seen_time, etc.)
         last_seen_time = time.time()
         no_face_emotion = Emotion.NEUTRAL
         consecutive_camera_failures = 0
@@ -429,21 +425,23 @@ class InteractionManager:
         camera_reopened_attempted_this_cycle = False
 
         while self.running:
-            # --- Event Handling ---
-            # This needs to be here regardless of debug mode for QUIT and debug toggling
-            # (Pygame events should be polled frequently)
+            if not self.pygame_initialized_in_thread: # If init failed, don't proceed
+                time.sleep(0.1)
+                continue
+
+            # --- Event Handling (must be in the Pygame thread) ---
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
                     break
+                # ... (rest of event handling: K_d, MOUSEBUTTONDOWN, _handle_debug_keydown, _handle_debug_click)
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_d:
                         self._toggle_debug_mode()
                     elif self.debug_mode: 
                         self._handle_debug_keydown(event)
-
                 if event.type == pygame.MOUSEBUTTONDOWN:
-                    if event.button == 1: # Left click
+                    if event.button == 1:
                         if self.debug_mode:
                             self._handle_debug_click(event.pos)
                         else: 
@@ -456,15 +454,13 @@ class InteractionManager:
                             else:
                                 self.num_mouse_clicks = 1 
                             self.last_mouse_click_time = current_time
-            if not self.running: break # Exit loop if QUIT event was processed
+            if not self.running: break
 
-            # --- Camera Frame Acquisition ---
+            # --- Camera Frame Acquisition (remains the same) ---
             current_cv_frame: Optional[np.ndarray] = None
             if self.picam2 and self.picam2.started:
                 try:
-                    # capture_array returns an RGB numpy array
                     rgb_frame_array = self.picam2.capture_array()
-                    # Convert to BGR for OpenCV processing if needed by services
                     current_cv_frame = cv2.cvtColor(rgb_frame_array, cv2.COLOR_RGB2BGR)
                     consecutive_camera_failures = 0
                     camera_reopened_attempted_this_cycle = False
@@ -477,137 +473,106 @@ class InteractionManager:
                         if self.picam2:
                             try:
                                 self.picam2.stop()
-                            except Exception as e_stop:
+                            except Exception as e_stop: 
                                 logger.error(f"Exception while stopping picam2: {e_stop}")
-                            self.picam2 = None # Flag for re-initialization
-                            camera_reopened_attempted_this_cycle = False # Allow reopen attempt on next cycle
+                            self.picam2 = None
+                            camera_reopened_attempted_this_cycle = False
                         consecutive_camera_failures = 0 
-            elif not self.picam2 and not camera_reopened_attempted_this_cycle : # Try to reinitialize if picam2 is None
+            elif not self.picam2 and not camera_reopened_attempted_this_cycle :
                 logger.info("Picamera2 is not available. Attempting to reinitialize...")
-                camera_reopened_attempted_this_cycle = True # Avoid re-attempting in the same loop if it fails
+                camera_reopened_attempted_this_cycle = True
                 try:
                     self.picam2 = Picamera2()
                     config = self.picam2.create_preview_configuration(main={"size": (640, 480), "format": "RGB888"})
                     self.picam2.configure(config)
                     self.picam2.start()
-                    if self.picam2.started:
-                        logger.info("Picamera2 reinitialized successfully.")
-                        consecutive_camera_failures = 0
-                    else:
-                        logger.error("Failed to restart Picamera2 after reinitialization attempt.")
-                        self.picam2 = None # Ensure it stays None if start fails
-                except Exception as e_reinit:
-                    logger.error(f"Error reinitializing Picamera2: {e_reinit}")
-                    self.picam2 = None
+                    if self.picam2.started: logger.info("Picamera2 reinitialized successfully.")
+                    else: logger.error("Failed to restart Picamera2."); self.picam2 = None
+                except Exception as e_reinit: logger.error(f"Error reinitializing Picamera2: {e_reinit}"); self.picam2 = None
 
             # --- Main Logic & Rendering ---
             display_service = self.services.get('display')
 
             if self.debug_mode:
-                # Pass the BGR frame to debug UI; it will handle conversion for display if needed
                 self._render_debug_ui(current_cv_frame) 
             else: # Normal mode
-                # --- Normal mode logic ---
-                current_emotion_to_display = no_face_emotion # Default
-                
+                # ... (normal mode logic as before, using display_service.update() to draw on self.screen)
+                current_emotion_to_display = no_face_emotion
                 if current_cv_frame is not None:
                     faces = self.services['face'].detect_faces(current_cv_frame)
-                    
                     primary_face_roi: Optional[np.ndarray] = None
                     recognized_name: Optional[str] = None
                     detected_emotion_from_face: Optional[Emotion] = None
-
                     if faces:
                         last_seen_time = time.time()
-                        # Get first face bounding box (x, y, w, h)
                         x, y, w, h = faces[0]
                         y1, y2 = max(0, y), min(current_cv_frame.shape[0], y + h)
                         x1, x2 = max(0, x), min(current_cv_frame.shape[1], x + w)
                         primary_face_roi = current_cv_frame[y1:y2, x1:x2]
-
                         if primary_face_roi.size > 0:
                             recognized_name = self.services['face'].recognize_face(primary_face_roi)
-                            # Pass BGR to emotion service if it expects that
                             detected_emotion_from_face = self.services['emotion'].detect_emotion(primary_face_roi) 
-                        else: # Empty ROI
-                            primary_face_roi = None # Ensure it's None
-
-                        if detected_emotion_from_face:
-                            current_emotion_to_display = detected_emotion_from_face
-                            no_face_emotion = Emotion.NEUTRAL # Reset if face seen
-                        else: # No emotion from face, use neutral for face
-                            current_emotion_to_display = Emotion.NEUTRAL
-                    else: # No faces detected
+                        else: primary_face_roi = None
+                        if detected_emotion_from_face: current_emotion_to_display = detected_emotion_from_face; no_face_emotion = Emotion.NEUTRAL
+                        else: current_emotion_to_display = Emotion.NEUTRAL
+                    else: 
                         idle_time = time.time() - last_seen_time
-                        sleep_threshold = self.services['face'].config.get('interaction', {}).get('sleep_after_seconds', 600) # Default 10 mins
-                        if idle_time > sleep_threshold:
-                             no_face_emotion = Emotion.SLEEPY
+                        sleep_threshold = self.services['face'].config.get('interaction', {}).get('sleep_after_seconds', 600)
+                        if idle_time > sleep_threshold: no_face_emotion = Emotion.SLEEPY
                         current_emotion_to_display = no_face_emotion
-                    
-                    # Pass data to LLM if voice input occurs (example)
                     if self.services['voice'].has_input():
                         text = self.services['voice'].get_input()
                         if text:
                             logger.info(f"Received voice input: {text}")
-                            response = self.services['llm'].generate_response(
-                                text,
-                                user_name=recognized_name, # Pass recognized name
-                                emotion=current_emotion_to_display.value # Pass current displayed emotion
-                            )
-                            if response:
-                                logger.info(f"LLM Response: {response}")
-                                self.services['voice'].speak(response)
-                            else:
-                                logger.warning("LLM failed to generate response.")
-                else: # current_cv_frame is None
-                    current_emotion_to_display = Emotion.NEUTRAL # Or some other default for no camera
-                
-                if display_service:
-                    display_service.set_emotion(current_emotion_to_display)
-                    display_service.update() # EyeDisplay.update() just draws
+                            response = self.services['llm'].generate_response(text, user_name=recognized_name, emotion=current_emotion_to_display.value)
+                            if response: logger.info(f"LLM Response: {response}"); self.services['voice'].speak(response)
+                            else: logger.warning("LLM failed to generate response.")
+                else: current_emotion_to_display = Emotion.NEUTRAL
+                if display_service: display_service.set_emotion(current_emotion_to_display); display_service.update()
 
-            # --- Global screen update & FPS control ---
-            if display_service and display_service.screen:
+            # --- Global screen update & FPS control (must be in Pygame thread) ---
+            if self.screen: # Check if screen is initialized
                  pygame.display.flip()
-                 display_service.clock.tick(display_service.config.get('display', {}).get('fps', 30))
-            else: # Fallback if display service or screen is somehow not available
-                time.sleep(1/30) # Basic delay
-
+                 if display_service: # Use display_service's clock if available
+                     display_service.clock.tick(display_service.config.get('display', {}).get('fps', 30))
+                 else: # Fallback clock tick if display_service not available (should not happen)
+                     pygame.time.Clock().tick(30)
+            else:
+                time.sleep(1/30) 
         # End of while self.running loop
+        logger.info("Interaction loop ended.")
             
     def stop(self) -> None:
-        """Stop all services."""
-        self.running = False
-        if self.thread and self.thread.is_alive(): # Check if alive before join
+        """Stop all services and quit Pygame if initialized in thread."""
+        self.running = False # Signal the loop to stop
+        if self.thread and self.thread.is_alive():
             logger.info("Waiting for interaction manager thread to join...")
-            self.thread.join(timeout=2.0) # Add timeout
+            self.thread.join(timeout=2.0)
             if self.thread.is_alive():
                  logger.warning("Interaction manager thread did not join in time.")
 
+        # Picamera2 stop logic (remains the same)
         if self.picam2:
             try:
-                if self.picam2.started:
-                    self.picam2.stop()
-                # Picamera2 handles its own closing, no explicit close needed usually
+                if self.picam2.started: self.picam2.stop()
                 logger.info("Picamera2 stopped")
-            except Exception as e:
-                logger.error(f"Exception stopping Picamera2: {e}")
+            except Exception as e: logger.error(f"Exception stopping Picamera2: {e}")
             self.picam2 = None
             
-        # Stop all services (display service handles pygame.quit())
+        # Stop other services (display service stop is now simpler)
         for service_name, service in self.services.items():
-            if hasattr(service, 'stop'): # Check if service has stop method
+            if hasattr(service, 'stop'):
                 logger.info(f"Stopping {service_name} service...")
                 service.stop()
+        
+        # Quit Pygame modules if they were initialized in the thread
+        if self.pygame_initialized_in_thread:
+            logger.info("Quitting Pygame modules...")
+            pygame.font.quit()
+            pygame.quit()
+            self.pygame_initialized_in_thread = False # Reset flag
             
-        logger.info("Interaction manager stopped")
-        # Pygame.quit() should be called by EyeDisplay.stop()
-        # If EyeDisplay isn't guaranteed to be last or if it might fail,
-        # a final pygame.quit() here could be a safeguard, but generally owned by display service.
-        if pygame.get_init(): # If Pygame is still initialized
-            # pygame.quit() # Consider if this is needed here or strictly in EyeDisplay
-            pass
-
+        logger.info("Interaction manager fully stopped")
 
     def __enter__(self):
         """Context manager entry."""

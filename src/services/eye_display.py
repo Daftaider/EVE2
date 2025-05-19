@@ -25,11 +25,11 @@ class EyeDisplay:
     def __init__(self, config_path: str = "config/settings.yaml"):
         """Initialize eye display service."""
         self.config = self._load_config(config_path)
-        self.screen: Optional[pygame.Surface] = None # Type hint for clarity
+        self.screen: Optional[pygame.Surface] = None # Screen will be set by InteractionManager
         self.running = False
         self.current_emotion = Emotion.NEUTRAL
         self.eye_sprites: Dict[Emotion, pygame.Surface] = {}
-        self.clock = pygame.time.Clock() # Keep clock for InteractionManager to use
+        self.clock = pygame.time.Clock() # Clock can still be owned here, ticked by InteractionManager
         
     def _load_config(self, config_path: str) -> dict:
         """Load configuration from YAML file."""
@@ -40,41 +40,37 @@ class EyeDisplay:
             logger.error(f"Error loading config: {e}")
             return {}
             
-    def start(self) -> bool:
-        """Start the eye display. Initializes Pygame and the screen."""
+    def prepare_resources(self) -> bool:
+        """Load eye sprites and prepare for rendering."""
         try:
-            pygame.init() # Initialize all Pygame modules
-            width = self.config.get('display', {}).get('width', 800)
-            height = self.config.get('display', {}).get('height', 480)
-            
-            self.screen = pygame.display.set_mode((width, height))
-            pygame.display.set_caption("EVE2 Eyes")
-            
+            # Pygame.init() and screen creation are handled by InteractionManager
             self._load_eye_sprites()
-            
-            self.running = True
-            logger.info("Eye display started successfully")
+            self.running = True # Service is ready to have its update() called
+            logger.info("Eye display resources prepared successfully")
             return True
-            
         except Exception as e:
-            logger.error(f"Error starting eye display: {e}")
+            logger.error(f"Error preparing eye display resources: {e}")
             return False
             
     def _load_eye_sprites(self) -> None:
         """Load eye sprites for each emotion."""
         try:
-            # Use src/assets/eyes directory
             assets_dir = Path("src/assets/eyes")
             for emotion in Emotion:
                 sprite_path = assets_dir / f"{emotion.value}.png"
                 if sprite_path.exists():
                     try:
-                        self.eye_sprites[emotion] = pygame.image.load(str(sprite_path))
+                        # Ensure Pygame is initialized before loading images
+                        if pygame.get_init():
+                            self.eye_sprites[emotion] = pygame.image.load(str(sprite_path))
+                        else:
+                            logger.error("Pygame not initialized when trying to load eye sprites.")
+                            # Optionally, raise an error or handle this state
+                            return # Can't load sprites if Pygame isn't up
                     except Exception as e:
                         logger.error(f"Failed to load sprite {sprite_path}: {e}")
                 else:
                     logger.warning(f"Missing sprite for emotion: {emotion.value}")
-                    
         except Exception as e:
             logger.error(f"Error loading eye sprites: {e}")
             
@@ -84,35 +80,38 @@ class EyeDisplay:
         logger.info(f"Emotion set to: {emotion.value}")
         
     def update(self) -> None:
-        """Update the display by drawing the current emotion. Does not flip the display."""
+        """Update the display by drawing the current emotion. Called by InteractionManager."""
         if not self.running or self.screen is None:
+            # If screen is None here, it means InteractionManager hasn't set it yet or there was an issue.
+            if self.running and self.screen is None:
+                 logger.warning("EyeDisplay.update() called but screen is not set.")
             return
-
+            
         try:
-            self.screen.fill((0, 0, 0)) # Clear screen
+            self.screen.fill((0, 0, 0)) 
             
             if self.current_emotion in self.eye_sprites:
                 sprite = self.eye_sprites[self.current_emotion]
                 x = (self.screen.get_width() - sprite.get_width()) // 2
                 y = (self.screen.get_height() - sprite.get_height()) // 2
                 self.screen.blit(sprite, (x, y))
-                
+            # No pygame.display.flip() or clock.tick() - handled by InteractionManager
         except Exception as e:
             logger.error(f"Error updating eye display visuals: {e}")
             
     def stop(self) -> None:
-        """Stop the eye display."""
-        if self.screen is not None:
-            pygame.quit()
-            self.screen = None
+        """Stop the eye display service."""
+        # pygame.quit() is handled by InteractionManager
         self.running = False
-        logger.info("Eye display stopped")
+        # self.screen = None # InteractionManager manages the screen lifecycle
+        logger.info("Eye display service stopped")
         
+    # __enter__ and __exit__ might need adjustment if start() is no longer the main init point
+    # For now, let's assume InteractionManager calls prepare_resources()
+    # If these are still used directly, they should call prepare_resources()
     def __enter__(self):
-        """Context manager entry."""
-        self.start()
+        self.prepare_resources()
         return self
         
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
         self.stop() 
