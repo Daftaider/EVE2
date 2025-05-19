@@ -30,6 +30,7 @@ class EyeDisplay:
         self.current_emotion = Emotion.NEUTRAL
         self.eye_sprites: Dict[Emotion, pygame.Surface] = {}
         self.clock = pygame.time.Clock()
+        self.pygame_initialized = False # Flag to ensure Pygame is initialized only once
         
     def _load_config(self, config_path: str) -> dict:
         """Load configuration from YAML file."""
@@ -43,12 +44,9 @@ class EyeDisplay:
     def start(self) -> bool:
         """Start the eye display."""
         try:
-            pygame.init()
-            width = self.config.get('display', {}).get('width', 800)
-            height = self.config.get('display', {}).get('height', 480)
-            
-            self.screen = pygame.display.set_mode((width, height))
-            pygame.display.set_caption("EVE2 Eyes")
+            # Don't initialize pygame here, do it in the update method
+            # self.screen = pygame.display.set_mode((width, height))
+            # pygame.display.set_caption("EVE2 Eyes")
             
             # Load eye sprites
             self._load_eye_sprites()
@@ -86,10 +84,23 @@ class EyeDisplay:
         
     def update(self) -> None:
         """Update the display."""
-        if not self.running or self.screen is None:
+        if not self.running:
             return
-            
+
         try:
+            # Initialize Pygame and screen if not already done
+            if not self.pygame_initialized:
+                pygame.init()
+                width = self.config.get('display', {}).get('width', 800)
+                height = self.config.get('display', {}).get('height', 480)
+                self.screen = pygame.display.set_mode((width, height))
+                pygame.display.set_caption("EVE2 Eyes")
+                self.pygame_initialized = True
+
+            if self.screen is None: # Check if screen was initialized
+                logger.error("Screen not initialized, cannot update display.")
+                return
+            
             # Clear screen
             self.screen.fill((0, 0, 0))
             

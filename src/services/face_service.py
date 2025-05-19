@@ -130,7 +130,12 @@ class FaceService:
                 minNeighbors=5,
                 minSize=(30, 30)
             )
-            return faces.tolist()
+            # Check if faces is a numpy array before calling tolist()
+            if isinstance(faces, np.ndarray):
+                return faces.tolist()
+            else:
+                # If faces is an empty tuple (no faces detected), return an empty list
+                return []
         except Exception as e:
             logger.error(f"Error detecting faces: {e}")
             return []
