@@ -50,6 +50,8 @@ class InteractionManager:
         self.debug_recognized_face_info: Optional[Dict[str, Any]] = None # Store info for naming
         self.debug_message: Optional[str] = None # For displaying status messages in debug UI
         self.debug_message_timer: float = 0.0
+        self.debug_display_infos: List[Dict[str, Any]] = [] # New: For storing detailed info of all detected faces in video debug
+        self.debug_roi_for_current_enrol_action: Optional[np.ndarray] = None # New: ROI for the face currently being enrolled
         
     def _initialize_debug_font(self):
         # This now relies on self.pygame_initialized_in_thread being true
@@ -172,28 +174,29 @@ class InteractionManager:
                 self._toggle_debug_mode()
             elif clicked_action == "video_debug_menu":
                 self.debug_mode = "video_debug"
-                self.debug_recognized_face_info = None # Clear previous face info
+                self.debug_display_infos.clear() # Clear previous face infos
+                self.debug_roi_for_current_enrol_action = None
                 self.debug_input_text = ""
             elif clicked_action == "voice_debug_menu":
                 self.debug_mode = "voice_debug"
             elif clicked_action == "back_to_main_menu":
                 self.debug_mode = "main_menu"
-                self.debug_recognized_face_info = None # Clear face info when going back
+                self.debug_display_infos.clear()
+                self.debug_roi_for_current_enrol_action = None
             elif clicked_action == "rotate_cw":
                 self.debug_rotation_angle = (self.debug_rotation_angle + 90) % 360
             elif clicked_action == "rotate_ccw":
                 self.debug_rotation_angle = (self.debug_rotation_angle - 90 + 360) % 360
             elif clicked_action == "enrol_face_input":
-                 # Check if ROI is valid for enrolment
-                 face_info = self.debug_recognized_face_info
-                 roi_for_enrolment = face_info.get('roi_for_enrol') if face_info else None
-                 if isinstance(roi_for_enrolment, np.ndarray) and roi_for_enrolment.size > 0:
+                 # self.debug_roi_for_current_enrol_action should have been set when the button was rendered
+                 if self.debug_roi_for_current_enrol_action is not None and self.debug_roi_for_current_enrol_action.size > 0:
                     self.debug_active_input_field = "face_name"
                     self.debug_input_text = "" # Clear for new input
                     logger.info("Activated face name input for enrolment.")
                  else:
-                    logger.warning("Cannot enrol: No face ROI captured or ROI is empty for enrolment.")
-                    self.debug_message = "Error: No face ROI to enrol."
+                    logger.warning("Cannot enrol: No valid ROI for current enrolment action.")
+                    self.debug_message = "Error: No face data for this action."
+                    self.debug_message_timer = time.time() + 3
             # More actions will be added (like submitting enrolment)
 
     def _render_text(self, screen: pygame.Surface, text: str, pos: Tuple[int, int], color: Tuple[int,int,int] = (255, 255, 255), center_x: bool = False):
@@ -242,20 +245,20 @@ class InteractionManager:
         self._render_button(screen, "Voice Debug", button_start_y + button_spacing, "voice_debug_menu", center_x_pos=screen_center_x)
         self._render_button(screen, "Exit Debug Mode", button_start_y + 2 * button_spacing, "exit_debug", center_x_pos=screen_center_x)
 
-    def _render_video_debug(self, screen: pygame.Surface, frame: Optional[np.ndarray]):
-        self.debug_buttons.clear()
+    def _render_video_debug(self, screen: pygame.Surface, frame_with_boxes: Optional[np.ndarray]):
         screen_width = screen.get_width()
         screen_height = screen.get_height()
         
-        # Back button
         self._render_button(screen, "< Back", 30, "back_to_main_menu", center_x_pos=80)
         self._render_text(screen, "Video Debug", (screen_width // 2, 30), center_x=True)
+        if self.debug_display_infos:
+             self._render_text(screen, f"Detections: {len(self.debug_display_infos)}", (screen_width - 100, 50), center_x=True)
 
-        video_area_rect = pygame.Rect(50, 80, screen_width - 100, screen_height - 250) # Adjusted height for messages
+        video_area_rect = pygame.Rect(50, 80, screen_width - 100, screen_height - 250)
         pygame.draw.rect(screen, (50, 50, 50), video_area_rect)
 
-        if frame is not None:
-            display_frame = frame.copy() # frame already has boxes if detected
+        if frame_with_boxes is not None:
+            display_frame = frame_with_boxes.copy()
             # Apply rotation
             if self.debug_rotation_angle == 90:
                 display_frame = cv2.rotate(display_frame, cv2.ROTATE_90_CLOCKWISE)
@@ -270,15 +273,34 @@ class InteractionManager:
             new_w, new_h = int(frame_w * scale), int(frame_h * scale)
             
             if new_w > 0 and new_h > 0:
-                resized_frame = cv2.resize(display_frame, (new_w, new_h))
+                resized_frame_for_pygame = cv2.resize(display_frame, (new_w, new_h))
                 try:
-                    if not resized_frame.flags['C_CONTIGUOUS']:
-                        resized_frame = np.ascontiguousarray(resized_frame)
-                    pygame_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
+                    if not resized_frame_for_pygame.flags['C_CONTIGUOUS']:
+                        resized_frame_for_pygame = np.ascontiguousarray(resized_frame_for_pygame)
+                    pygame_frame = cv2.cvtColor(resized_frame_for_pygame, cv2.COLOR_BGR2RGB)
                     video_surface = pygame.surfarray.make_surface(pygame_frame.swapaxes(0, 1))
                     video_x = video_area_rect.left + (video_area_rect.width - new_w) // 2
                     video_y = video_area_rect.top + (video_area_rect.height - new_h) // 2
                     screen.blit(video_surface, (video_x, video_y))
+
+                    # Draw names/unknown status on Pygame screen, relative to displayed boxes
+                    # This requires transforming box coordinates to the displayed frame's scale and position
+                    # This is tricky because boxes are on the cv2 frame. Text will be separate.
+                    # Let's render text below the video area for now with the info.
+                    for face_info in self.debug_display_infos:
+                        fx, fy, fw, fh = face_info['box'] # These are for the original full-res frame
+                        
+                        # Apply same rotation to box points if needed (complex, easier to label on unrotated then let text rotate with frame)
+                        # For simplicity, we'll draw text near original box locations scaled to the display
+                        # This might not perfectly align if rotation is used.
+                        # A more robust way is to draw text on the cv2 frame before rotation and resize.
+                        # Let's try drawing text on the cv2 frame (frame_with_boxes) before it's processed for display.
+                        # Here, we just confirm display. If text was on frame_with_boxes, it shows.
+                        # Let's add the text rendering directly on the pygame surface for now, near estimated box locations.
+                        # This is tricky because boxes are on the cv2 frame. Text will be separate.
+                        # Let's render text below the video area for now with the info.
+                        pass # Box drawing is done on CV2 frame. Names/status will be rendered below video.
+
                 except Exception as e_surf:
                     logger.error(f"Error creating Pygame surface from frame: {e_surf}")
                     self._render_text(screen, "Error displaying frame", (video_area_rect.centerx, video_area_rect.centery), color=(255,0,0), center_x=True)
@@ -287,37 +309,47 @@ class InteractionManager:
         else:
             self._render_text(screen, "Camera not available or failed to capture frame", (video_area_rect.centerx, video_area_rect.centery), color=(255,255,0), center_x=True)
 
-        bottom_controls_y = screen_height - 100 # Y-level for buttons below video
+        bottom_controls_y = screen_height - 100
         
-        # Rotation buttons
         self._render_button(screen, "Rot CW", bottom_controls_y, "rotate_cw", center_x_pos=screen_width // 4)
         self._render_text(screen, f"{self.debug_rotation_angle}°", (screen_width // 2, bottom_controls_y -10 ), center_x=True)
         self._render_button(screen, "Rot CCW", bottom_controls_y, "rotate_ccw", center_x_pos=3 * screen_width // 4)
         
-        # Face enrolment UI elements
         enrol_elements_y = video_area_rect.bottom + 20
+        text_y_offset = 0
+
+        # Display recognized names or "Unknown" for each detected face
+        if not self.debug_active_input_field: # Only show list if not inputting a name
+            for i, face_info in enumerate(self.debug_display_infos):
+                name_text = face_info['name'] if face_info['name'] else "Unknown"
+                display_text = f"Face {i+1}: {name_text}"
+                # For simplicity, display as a list below video
+                self._render_text(screen, display_text, (50, enrol_elements_y + text_y_offset), color=(220,220,220))
+                text_y_offset += 25
+
         if self.debug_active_input_field == "face_name":
-            input_rect = pygame.Rect(screen_width // 2 - 150, enrol_elements_y, 300, 40)
+            input_rect = pygame.Rect(screen_width // 2 - 150, enrol_elements_y + text_y_offset, 300, 40)
             pygame.draw.rect(screen, (200, 200, 200), input_rect)
             pygame.draw.rect(screen, (100, 100, 100), input_rect, 2)
             self._render_text(screen, self.debug_input_text, (input_rect.x + 5, input_rect.y + 5), color=(0,0,0))
             self._render_text(screen, "Enter Name & Press Enter", (screen_width//2, input_rect.bottom + 5), center_x=True, color=(200,200,200))
-        elif self.debug_recognized_face_info:
-            if self.debug_recognized_face_info.get('multiple_faces'):
-                self._render_text(screen, "Multiple faces detected. Selection not yet implemented.", (screen_width//2, enrol_elements_y + 10), center_x=True, color=(255, 200, 0))
-            elif self.debug_recognized_face_info.get('has_face') and self.debug_recognized_face_info.get('roi_for_enrol') is not None:
-                 # Check if roi_for_enrol is actually a numpy array with size
-                 roi_check = self.debug_recognized_face_info.get('roi_for_enrol')
-                 if isinstance(roi_check, np.ndarray) and roi_check.size > 0:
-                    self._render_button(screen, "Enrol This Face", enrol_elements_y + 15, "enrol_face_input", center_x_pos=screen_width//2)
-                    if self.debug_recognized_face_info.get('name'): # This 'name' might be from a previous recognition attempt, not current detection
-                        self._render_text(screen, f"Previously Recognized: {self.debug_recognized_face_info['name']}", (screen_width//2, enrol_elements_y + 45), center_x=True)
-                 else: # ROI was empty or invalid
-                    self._render_text(screen, "Detected face ROI is empty.", (screen_width//2, enrol_elements_y + 10), center_x=True, color=(255, 200, 0))
-            elif self.debug_recognized_face_info.get('has_face') == False : # Explicitly no face
-                 self._render_text(screen, "No face detected for enrolment.", (screen_width//2, enrol_elements_y + 10), center_x=True, color=(255, 200, 0))
-        else: # No face info at all (e.g. camera off)
-            self._render_text(screen, "No face detected for enrolment.", (screen_width//2, enrol_elements_y + 10), center_x=True, color=(255, 200, 0))
+            text_y_offset += 70 # Space for input field and prompt
+        else:
+            unknown_faces = [info for info in self.debug_display_infos if info['name'] is None and info['roi'].size > 0]
+            if len(unknown_faces) == 1:
+                # If button is clicked, its action handler will use this ROI
+                self.debug_roi_for_current_enrol_action = unknown_faces[0]['roi'] 
+                self._render_button(screen, "Enrol This Face", enrol_elements_y + text_y_offset + 15, "enrol_face_input", center_x_pos=screen_width//2)
+                text_y_offset += 45
+            elif len(self.debug_display_infos) > 0 : # More than one face, or one known face
+                self._render_text(screen, f"{len(self.debug_display_infos)} face(s) detected.", (screen_width//2, enrol_elements_y + text_y_offset + 10), center_x=True, color=(255, 200, 0))
+                if any(uf['name'] is None for uf in self.debug_display_infos):
+                     self._render_text(screen, "Refined enrolment for multiple/specific faces TBD.", (screen_width//2, enrol_elements_y + text_y_offset + 30), center_x=True, color=(255, 200, 0))
+                text_y_offset += 40
+                self.debug_roi_for_current_enrol_action = None # No single face to enrol directly
+            else: # No faces detected
+                self._render_text(screen, "No face detected for enrolment.", (screen_width//2, enrol_elements_y + text_y_offset + 10), center_x=True, color=(255, 200, 0))
+                self.debug_roi_for_current_enrol_action = None
 
     def _render_voice_debug_placeholder(self, screen: pygame.Surface):
         self.debug_buttons.clear()
@@ -334,45 +366,38 @@ class InteractionManager:
             return
         
         self.screen.fill((30, 30, 30))
-        self.debug_buttons.clear()
+        self.debug_buttons.clear() # Clear buttons from previous frame
+        
         if self.debug_mode == "main_menu":
             self._render_debug_main_menu(self.screen)
         elif self.debug_mode == "video_debug":
-            processed_frame_for_display = None # Frame with boxes drawn, ready for display pipeline
-            detected_faces_list: List[Tuple[int, int, int, int]] = []
+            self.debug_display_infos.clear() # Clear from previous frame's detections
+            processed_frame_for_display = None # Frame with boxes drawn
+            raw_detected_faces: List[Tuple[int, int, int, int]] = []
 
             if frame is not None:
-                # Make a copy to draw on, before any rotation/resizing for display
-                frame_with_boxes = frame.copy()
-                detected_faces_list = self.services['face'].detect_faces(frame) # Original detection on raw frame
+                frame_with_boxes = frame.copy() # For drawing boxes on
+                raw_detected_faces = self.services['face'].detect_faces(frame) # Get all face candidates
 
-                for (fx, fy, fw, fh) in detected_faces_list:
+                for (fx, fy, fw, fh) in raw_detected_faces:
+                    # Draw rectangle for every detected face candidate
                     cv2.rectangle(frame_with_boxes, (fx, fy), (fx + fw, fy + fh), (0, 255, 0), 2)
+                    
+                    # Extract ROI for recognition
+                    y1, y2 = max(0, fy), min(frame.shape[0], fy + fh)
+                    x1, x2 = max(0, fx), min(frame.shape[1], fx + fw)
+                    roi = frame[y1:y2, x1:x2] # Get ROI from original, undrawn frame
+                    
+                    recognized_name = None
+                    if roi.size > 0: # Ensure ROI is not empty
+                        recognized_name = self.services['face'].recognize_face(roi)
+                    
+                    self.debug_display_infos.append({'box': (fx,fy,fw,fh), 'roi': roi, 'name': recognized_name})
                 
                 processed_frame_for_display = frame_with_boxes
-
-                # Update debug_recognized_face_info based on detection
-                if not self.debug_active_input_field: # Only update if not currently typing a name
-                    if len(detected_faces_list) == 1:
-                        x,y,w,h = detected_faces_list[0]
-                        # Ensure ROI coordinates are within frame bounds
-                        y1, y2 = max(0, y), min(frame.shape[0], y + h)
-                        x1, x2 = max(0, x), min(frame.shape[1], x + w)
-                        face_roi = frame[y1:y2, x1:x2] # ROI from original, undrawn frame for enrolment
-                        if face_roi.size > 0:
-                            self.debug_recognized_face_info = {'has_face': True, 'roi_for_enrol': face_roi, 'box': detected_faces_list[0], 'multiple_faces': False}
-                        else:
-                            self.debug_recognized_face_info = {'has_face': False, 'multiple_faces': False}
-                    elif len(detected_faces_list) > 1:
-                        self.debug_recognized_face_info = {'has_face': True, 'multiple_faces': True} # Indicate multiple faces
-                    else: # No faces
-                        self.debug_recognized_face_info = None
-            else: # frame is None
-                 if not self.debug_active_input_field:
-                    self.debug_recognized_face_info = None
-
-
-            self._render_video_debug(self.screen, processed_frame_for_display) # Pass frame with boxes
+            
+            # Pass the frame with boxes and the detailed detection infos to the rendering function
+            self._render_video_debug(self.screen, processed_frame_for_display) 
         elif self.debug_mode == "voice_debug":
             self._render_voice_debug_placeholder(self.screen)
         
@@ -382,31 +407,36 @@ class InteractionManager:
             self.debug_message = None
 
     def _submit_debug_face_name(self):
-        if self.debug_recognized_face_info and self.debug_input_text:
-            face_roi = self.debug_recognized_face_info.get('roi_for_enrol')
-            if face_roi is not None and face_roi.size > 0:
-                name_to_enrol = self.debug_input_text.strip()
-                if name_to_enrol:
-                    logger.info(f"Attempting to enrol face from debug UI. Name: {name_to_enrol}")
-                    success = self.services['face'].enrol_user(name_to_enrol, face_roi)
-                    if success:
-                        logger.info(f"Successfully enrolled {name_to_enrol} from debug UI.")
-                        self.debug_message = f"Enrolled: {name_to_enrol}"
-                    else:
-                        logger.error(f"Failed to enrol {name_to_enrol} from debug UI.")
-                        self.debug_message = f"Enrolment failed for {name_to_enrol}"
-                    self.debug_message_timer = time.time() + 3
-                else: # Empty name
-                    self.debug_message = "Enrolment failed: Name cannot be empty."
-                    self.debug_message_timer = time.time() + 3
-
-            else: # No ROI
-                logger.warning("Debug enrolment failed: No face ROI available.")
-                self.debug_message = "Enrolment failed: No face data."
+        if self.debug_roi_for_current_enrol_action is not None and self.debug_roi_for_current_enrol_action.size > 0 and self.debug_input_text:
+            face_roi_to_enrol = self.debug_roi_for_current_enrol_action
+            name_to_enrol = self.debug_input_text.strip()
+            if name_to_enrol:
+                logger.info(f"Attempting to enrol face from debug UI. Name: {name_to_enrol}")
+                # Ensure ROI is C-contiguous for some cv2 operations if FaceService expects it
+                if not face_roi_to_enrol.flags['C_CONTIGUOUS']:
+                    face_roi_to_enrol = np.ascontiguousarray(face_roi_to_enrol)
+                
+                success = self.services['face'].enrol_user(name_to_enrol, face_roi_to_enrol)
+                if success:
+                    logger.info(f"Successfully enrolled {name_to_enrol} from debug UI.")
+                    self.debug_message = f"Enrolled: {name_to_enrol}"
+                else:
+                    logger.error(f"Failed to enrol {name_to_enrol} from debug UI.")
+                    self.debug_message = f"Enrolment failed for {name_to_enrol}"
                 self.debug_message_timer = time.time() + 3
+            else: # Empty name
+                self.debug_message = "Enrolment failed: Name cannot be empty."
+                self.debug_message_timer = time.time() + 3
+        else: # No ROI or no input text
+            logger.warning("Debug enrolment failed: No face ROI available or name is empty.")
+            self.debug_message = "Enrolment failed: No face data or name."
+            self.debug_message_timer = time.time() + 3
+            
         self.debug_input_text = ""
         self.debug_active_input_field = None
-        self.debug_recognized_face_info = None # Clear after attempt
+        self.debug_roi_for_current_enrol_action = None # Clear after attempt
+        # self.debug_display_infos.clear() # Don't clear here, let next frame's detection repopulate
+        # self.debug_recognized_face_info = None # Clear after attempt
 
     def _interaction_loop(self) -> None:
         """Main interaction loop. This thread handles Pygame init, events, and rendering."""
