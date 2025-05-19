@@ -171,6 +171,7 @@ class InteractionManager:
         
         if clicked_action:
             if clicked_action == "exit_debug":
+                logger.info("'exit_debug' action recognized. Calling _toggle_debug_mode.")
                 self._toggle_debug_mode()
             elif clicked_action == "video_debug_menu":
                 self.debug_mode = "video_debug"
