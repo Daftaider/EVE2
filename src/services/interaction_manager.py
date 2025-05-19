@@ -9,6 +9,9 @@ from typing import Optional, Dict, Any
 from pathlib import Path
 import cv2
 import os
+from picamera2 import Picamera2
+from picamera2.encoders import JpegEncoder
+from picamera2.outputs import FileOutput
 
 from .eye_display import EyeDisplay, Emotion
 from .face_service import FaceService
@@ -27,6 +30,7 @@ class InteractionManager:
         self.running = False
         self.services: Dict[str, Any] = {}
         self.camera = None
+        self.picam2 = None
         self.command_queue = queue.Queue()
         self.thread = None
         
@@ -45,26 +49,27 @@ class InteractionManager:
             # Initialize camera capture
             try:
                 camera_index = self.services['face'].config.get('camera', {}).get('index', 0)
-                # Try MMAL backend first (Raspberry Pi specific)
-                logger.info(f"Attempting to open camera {camera_index} using MMAL backend...")
-                self.camera = cv2.VideoCapture(camera_index, cv2.CAP_MMAL)
+                logger.info(f"Attempting to initialize Picamera2...")
                 
-                if not self.camera.isOpened():
-                    logger.warning("Failed to open camera with MMAL backend. Trying V4L2...")
-                    # Fallback to V4L2
-                    self.camera = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
-                    if self.camera.isOpened():
-                        # Set format to RGB3 for V4L2
-                        self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('R','G','B','3'))
-                        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                        self.camera.set(cv2.CAP_PROP_FPS, 30)
+                # Initialize Picamera2
+                self.picam2 = Picamera2()
                 
-                if not self.camera.isOpened():
-                    logger.error(f"Failed to open camera at index {camera_index} using both MMAL and V4L2 backends.")
+                # Configure camera
+                config = self.picam2.create_preview_configuration(
+                    main={"size": (640, 480), "format": "RGB888"},
+                    lores={"size": (640, 480), "format": "YUV420"}
+                )
+                self.picam2.configure(config)
+                
+                # Start camera
+                self.picam2.start()
+                
+                if not self.picam2.started:
+                    logger.error("Failed to start Picamera2")
                     return False
-                         
-                logger.info(f"Camera {camera_index} opened successfully (Backend: {self.camera.getBackendName()})")
+                    
+                logger.info("Picamera2 initialized successfully")
+                
             except Exception as e:
                 logger.error(f"Error initializing camera: {e}")
                 return False
@@ -92,70 +97,67 @@ class InteractionManager:
         """Main interaction loop."""
         last_seen_time = time.time()
         no_face_emotion = Emotion.NEUTRAL
-        consecutive_camera_failures = 0  # Add failure counter
-        max_consecutive_failures = 30 # Allow ~1 second of failures @ 30fps before trying recovery
-        camera_reopened = False # Flag to prevent continuous reopening attempts
+        consecutive_camera_failures = 0
+        max_consecutive_failures = 30
+        camera_reopened = False
 
         while self.running:
             try:
-                if not self.camera or not self.camera.isOpened():
-                    logger.error("Camera not available or closed unexpectedly.")
-                    # Try to reopen once if not already attempted
+                if not self.picam2 or not self.picam2.started:
+                    logger.error("Camera not available or stopped unexpectedly.")
                     if not camera_reopened:
                         logger.info("Attempting to reopen camera...")
                         try:
-                            camera_index = self.services['face'].config.get('camera', {}).get('index', 0)
-                            # Try MMAL backend first
-                            logger.info("Attempting to reopen camera with MMAL backend...")
-                            self.camera = cv2.VideoCapture(camera_index, cv2.CAP_MMAL)
+                            self.picam2 = Picamera2()
+                            config = self.picam2.create_preview_configuration(
+                                main={"size": (640, 480), "format": "RGB888"},
+                                lores={"size": (640, 480), "format": "YUV420"}
+                            )
+                            self.picam2.configure(config)
+                            self.picam2.start()
                             
-                            if not self.camera.isOpened():
-                                logger.warning("Failed to reopen with MMAL, trying V4L2...")
-                                self.camera = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
-                                if self.camera.isOpened():
-                                    # Set format to RGB3 for V4L2
-                                    self.camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('R','G','B','3'))
-                                    self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                                    self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                                    self.camera.set(cv2.CAP_PROP_FPS, 30)
-                            
-                            if self.camera.isOpened():
-                                logger.info(f"Camera reopened successfully (Backend: {self.camera.getBackendName()})")
+                            if self.picam2.started:
+                                logger.info("Camera reopened successfully")
                                 camera_reopened = True
                                 consecutive_camera_failures = 0
                             else:
-                                logger.error("Failed to reopen camera with both MMAL and V4L2 backends.")
+                                logger.error("Failed to reopen camera")
                                 camera_reopened = True
                         except Exception as e:
                             logger.error(f"Error trying to reopen camera: {e}")
-                            camera_reopened = True # Mark attempt failed
+                            camera_reopened = True
                     
-                    time.sleep(1) # Wait before next check/attempt
+                    time.sleep(1)
                     continue
 
-                # Capture frame-by-frame
-                ret, frame = self.camera.read()
-                
-                if not ret or frame is None:
+                # Capture frame
+                try:
+                    frame = self.picam2.capture_array()
+                    if frame is None:
+                        raise Exception("Failed to capture frame")
+                        
+                    # Convert to BGR for OpenCV compatibility
+                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    
+                    # Reset failure counter on successful capture
+                    consecutive_camera_failures = 0
+                    camera_reopened = False
+                    
+                except Exception as e:
                     consecutive_camera_failures += 1
-                    logger.warning(f"Failed to grab frame ({consecutive_camera_failures}/{max_consecutive_failures})")
+                    logger.warning(f"Failed to grab frame ({consecutive_camera_failures}/{max_consecutive_failures}): {e}")
                     
                     if consecutive_camera_failures >= max_consecutive_failures:
                         logger.error("Too many consecutive camera read failures. Assuming camera issue.")
-                        # Optionally, try to release and flag for reopen on next loop iteration
-                        if self.camera:
-                             self.camera.release()
-                             logger.info("Camera released due to read failures.")
-                             self.camera = None # Ensure it triggers the reopen logic
-                             camera_reopened = False # Allow reopen attempt
-                        consecutive_camera_failures = 0 # Reset counter after handling
+                        if self.picam2:
+                            self.picam2.stop()
+                            logger.info("Camera stopped due to read failures.")
+                            self.picam2 = None
+                            camera_reopened = False
+                        consecutive_camera_failures = 0
                         
-                    time.sleep(0.1) # Small delay before retrying read
+                    time.sleep(0.1)
                     continue
-                
-                # If read was successful, reset counter
-                consecutive_camera_failures = 0
-                camera_reopened = False # Allow reopen attempt if it closes later
 
                 # Process face detection
                 faces = self.services['face'].detect_faces(frame)
@@ -169,7 +171,6 @@ class InteractionManager:
                     x, y, w, h = faces[0]
                     
                     # Extract face ROI
-                    # Ensure ROI coordinates are within frame bounds
                     y1, y2 = max(0, y), min(frame.shape[0], y + h)
                     x1, x2 = max(0, x), min(frame.shape[1], x + w)
                     face_roi = frame[y1:y2, x1:x2]
@@ -200,7 +201,7 @@ class InteractionManager:
                     self.services['display'].set_emotion(no_face_emotion)
                     current_emotion = no_face_emotion
 
-                # Process voice input if available (regardless of face detection state)
+                # Process voice input if available
                 if self.services['voice'].has_input():
                     text = self.services['voice'].get_input()
                     if text:
@@ -222,7 +223,7 @@ class InteractionManager:
                 # Update display rendering
                 self.services['display'].update()
                 
-                # Simple FPS control (adjust as needed)
+                # Simple FPS control
                 time.sleep(1/30)
                 
             except Exception as e:
@@ -234,10 +235,10 @@ class InteractionManager:
         if self.thread:
             self.thread.join()
 
-        # Release camera
-        if self.camera:
-            self.camera.release()
-            logger.info("Camera released")
+        # Stop camera
+        if self.picam2:
+            self.picam2.stop()
+            logger.info("Camera stopped")
             
         # Stop all services
         for service_name, service in self.services.items():
