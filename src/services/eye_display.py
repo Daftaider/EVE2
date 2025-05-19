@@ -25,12 +25,11 @@ class EyeDisplay:
     def __init__(self, config_path: str = "config/settings.yaml"):
         """Initialize eye display service."""
         self.config = self._load_config(config_path)
-        self.screen = None
+        self.screen: Optional[pygame.Surface] = None # Type hint for clarity
         self.running = False
         self.current_emotion = Emotion.NEUTRAL
         self.eye_sprites: Dict[Emotion, pygame.Surface] = {}
-        self.clock = pygame.time.Clock()
-        self.pygame_initialized = False # Flag to ensure Pygame is initialized only once
+        self.clock = pygame.time.Clock() # Keep clock for InteractionManager to use
         
     def _load_config(self, config_path: str) -> dict:
         """Load configuration from YAML file."""
@@ -42,13 +41,15 @@ class EyeDisplay:
             return {}
             
     def start(self) -> bool:
-        """Start the eye display."""
+        """Start the eye display. Initializes Pygame and the screen."""
         try:
-            # Don't initialize pygame here, do it in the update method
-            # self.screen = pygame.display.set_mode((width, height))
-            # pygame.display.set_caption("EVE2 Eyes")
+            pygame.init() # Initialize all Pygame modules
+            width = self.config.get('display', {}).get('width', 800)
+            height = self.config.get('display', {}).get('height', 480)
             
-            # Load eye sprites
+            self.screen = pygame.display.set_mode((width, height))
+            pygame.display.set_caption("EVE2 Eyes")
+            
             self._load_eye_sprites()
             
             self.running = True
@@ -83,43 +84,21 @@ class EyeDisplay:
         logger.info(f"Emotion set to: {emotion.value}")
         
     def update(self) -> None:
-        """Update the display."""
-        if not self.running:
+        """Update the display by drawing the current emotion. Does not flip the display."""
+        if not self.running or self.screen is None:
             return
 
         try:
-            # Initialize Pygame and screen if not already done
-            if not self.pygame_initialized:
-                pygame.init()
-                width = self.config.get('display', {}).get('width', 800)
-                height = self.config.get('display', {}).get('height', 480)
-                self.screen = pygame.display.set_mode((width, height))
-                pygame.display.set_caption("EVE2 Eyes")
-                self.pygame_initialized = True
-
-            if self.screen is None: # Check if screen was initialized
-                logger.error("Screen not initialized, cannot update display.")
-                return
+            self.screen.fill((0, 0, 0)) # Clear screen
             
-            # Clear screen
-            self.screen.fill((0, 0, 0))
-            
-            # Draw current emotion sprite if available
             if self.current_emotion in self.eye_sprites:
                 sprite = self.eye_sprites[self.current_emotion]
-                # Center the sprite
                 x = (self.screen.get_width() - sprite.get_width()) // 2
                 y = (self.screen.get_height() - sprite.get_height()) // 2
                 self.screen.blit(sprite, (x, y))
                 
-            # Update display
-            pygame.display.flip()
-            
-            # Control FPS
-            self.clock.tick(self.config.get('display', {}).get('fps', 30))
-            
         except Exception as e:
-            logger.error(f"Error updating display: {e}")
+            logger.error(f"Error updating eye display visuals: {e}")
             
     def stop(self) -> None:
         """Stop the eye display."""
